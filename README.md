@@ -9,27 +9,21 @@
 [![Bun](https://img.shields.io/badge/Bun-Runtime-f9f1e1?logo=bun&logoColor=black)](./package.json)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
-**An open-source CLI and TypeScript SDK for building harnesses around your coding agent** — Claude Code, OpenCode, or GitHub Copilot CLI. Chain agent sessions into deterministic pipelines, add human-in-the-loop approval gates, dispatch **12 specialized sub-agents**, and tap **57 built-in skills** — then ship it as TypeScript your whole team runs.
+**Turn coding agents into reliable engineering workflows.** Atomic is an open-source CLI and TypeScript SDK for Claude Code, OpenCode, and GitHub Copilot CLI. Define the steps, guardrails, review gates, and execution environment your agent should follow, then run the workflow as TypeScript your whole team can review and reuse.
 
-> Define how your agent works. Start for yourself, scale to your team — across GitHub, Azure DevOps (ADO), or Sapling.
+> Build the workflow once. Run it across agents, repos, and teams — with GitHub, Azure DevOps (ADO), or Sapling.
 
 ---
 
-## Two surfaces: CLI and SDK
+## Why Atomic
 
-Atomic ships **two** things that share one orchestrator runtime. You can use either on its own or both together:
+Coding agents are great inside a single session. They can inspect code, use tools, make edits, and explain their work. The trouble starts when the task is ambiguous/complex, tied to specific outcomes/exit criteria, long-running, or tied to a large codebase: you end up reminding the agent of the process, moving output between sessions, checking whether it followed the right steps, and deciding when a human needs to review the work. Atomic turns that process into code. A workflow can branch, retry, run stages in parallel, isolate sessions, pass only the right transcript forward, pause for human approval, and run inside a devcontainer so the agent is not loose on your host machine.
 
-|                       | Atomic CLI                                                                                                                                                                                                                         | Atomic SDK                                                                                                                                                      |
-| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **What it is**        | Global `atomic` binary                                                                                                                                                                                                             | `@bastani/atomic/workflows` TypeScript library                                                                                                                  |
-| **Install**           | `bun install -g @bastani/atomic` (or `install.sh` / `install.ps1`)                                                                                                                                                                 | `bun add @bastani/atomic` inside your project                                                                                                                   |
-| **Entrypoint**        | `atomic <command>`                                                                                                                                                                                                                 | `bun run src/<agent>-worker.ts`                                                                                                                                 |
-| **Code required?**    | No — everything is pre-built                                                                                                                                                                                                       | Yes — you write `defineWorkflow(...)` + a 3-line composition root                                                                                               |
-| **What you get**      | `atomic chat` (agent REPL), three autonomous builtins (`ralph`, `deep-research-codebase`, `open-claude-design`), session management, the live orchestrator panel, Atomic skills (`/init`, `/research-codebase`, `/create-spec`, …) | `defineWorkflow`, `createWorkflowCli`, `createRegistry`, `ctx.stage`, `s.save` / `s.transcript`, headless stages, the Commander adapter (`toCommand`, `runCli`) |
-| **When to reach for** | You want autonomous execution of a standard pattern out of the box, or interactive chat with your agent's full toolset                                                                                                             | You want to encode **your** team's process — review flows, deployment gates, custom research pipelines — as TypeScript every teammate runs identically          |
-| **Read next**         | [Quick Start](#quick-start) (steps 1–3)                                                                                                                                                                                            | [Quick Start step 4](#4-build-your-own-workflow--sdk) and [Building your own atomic-powered app](#building-your-own-atomic-powered-app)                         |
-
-Both surfaces call the same runtime underneath (tmux/psmux session graph, provider SDKs, detach/reattach) — they're two entry points, not two products. Neither depends on the other: you can `bun add @bastani/atomic` in a project without ever installing the global binary, and you can use `atomic chat` and the builtins without writing any TypeScript.
+- **Start with your own process.** Automate the repetitive parts of research, product feedback, debugging, review, migrations, or PR prep. One TypeScript file, versioned with the repo.
+- **Scale to your team.** Encode review gates, quality checks, and approvals so every teammate runs the same workflow instead of manually steering an agent.
+- **Keep the coding agent.** Atomic adds structure around Claude Code, OpenCode, and Copilot CLI without rebuilding their file editing, tool use, MCP setup, hooks, or context handling from scratch.
+- **Use natural language to get started.** Ask the `workflow-creator` skill to turn a workflow description into `defineWorkflow()` code, or let an agent use the skill when a complex task needs a repeatable workflow.
+- **Control the outer loop.** Instead of trusting a black-box harness to improvise process, Atomic makes the orchestration inspectable: the agent stil uses it's harness with its native tools and context management, but the workflow, gates, handoffs, and execution graph are TypeScript you can read, edit, and version. This allows you to enhance your existing coding agent's capabilities. 
 
 ---
 
@@ -39,7 +33,7 @@ Install, generate context, try Ralph, then write your own workflow — four step
 
 ### Prerequisites
 
-Atomic doesn't replace your coding agent or terminal — it orchestrates them. Three things have to exist on the host before a workflow can run:
+Atomic doesn't replace your coding agent or terminal — it gives them a workflow to follow. Three things have to exist on the host before a workflow can run:
 
 - **[Bun](https://bun.sh/)** as the JavaScript runtime — Atomic and the SDK ship source that relies on `Bun.spawn`, native pty handling, and Bun-specific module resolution. **They do not run on Node.js.** The bootstrap installer below installs Bun for you; if you install `@bastani/atomic` manually, install Bun first.
 - **A terminal multiplexer** — every stage runs inside a detachable session on a dedicated `atomic` socket (your personal tmux is untouched). That's how workflows survive terminal disconnects, how `-d/--detach` puts a run in the background, and how `atomic session connect` reattaches later from any shell.
@@ -248,7 +242,7 @@ Run it:
 bun run src/claude-worker.ts -n review-to-merge -a claude
 ```
 
-That's the full shape — one workflow file, one three-line composition root. `createWorkflowCli` handles named dispatch (`-n/--name` + `-a/--agent`), the `--<input>` flags declared by your workflow, detached execution, and the interactive picker. Pass an array (`createWorkflowCli([claude, copilot])`) for multi-agent or multi-workflow apps; the file stays three lines. See [Workflow SDK](#workflow-sdk--build-your-own-deterministic-harness) for parallel stages, input schemas, headless stages, and the full API reference.
+That's the full shape — one workflow file, one three-line composition root. `createWorkflowCli` handles named dispatch (`-n/--name` + `-a/--agent`), the `--<input>` flags declared by your workflow, detached execution, and the interactive picker. Pass an array (`createWorkflowCli([claude, copilot])`) for multi-agent or multi-workflow apps; the file stays three lines. See [Workflow SDK](#workflow-sdk--build-reliable-engineering-workflows) for parallel stages, input schemas, headless stages, and the full API reference.
 
 ### Managing sessions
 
@@ -270,42 +264,42 @@ atomic workflow -n ralph -a claude -d "build the auth module"   # returns immedi
 atomic workflow session connect atomic-wf-claude-ralph-<id>      # attach later
 ```
 
-Detached mode is what you want for scripted / CI automation and long-running tasks — the orchestrator keeps running on the atomic tmux socket regardless of your terminal.
+Detached mode is what you want for scripted / CI automation and long-running tasks — the workflow keeps running on the atomic tmux socket regardless of your terminal.
 
 ---
 
-## Why Atomic
+## Two surfaces: CLI and SDK
 
-Better models make harnesses **more** important, not less. The more you trust an agent to execute complex tasks, the more value you get from defining exactly **what** it should execute, in **what order**, with **what checks** along the way. The harness is the durable layer — models keep improving underneath it, but your process stays the same.
+Atomic ships **two** things that share one workflow runtime. You can use either on its own or both together:
 
-- **Start for yourself.** Automate the repetitive parts of your own workflow — research a codebase, add monitoring, generate specs. One TypeScript file, one afternoon.
-- **Scale to your team.** Encode your team's review process, deployment gates, and quality checks as TypeScript every member runs identically — versioned, testable, reproducible.
-- **Work across agents.** Write a harness once, run it on Claude Code, OpenCode, or Copilot CLI with a flag change.
+|                       | Atomic CLI                                                                                                                                                                                                                         | Atomic SDK                                                                                                                                                      |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **What it is**        | Global `atomic` binary                                                                                                                                                                                                             | `@bastani/atomic/workflows` TypeScript library                                                                                                                  |
+| **Install**           | `bun install -g @bastani/atomic` (or `install.sh` / `install.ps1`)                                                                                                                                                                 | `bun add @bastani/atomic` inside your project                                                                                                                   |
+| **Entrypoint**        | `atomic <command>`                                                                                                                                                                                                                 | `bun run src/<agent>-worker.ts`                                                                                                                                 |
+| **Code required?**    | No — everything is pre-built. You can also ask the agent inside `atomic chat` to use the `workflow-creator` skill, decide when a complex task needs its own workflow, and build/run that workflow on the fly.                       | No to start — describe the workflow in natural language and use the `workflow-creator` skill to generate it. Then refine it in natural language or edit the TypeScript workflow and composition root directly, with full visibility into exactly what will run. |
+| **What you get**      | `atomic chat` (agent REPL), three autonomous built-in workflows (`ralph`, `deep-research-codebase`, `open-claude-design`), session management, the live workflow panel, Atomic skills (`/init`, `/research-codebase`, `/create-spec`, …) | `defineWorkflow`, `createWorkflowCli`, `createRegistry`, `ctx.stage`, `s.save` / `s.transcript`, headless stages, the Commander adapter (`toCommand`, `runCli`) |
+| **When to reach for** | You want autonomous execution of a standard pattern out of the box, interactive chat with your agent's full toolset, or a CLI agent that can create a purpose-built workflow before doing complex work.                              | You want to control the outer loop yourself — review flows, deployment gates, custom research pipelines — with full visibility into the TypeScript your team will run identically.                                             |
+| **Read next**         | [Quick Start](#quick-start) (steps 1–3)                                                                                                                                                                                            | [Quick Start step 4](#4-build-your-own-workflow--sdk) and [Building your own atomic-powered app](#building-your-own-atomic-powered-app)                         |
 
-### Example use cases
+Both surfaces call the same runtime underneath (tmux/psmux session graph, provider SDKs, detach/reattach) — they're two entry points, not two products. Neither depends on the other: you can `bun add @bastani/atomic` in a project without ever installing the global binary, and you can use `atomic chat` and the built-in workflows without writing any TypeScript.
 
-These are shapes you'd **author** with `defineWorkflow` and then run from your own `src/<agent>-worker.ts` — see [step 4 of Quick Start](#4-build-your-own-workflow) for the three-line entrypoint. Atomic ships three built-in workflows (`ralph`, `deep-research-codebase`, `open-claude-design`); everything else is yours to define.
+## Example use cases
 
-**Add production monitoring.** Research observability gaps, implement missing metrics and health checks, review the changes.
+These are workflows you'd author with `defineWorkflow` and run from your own `src/<agent>-worker.ts` — see [step 4 of Quick Start](#4-build-your-own-workflow--sdk) for the three-line entrypoint. Atomic ships three built-in workflows (`ralph`, `deep-research-codebase`, `open-claude-design`); everything else is yours to define.
 
-```bash
-bun run src/claude-worker.ts -n observability -a claude "add Prometheus metrics and health checks to all API endpoints"
-```
-
-**Parallel UX testing with 50 personas.** Spin up 50 agents, each with a distinct persona (power user, accessibility-dependent, non-technical stakeholder), each using [Playwright](#built-in-skills) to test your app.
-
-```bash
-bun run src/claude-worker.ts -n ux-personas -a claude --personas=50
-```
-
-**Review-to-merge pipeline.** The workflow from [step 4](#4-build-your-own-workflow) above — reviews code, runs CI in parallel, opens a PR, notifies Slack, waits for approval, merges.
+- **Review-to-merge pipeline.** Review code, run CI in parallel, open a PR, notify Slack, wait for approval, merge.
+- **Support ticket to draft PR.** Reproduce the issue, find the root cause, try a fix in a sandbox, run tests, pause for review.
+- **Production alert investigation.** Pull the failing trace, inspect recent commits, rank likely causes, then draft a fix or page the on-call with evidence.
+- **Parallel UX testing.** Run many persona-specific agents against the same feature, aggregate structured feedback, and turn selected issues into tasks.
+- **Large migration or refactor.** Research the codebase, split the work into safe batches, run implementation and review passes, and keep artifacts for later runs.
 
 ---
 
 ## Table of Contents
 
 - [Atomic](#atomic)
-  - [Two surfaces: CLI and SDK](#two-surfaces-cli-and-sdk)
+  - [Why Atomic](#why-atomic)
   - [Quick Start](#quick-start)
     - [Prerequisites](#prerequisites)
     - [1. Install — CLI + SDK share the same package](#1-install--cli--sdk-share-the-same-package)
@@ -313,16 +307,16 @@ bun run src/claude-worker.ts -n ux-personas -a claude --personas=50
     - [3. Try Ralph — CLI (autonomous coding)](#3-try-ralph--cli-autonomous-coding)
     - [4. Build your own workflow — SDK](#4-build-your-own-workflow--sdk)
     - [Managing sessions](#managing-sessions)
-  - [Why Atomic](#why-atomic)
-    - [Example use cases](#example-use-cases)
+  - [Two surfaces: CLI and SDK](#two-surfaces-cli-and-sdk)
+  - [Example use cases](#example-use-cases)
   - [Table of Contents](#table-of-contents)
   - [Security: Workflow Permissions Model](#security-workflow-permissions-model)
   - [Core Features](#core-features)
     - [Multi-Agent Support](#multi-agent-support)
-    - [Workflow SDK — Build Your Own Deterministic Harness](#workflow-sdk--build-your-own-deterministic-harness)
+    - [Workflow SDK — Build Reliable Engineering Workflows](#workflow-sdk--build-reliable-engineering-workflows)
       - [Runnable examples shipped with the repo](#runnable-examples-shipped-with-the-repo)
       - [Builder API](#builder-api)
-      - [WorkflowContext (`ctx`) — top-level orchestrator](#workflowcontext-ctx--top-level-orchestrator)
+      - [WorkflowContext (`ctx`) — top-level workflow context](#workflowcontext-ctx--top-level-workflow-context)
       - [SessionContext (`s`) — inside each session callback](#sessioncontext-s--inside-each-session-callback)
       - [Session Options (`SessionRunOptions`)](#session-options-sessionrunoptions)
       - [Saving Transcripts](#saving-transcripts)
@@ -334,7 +328,7 @@ bun run src/claude-worker.ts -n ux-personas -a claude --personas=50
     - [Containerized Execution](#containerized-execution)
     - [Specialized Sub-Agents](#specialized-sub-agents)
     - [Built-in Skills](#built-in-skills)
-    - [Workflow Orchestrator Panel](#workflow-orchestrator-panel)
+    - [Workflow Panel](#workflow-panel)
   - [Commands Reference](#commands-reference)
     - [CLI Commands](#cli-commands)
       - [Global Flags](#global-flags)
@@ -347,7 +341,7 @@ bun run src/claude-worker.ts -n ux-personas -a claude --personas=50
     - [One factory, three input shapes](#one-factory-three-input-shapes)
     - [One method: `run()`](#one-method-run)
     - [Embedding under a parent CLI — `toCommand` + `runCli`](#embedding-under-a-parent-cli--tocommand--runcli)
-    - [`entry` — for bundled apps and test harnesses](#entry--for-bundled-apps-and-test-harnesses)
+    - [`entry` — for bundled apps and tests](#entry--for-bundled-apps-and-tests)
     - [Registry rules](#registry-rules)
     - [Input precedence](#input-precedence)
     - [Builtin workflows via the `atomic` CLI](#builtin-workflows-via-the-atomic-cli)
@@ -395,9 +389,9 @@ Atomic works across **three production coding agents** — switch with a flag an
 
 Each agent gets its own configuration directory (`.claude/`, `.opencode/`, `.github/`), skills, and context files — all managed by Atomic.
 
-### Workflow SDK — Build Your Own Deterministic Harness
+### Workflow SDK — Build Reliable Engineering Workflows
 
-The Workflow SDK (`@bastani/atomic/workflows`) lets you encode your team's process as TypeScript — spawn agent sessions dynamically with native control flow (`for`, `if`, `Promise.all()`), and watch them appear in a live graph as they execute.
+The Workflow SDK (`@bastani/atomic/workflows`) lets you encode your team's process as TypeScript — spawn agent sessions dynamically with native control flow (`for`, `if`, `Promise.all()`), pass state explicitly, and watch each stage appear in a live graph as it runs.
 
 Set up a workflow project (`bun init && bun add @bastani/atomic`), define your workflow with `defineWorkflow`, then bind it to a CLI with `createWorkflowCli(definition)` (single workflow) or `createWorkflowCli(registry)` (many workflows):
 
@@ -421,9 +415,9 @@ The [`examples/`](./examples) directory contains small, complete user apps you c
 | `hil-favorite-color-headless`   | HIL pause inside a headless stage                                                                                                                                                                                                                            |
 | `structured-output-demo`        | Per-SDK structured output (JSON-schema validation, Zod)                                                                                                                                                                                                      |
 | `reviewer-tool-test`            | Custom reviewer tool wiring (Copilot — copilot-worker.ts only)                                                                                                                                                                                               |
-| `review-fix-loop`               | Draft → loop(review → fix) with bounded iterations and early exit on a `CLEAN` verdict — the quintessential harness pattern, showing how a stage's return value (`handle.result`) drives TypeScript control flow                                             |
+| `review-fix-loop`               | Draft → loop(review → fix) with bounded iterations and early exit on a `CLEAN` verdict — a reliable review gate showing how a stage's return value (`handle.result`) drives TypeScript control flow                                                        |
 | `multi-workflow`                | Two Claude workflows under one `cli.ts` — `-n/--name` dispatch, per-workflow `--<input>` flag union, and the interactive picker. Shows the array form (`createWorkflowCli([hello, goodbye])`) and the `createRegistry().register(...)` variant side by side. |
-| `commander-embed`               | Mount an atomic workflow under a parent Commander CLI with `toCommand(cli, "greet")`, alongside a plain Commander sibling command. `runCli` replaces `program.parseAsync()` and transparently handles detached orchestrator re-entry.                        |
+| `commander-embed`               | Mount an atomic workflow under a parent Commander CLI with `toCommand(cli, "greet")`, alongside a plain Commander sibling command. `runCli` replaces `program.parseAsync()` and transparently handles detached workflow re-entry.                            |
 
 Run any of them with:
 
@@ -662,6 +656,7 @@ The graph shows `seed → merge` — headless stages are transparent to the topo
 | ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | **Dynamic session spawning**       | `ctx.stage()` spawns sessions at runtime — each gets its own tmux window and graph node                                            |
 | **Native TypeScript control flow** | Use `for`, `if/else`, `Promise.all()`, `try/catch` — no framework DSL                                                              |
+| **Review gates and approvals**     | Pause for human input, run structured review stages, and decide whether the next stage should continue                             |
 | **Session return values**          | Session callbacks can return data: `const h = await ctx.stage(...); h.result`                                                      |
 | **Transcript passing**             | Access prior output via handle (`s.transcript(handle)`) or name (`s.transcript("name")`)                                           |
 | **Declared input schemas**         | Add an `inputs: [...]` array and the CLI materialises `--<field>=<value>` flags with built-in validation                           |
@@ -671,6 +666,7 @@ The graph shows `seed → merge` — headless stages are transparent to the topo
 | **Provider-agnostic**              | Write raw SDK code for Claude, Copilot, or OpenCode inside each callback                                                           |
 | **Live graph visualization**       | Sessions appear in the TUI graph as they spawn — loops and conditionals visible in real time                                       |
 | **Background (headless) stages**   | `headless: true` runs in-process without a tmux window — invisible in graph, tracked by statusline counter, identical callback API |
+| **Token-aware handoffs**           | Save transcripts to disk and pass paths or distilled outputs forward instead of stuffing every stage with the full history         |
 
 **Deterministic execution guarantees:**
 
@@ -682,7 +678,7 @@ Workflows are deterministic by design — the same definition produces the same 
 - **Isolated context windows** — Each session runs in its own tmux pane with a fresh context. Data flows only through explicit `ctx.transcript()` / `ctx.getMessages()` calls.
 - **Persisted artifacts** — Every session writes messages, transcript, and metadata to disk — a complete, inspectable execution record.
 
-Variance comes only from the LLM's responses, not from the harness.
+Variance comes from the LLM's responses, not from a changing workflow.
 
 > Ask Atomic to build workflows for you: `Use your workflow-creator skill to create a workflow that plans, implements, and reviews a feature.`
 
@@ -697,7 +693,7 @@ Variance comes only from the LLM's responses, not from the harness.
 | `.run(async (ctx) => { ... })`          | Set the workflow's entry point — `ctx` is a `WorkflowContext`     |
 | `.compile()`                            | **Required** — terminal method that seals the workflow definition |
 
-#### WorkflowContext (`ctx`) — top-level orchestrator
+#### WorkflowContext (`ctx`) — top-level workflow context
 
 | Property                                       | Type                        | Description                                                                                                                                                                                        |
 | ---------------------------------------------- | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -818,7 +814,7 @@ The [Ralph Method](https://ghuntley.com/ralph/) enables **multi-hour autonomous 
 **How Ralph works:**
 
 1. **Task Decomposition** — A `planner` sub-agent breaks your spec into a task list with dependency tracking, stored in SQLite (WAL mode for parallel access).
-2. **Orchestration** — An `orchestrator` retrieves the task list, validates the dependency graph, and dispatches `worker` sub-agents for ready tasks.
+2. **Execution** — An `orchestrator` retrieves the task list, validates the dependency graph, and dispatches `worker` sub-agents for ready tasks.
 3. **Review & Debug** — A `reviewer` audits the implementation with structured JSON output; if P0–P2 findings exist, a `debugger` investigates root causes and feeds back to the planner on the next iteration.
 
 **Loop config:** Up to **10 iterations**. Exits early after **2 consecutive clean reviews** (zero actionable findings). P3 (minor) findings are non-actionable.
@@ -1025,9 +1021,9 @@ Skills are structured capability modules that give agents best practices and reu
 
 Skills are auto-invoked when relevant. Run `ls .agents/skills/` for the complete, current list on disk.
 
-### Workflow Orchestrator Panel
+### Workflow Panel
 
-During `atomic workflow` execution, Atomic renders a live orchestrator panel built on [OpenTUI](https://github.com/anomalyco/opentui) over the workflow's tmux session graph. It shows:
+During `atomic workflow` execution, Atomic renders a live workflow panel built on [OpenTUI](https://github.com/anomalyco/opentui) over the workflow's tmux session graph. It shows:
 
 - **Session graph** — Nodes per `.stage()` with status (pending / running / completed / failed) and edges for sequential / parallel dependencies
 - **Task list tracking** — Ralph's decomposed task list with dependency arrows, updated in real time
@@ -1038,7 +1034,7 @@ During `atomic chat`, there is no Atomic-owned TUI — `atomic chat -a <agent>` 
 
 | Context                                | UI provider                                                 |
 | -------------------------------------- | ----------------------------------------------------------- |
-| `atomic workflow -n <name> -a <agent>` | Atomic (orchestrator panel + tmux session graph)            |
+| `atomic workflow -n <name> -a <agent>` | Atomic (workflow panel + tmux session graph)                |
 | `atomic chat -a <agent>`               | The native agent CLI (Claude Code / OpenCode / Copilot CLI) |
 
 ---
@@ -1050,7 +1046,7 @@ During `atomic chat`, there is no Atomic-owned TUI — `atomic chat -a <agent>` 
 | Command                         | Description                                                     |
 | ------------------------------- | --------------------------------------------------------------- |
 | `atomic chat`                   | Spawn the native agent CLI inside a tmux session                |
-| `atomic workflow`               | Run a named multi-session workflow with the Atomic orchestrator panel |
+| `atomic workflow`               | Run a named multi-session workflow with the Atomic workflow panel |
 | `atomic workflow list`          | List available workflows, grouped by source                     |
 | `atomic session list`           | List all running sessions on the atomic tmux socket             |
 | `atomic session connect [name]` | Attach to a session (interactive picker when no name given)     |
@@ -1137,7 +1133,7 @@ atomic workflow -n open-claude-design -a claude \
   --prompt="a dashboard for monitoring API latency" \
   --output-type=prototype
 
-# 5. Run detached — orchestrator runs in the background; prints the session name
+# 5. Run detached — workflow runs in the background; prints the session name
 #    and returns immediately. Attach any time with `atomic workflow session connect`.
 atomic workflow -n ralph -a claude -d "build a REST API for user management"
 ```
@@ -1212,7 +1208,7 @@ Native slash commands (`/help`, `/clear`, `/compact`, `/model`, `/theme`, `/agen
 
 `@bastani/atomic/workflows` is a library, not just a CLI. Use it directly to build your own TypeScript app that runs your team's workflows.
 
-> **SDK-only users:** you don't need the global `atomic` binary, but you still need the runtime prerequisites — **[Bun](https://bun.sh/) (the SDK does not run on Node.js)**, a terminal multiplexer (tmux on macOS/Linux, psmux on Windows), and at least one authenticated coding agent CLI (`claude`, `opencode`, or `copilot`). See [Prerequisites](#prerequisites) for the "why" and install commands. The SDK spawns the agent CLI at each stage and wraps it in a detachable multiplexer session — those are orchestration primitives the SDK doesn't embed.
+> **SDK-only users:** you don't need the global `atomic` binary, but you still need the runtime prerequisites — **[Bun](https://bun.sh/) (the SDK does not run on Node.js)**, a terminal multiplexer (tmux on macOS/Linux, psmux on Windows), and at least one authenticated coding agent CLI (`claude`, `opencode`, or `copilot`). See [Prerequisites](#prerequisites) for the "why" and install commands. The SDK spawns the agent CLI at each stage and wraps it in a detachable multiplexer session.
 >
 > **Management commands ship natively.** `createWorkflowCli` auto-registers `session` and `status` subcommands on every worker CLI by default, so `bun run src/claude-worker.ts session list`, `… status <id>`, `… session connect <id>`, and `… session kill <id> -y` all work with zero extra code. Sessions live on the shared `atomic` tmux socket, so the worker CLI, the global `atomic` binary, and `bunx atomic` (for SDK-only installs) all see the same runtime state. Opt out with `createWorkflowCli(workflow, { includeManagementCommands: false })` when you want a minimal CLI or are embedding under a parent Commander program that owns session management. The names `session` and `status` are reserved — workflow inputs with those names throw at `defineWorkflow` time to prevent flag collisions.
 
@@ -1317,7 +1313,7 @@ program.addCommand(toCommand(cli, "deploy"));
 program.command("hello").action(() => console.log("hi"));
 
 // Replaces program.parseAsync(). runCli transparently handles detached
-// re-entry — when the process is a tmux-spawned orchestrator, it drives
+// re-entry — when the process is a tmux-spawned workflow runner, it drives
 // runOrchestrator; otherwise it invokes your callback (argv parse + any
 // bootstrap you want). PyTorch's init_process_group for rank-zero
 // dispatch — no guards, no env-var checks in user code.
@@ -1326,9 +1322,9 @@ await runCli(cli, () => program.parseAsync());
 
 `toCommand(cli, "workflow")` is exactly how the internal `atomic workflow` command is wired (`src/commands/cli/workflow.ts`). Because the Commander dependency lives only on the subpath, a future `@bastani/atomic/workflows/yargs` adapter can ship alongside without touching the core SDK.
 
-### `entry` — for bundled apps and test harnesses
+### `entry` — for bundled apps and tests
 
-`createWorkflowCli` accepts `{ entry?: string }`, defaulting to `process.argv[1]`. That's the file the runtime re-executes on `--detach` to resume the orchestrator, so it has to be the composition root. Override it when you bundle the app (`entry` should point at the bundle), when the composition root isn't argv[1] (tests, embedded CLIs), or with `import.meta.url` for ESM-native correctness.
+`createWorkflowCli` accepts `{ entry?: string }`, defaulting to `process.argv[1]`. That's the file the runtime re-executes on `--detach` to resume the workflow, so it has to be the composition root. Override it when you bundle the app (`entry` should point at the bundle), when the composition root isn't argv[1] (tests, embedded CLIs), or with `import.meta.url` for ESM-native correctness.
 
 ```ts
 const cli = createWorkflowCli(workflow, { entry: import.meta.url });
@@ -1482,6 +1478,11 @@ Ensure the agent CLI is in your PATH. Atomic uses `Bun.which()`, which handles `
 ## FAQ
 
 <details>
+<summary><b>Why not markdown, a coding agent alone, or a general agent framework?</b></summary>
+Markdown is great for guidance: conventions, commands, repo notes, and checklists. Use Claude Code, OpenCode, or Copilot CLI directly for normal single-session coding. Atomic is for the point where the work needs branching, retries, parallel sessions, state, human approval, sandboxed execution, or reliable handoff between stages. General agent frameworks can do some of this, but you often rebuild coding-agent basics yourself: file editing, terminal interaction, MCP setup, hooks, session handling, and repo-specific context. Atomic starts from production coding agents and adds the workflow layer around them.
+</details>
+
+<details>
 <summary><b>How does Atomic differ from Spec-Kit?</b></summary>
 
 [Spec Kit](https://github.com/github/spec-kit) is GitHub's toolkit for "Spec-Driven Development." Both improve AI-assisted development, but solve different problems:
@@ -1507,9 +1508,9 @@ Ensure the agent CLI is in your PATH. Atomic uses `Bun.which()`, which handles `
 <details>
 <summary><b>How does Atomic differ from DeerFlow?</b></summary>
 
-[DeerFlow](https://github.com/bytedance/deer-flow) is ByteDance's agent harness built on LangGraph/LangChain. Both are multi-agent orchestrators, but take different approaches:
+[DeerFlow](https://github.com/bytedance/deer-flow) is ByteDance's agent runtime built on LangGraph/LangChain. Both can run multi-agent work, but take different approaches:
 
-**In short:** DeerFlow is a general-purpose agent orchestrator with a web UI. Atomic is narrowly focused on coding workflows. The key difference is that Atomic runs on top of production coding agents (Claude Code, OpenCode, Copilot CLI) rather than reimplementing coding tools through a generic API — you get each agent's native file editing, permissions, MCP integrations, and hooks out of the box. Atomic also gives you deterministic execution, which matters when encoding a team's dev process.
+**In short:** DeerFlow is a general-purpose agent system with a web UI. Atomic is narrowly focused on coding workflows. The key difference is that Atomic runs on top of production coding agents (Claude Code, OpenCode, Copilot CLI) rather than reimplementing coding tools through a generic API — you get each agent's native file editing, permissions, MCP integrations, and hooks out of the box. Atomic also gives you deterministic execution, which matters when encoding a team's dev process.
 
 | Aspect                  | DeerFlow                                        | Atomic                                                                                        |
 | ----------------------- | ----------------------------------------------- | --------------------------------------------------------------------------------------------- |
@@ -1531,9 +1532,9 @@ Ensure the agent CLI is in your PATH. Atomic uses `Bun.which()`, which handles `
 <details>
 <summary><b>How does Atomic differ from Hermes Agent?</b></summary>
 
-[Hermes Agent](https://github.com/NousResearch/hermes-agent) is Nous Research's general-purpose AI agent with a self-improving learning loop. Both are open-source agent frameworks, but serve different use cases:
+[Hermes Agent](https://github.com/NousResearch/hermes-agent) is Nous Research's general-purpose AI agent with a self-improving learning loop. Both are open source agent projects, but serve different use cases:
 
-**In short:** Hermes is a broad AI assistant that learns across sessions and connects to messaging platforms. Atomic is a coding-specific harness for engineering teams. It lets you encode your development process as deterministic TypeScript workflows that run identically across team members, machines, and CI. Atomic inherits production-hardened tools from Claude Code, OpenCode, and Copilot CLI — including their permission systems, MCP integrations, and hooks — giving you two independent security boundaries (devcontainer isolation + agent permissions). Fresh context per session keeps output sharp over multi-hour tasks. Developer-authored skills don't drift the way auto-generated ones can.
+**In short:** Hermes is a broad AI assistant that learns across sessions and connects to messaging platforms. Atomic is coding-specific workflow software for engineering teams. It lets you encode your development process as deterministic TypeScript workflows that run identically across team members, machines, and CI. Atomic inherits production-hardened tools from Claude Code, OpenCode, and Copilot CLI — including their permission systems, MCP integrations, and hooks — giving you two independent security boundaries (devcontainer isolation + agent permissions). Fresh context per session keeps output sharp over multi-hour tasks. Developer-authored skills don't drift the way auto-generated ones can.
 
 | Aspect                    | Hermes Agent                                                                                 | Atomic                                                                                                                                       |
 | ------------------------- | -------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
