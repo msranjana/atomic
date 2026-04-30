@@ -1,6 +1,8 @@
 ---
 name: gh-commit
 description: Create well-formatted commits with conventional commit format.
+metadata:
+  provider: atomic
 ---
 
 # Smart Git Commit

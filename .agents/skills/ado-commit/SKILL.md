@@ -1,6 +1,8 @@
 ---
 name: ado-commit
 description: Create well-formatted conventional commits in a repository hosted on Azure DevOps (ADO / Azure Repos). Use this whenever the user asks to commit changes and the project is on Azure DevOps — dev.azure.com, visualstudio.com, or explicit mentions of ADO, Azure Repos, or work item IDs like `AB#1234`. Automatically appends `AB#<id>` work-item trailers when the branch name or staged changes reference one, and attributes AI-assisted authorship.
+metadata:
+  provider: atomic
 ---
 
 # ADO Commit

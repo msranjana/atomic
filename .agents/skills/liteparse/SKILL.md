@@ -4,6 +4,7 @@ description: Use this skill when the user asks to parse, perform multi-format do
 compatibility: Requires Node 18+ and `@llamaindex/liteparse` installed globally via npm (`npm i -g @llamaindex/liteparse`)
 license: MIT
 metadata:
+  provider: atomic
   author: LlamaIndex
   version: "0.1.0"
 ---

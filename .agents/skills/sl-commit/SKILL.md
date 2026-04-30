@@ -1,6 +1,8 @@
 ---
 name: sl-commit
 description: Create well-formatted commits with conventional commit format using Sapling.
+metadata:
+  provider: atomic
 ---
 
 # Smart Sapling Commit

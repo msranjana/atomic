@@ -2,6 +2,8 @@
 name: research-codebase
 description: Document codebase as-is with research directory for historical context
 argument-hint: "<research-question>"
+metadata:
+  provider: atomic
 ---
 
 # Research Codebase

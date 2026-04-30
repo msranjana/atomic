@@ -1,6 +1,8 @@
 ---
 name: ado-create-pr
 description: Commit, push, and open a pull request in Azure DevOps. Use whenever the user wants to open, update, or draft a PR and the project is hosted on Azure DevOps (`dev.azure.com`, `visualstudio.com`, or explicit mentions of ADO, Azure Repos, or work item IDs like `AB#1234`). Links work items to the PR, sets reviewers, and supports draft-by-default.
+metadata:
+  provider: atomic
 ---
 
 # ADO Create Pull Request

@@ -1,6 +1,8 @@
 ---
 name: ripgrep
 description: Use when searching text in files, codebases, books, or documents. Use when finding files by pattern, searching large files that are too big to read fully, extracting specific content from many files, or when grep/find is too slow. Triggers on "search for", "find occurrences", "look for pattern", "search in files".
+metadata:
+  provider: atomic
 ---
 
 # Ripgrep (rg) - Fast Text Search Tool

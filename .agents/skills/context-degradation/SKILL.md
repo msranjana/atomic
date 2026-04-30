@@ -1,6 +1,8 @@
 ---
 name: context-degradation
 description: This skill should be used when the user asks to "diagnose context problems", "fix lost-in-middle issues", "debug agent failures", "understand context poisoning", or mentions context degradation, attention patterns, context clash, context confusion, or agent performance degradation. A core context engineering skill — also activates when the user mentions "context engineering" or "context-engineering" in the context of diagnosing and mitigating context failures.
+metadata:
+  provider: atomic
 ---
 
 # Context Degradation Patterns

@@ -1,6 +1,8 @@
 ---
 name: explain-code
 description: Explain code functionality in detail.
+metadata:
+  provider: atomic
 ---
 
 # Analyze and Explain Code Functionality

@@ -1,6 +1,8 @@
 ---
 name: prompt-engineer
 description: Create, improve, or optimize prompts using best practices
+metadata:
+  provider: atomic
 ---
 
 # Prompt Engineering Skill

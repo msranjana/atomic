@@ -1,6 +1,8 @@
 ---
 name: init
 description: Generate CLAUDE.md and AGENTS.md by exploring the codebase
+metadata:
+  provider: atomic
 ---
 
 # Generate CLAUDE.md and AGENTS.md

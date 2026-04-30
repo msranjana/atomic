@@ -1,6 +1,8 @@
 ---
 name: workflow-creator
 description: Create AND run Atomic CLI workflows (`defineWorkflow().run().compile()` with `ctx.stage()`) across Claude, Copilot, and OpenCode SDKs. Use for **authoring** when the user wants to build, edit, debug, or design agent pipelines — multi-stage automations, review/fix loops, parallel fan-out, headless/background stages, `defineWorkflow`, `ctx.stage`, `ctx.inputs`, declared `WorkflowInput` schemas, `runWorkflow`, `createRegistry`, `listWorkflows`, the SDK's metadata accessors (`getName`, `getInputSchema`, `getAgent`), `validateInputs`, the interactive workflow picker (`WorkflowPicker` from `@bastani/atomic/workflows/components`), single or multi-workflow composition roots. Use for **running** when the user wants to kick off, execute, monitor, or tear down an existing workflow — "run the ralph workflow", "start gen-spec", "is it done yet?", "what's the status?", "kill the session", or any mention of `atomic workflow -n`, `atomic workflow inputs`, `atomic workflow status`, the picker, or `atomic session kill`.
+metadata:
+  provider: atomic
 ---
 
 # Workflow Creator
@@ -18,20 +20,20 @@ Two user journeys live in this skill:
 
 Load references on demand. **Only `getting-started.md` is always-load.** Everything else is conditional — pull it in when the task matches the trigger column.
 
-| File | Load when |
-|---|---|
-| `getting-started.md` | **Always** — quick-start examples for all 3 SDKs, SDK exports, `SessionContext` field reference |
-| `agent-setup-recipe.md` | When the user is starting from zero (empty terminal, no project, "set me up", "how do I get started"). Deterministic env-detect → install → scaffold → smoke-test playbook with typed-error recovery hints |
-| `failure-modes.md` | Before shipping any multi-session workflow. 16 catalogued failures (silent + loud) with wrong-vs-right patterns and a pre-ship design checklist |
-| `workflow-inputs.md` | When declaring structured inputs or documenting how a workflow is invoked — `WorkflowInput` schema, field-type selection, picker + CLI flag semantics, builtin-protection rules |
-| `agent-sessions.md` | When writing SDK calls — `s.session.query()` (Claude), `s.session.send()` (Copilot), `s.client.session.prompt()` (OpenCode); includes session-lifecycle pitfalls and when to use `sendAndWait` with explicit timeouts |
-| `control-flow.md` | When using loops, conditionals, parallel execution (`Promise.all`), headless fan-out, or review/fix patterns |
-| `state-and-data-flow.md` | When passing data between sessions — `s.save()`, `s.transcript()`, `s.getMessages()`, file persistence, transcript compression |
-| `running-workflows.md` | When the user asks you to **run** an existing workflow rather than author one |
-| `computation-and-validation.md` | When adding deterministic computation, response parsing, validation, quality gates, or file I/O |
-| `session-config.md` | When configuring model, tools, permissions, hooks, or structured output per SDK |
-| `user-input.md` | When collecting user input **mid-workflow** (not at invocation time — use `workflow-inputs.md` for that) |
-| `registry-and-validation.md` | When setting up `createRegistry()` and iterating it via `listWorkflows`, understanding key scheme, validate-on-register rules, and same-name collision detection (only relevant for the multi-workflow cli) |
+| File                            | Load when                                                                                                                                                                                                             |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `getting-started.md`            | **Always** — quick-start examples for all 3 SDKs, SDK exports, `SessionContext` field reference                                                                                                                       |
+| `agent-setup-recipe.md`         | When the user is starting from zero (empty terminal, no project, "set me up", "how do I get started"). Deterministic env-detect → install → scaffold → smoke-test playbook with typed-error recovery hints            |
+| `failure-modes.md`              | Before shipping any multi-session workflow. 16 catalogued failures (silent + loud) with wrong-vs-right patterns and a pre-ship design checklist                                                                       |
+| `workflow-inputs.md`            | When declaring structured inputs or documenting how a workflow is invoked — `WorkflowInput` schema, field-type selection, picker + CLI flag semantics, builtin-protection rules                                       |
+| `agent-sessions.md`             | When writing SDK calls — `s.session.query()` (Claude), `s.session.send()` (Copilot), `s.client.session.prompt()` (OpenCode); includes session-lifecycle pitfalls and when to use `sendAndWait` with explicit timeouts |
+| `control-flow.md`               | When using loops, conditionals, parallel execution (`Promise.all`), headless fan-out, or review/fix patterns                                                                                                          |
+| `state-and-data-flow.md`        | When passing data between sessions — `s.save()`, `s.transcript()`, `s.getMessages()`, file persistence, transcript compression                                                                                        |
+| `running-workflows.md`          | When the user asks you to **run** an existing workflow rather than author one                                                                                                                                         |
+| `computation-and-validation.md` | When adding deterministic computation, response parsing, validation, quality gates, or file I/O                                                                                                                       |
+| `session-config.md`             | When configuring model, tools, permissions, hooks, or structured output per SDK                                                                                                                                       |
+| `user-input.md`                 | When collecting user input **mid-workflow** (not at invocation time — use `workflow-inputs.md` for that)                                                                                                              |
+| `registry-and-validation.md`    | When setting up `createRegistry()` and iterating it via `listWorkflows`, understanding key scheme, validate-on-register rules, and same-name collision detection (only relevant for the multi-workflow cli)           |
 
 ## Scaffold a new workflow from scratch
 
@@ -102,22 +104,22 @@ budgets). Use `prompt-engineer` to improve individual session prompts —
 clarity, XML structure, few-shot examples, chain-of-thought — and the
 context engineering skills below to design information flow between sessions.
 
-| Design Concern | Skill | Trigger |
-|---|---|---|
-| Prompt clarity and structure | `prompt-engineer` | Every workflow — clear instructions, XML tags, examples, chain-of-thought |
-| Session prompt structure | `context-fundamentals` | Every workflow — token budgeting, prompt positioning, progressive disclosure |
-| Context failure prevention | `context-degradation` | Long conversations, accumulated state, multi-turn loops |
-| Transcript compression | `context-compression` | Passing large transcripts between sessions |
-| Multi-session architecture | `multi-agent-patterns` | Coordination topology, handoff protocols, error propagation |
-| Cross-run persistence | `memory-systems` | Retaining knowledge across separate executions |
-| Custom tools and capabilities | `tool-design` | Sessions exposing custom tools |
-| File-based coordination | `filesystem-context` | Sessions sharing state via files |
-| Remote execution | `hosted-agents` | Sandboxed or remote environments |
-| Token efficiency | `context-optimization` | Compaction triggers, observation masking, cache-friendly ordering |
-| Quality gates | `evaluation` | Review loops or quality checkpoints |
-| LLM-as-judge review | `advanced-evaluation` | Automated review sessions judging other sessions' output |
-| Task-model fit | `project-development` | Validating whether a task is viable for agent automation |
-| Deliberative reasoning | `bdi-mental-states` | Explainable reasoning chains or formal cognitive models |
+| Design Concern                | Skill                  | Trigger                                                                      |
+| ----------------------------- | ---------------------- | ---------------------------------------------------------------------------- |
+| Prompt clarity and structure  | `prompt-engineer`      | Every workflow — clear instructions, XML tags, examples, chain-of-thought    |
+| Session prompt structure      | `context-fundamentals` | Every workflow — token budgeting, prompt positioning, progressive disclosure |
+| Context failure prevention    | `context-degradation`  | Long conversations, accumulated state, multi-turn loops                      |
+| Transcript compression        | `context-compression`  | Passing large transcripts between sessions                                   |
+| Multi-session architecture    | `multi-agent-patterns` | Coordination topology, handoff protocols, error propagation                  |
+| Cross-run persistence         | `memory-systems`       | Retaining knowledge across separate executions                               |
+| Custom tools and capabilities | `tool-design`          | Sessions exposing custom tools                                               |
+| File-based coordination       | `filesystem-context`   | Sessions sharing state via files                                             |
+| Remote execution              | `hosted-agents`        | Sandboxed or remote environments                                             |
+| Token efficiency              | `context-optimization` | Compaction triggers, observation masking, cache-friendly ordering            |
+| Quality gates                 | `evaluation`           | Review loops or quality checkpoints                                          |
+| LLM-as-judge review           | `advanced-evaluation`  | Automated review sessions judging other sessions' output                     |
+| Task-model fit                | `project-development`  | Validating whether a task is viable for agent automation                     |
+| Deliberative reasoning        | `bdi-mental-states`    | Explainable reasoning chains or formal cognitive models                      |
 
 ## How Workflows Work
 
@@ -290,18 +292,18 @@ The dev's CLI is **never** re-execed. The SDK ships an internal orchestrator ent
 atomic workflow -n <name> -a <agent> [inputs...]
 ```
 
-Surface | Command | When
----|---|---
-Named, with prompt | `… -n hello -a claude "fix the bug"` | Requires workflow to declare a `prompt` input
-Named, structured | `… -n gen-spec -a claude --research_doc=notes.md` | Structured inputs via `--<field>` flags
-Interactive picker | `atomic workflow -a claude` | Discovery — fuzzy list + form; this is the intentional no-`-n` path
-List (atomic builtins) | `atomic workflow list`, `atomic workflow list -a <agent>` | Browse registered builtins, optionally filtered
-List (user cli) | Iterate `listWorkflows(registry)` and add a `list` Commander subcommand yourself | No built-in `--list` flag
-List (single-workflow) | Not applicable — the file *is* the workflow
-Inspect inputs | `atomic workflow inputs <name> -a claude` | Print input schema as JSON
-Status (one or all) | `atomic workflow status [<session-id>]` | Query state — `in_progress`, `error`, `completed`, `needs_review`
-Kill non-interactively | `atomic session kill <id> -y` | Tear down without confirmation prompt — `-y` is mandatory for agents
-Detached (background) | `… -d` / `… --detach` | Runs without attaching; reattach with `atomic workflow session connect <name>`
+| Surface                | Command                                                                          | When                                                                           |
+| ---------------------- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| Named, with prompt     | `… -n hello -a claude "fix the bug"`                                             | Requires workflow to declare a `prompt` input                                  |
+| Named, structured      | `… -n gen-spec -a claude --research_doc=notes.md`                                | Structured inputs via `--<field>` flags                                        |
+| Interactive picker     | `atomic workflow -a claude`                                                      | Discovery — fuzzy list + form; this is the intentional no-`-n` path            |
+| List (atomic builtins) | `atomic workflow list`, `atomic workflow list -a <agent>`                        | Browse registered builtins, optionally filtered                                |
+| List (user cli)        | Iterate `listWorkflows(registry)` and add a `list` Commander subcommand yourself | No built-in `--list` flag                                                      |
+| List (single-workflow) | Not applicable — the file *is* the workflow                                      |
+| Inspect inputs         | `atomic workflow inputs <name> -a claude`                                        | Print input schema as JSON                                                     |
+| Status (one or all)    | `atomic workflow status [<session-id>]`                                          | Query state — `in_progress`, `error`, `completed`, `needs_review`              |
+| Kill non-interactively | `atomic session kill <id> -y`                                                    | Tear down without confirmation prompt — `-y` is mandatory for agents           |
+| Detached (background)  | `… -d` / `… --detach`                                                            | Runs without attaching; reattach with `atomic workflow session connect <name>` |
 
 Any of the named shapes above (positional or structured) accepts
 `-d` / `--detach` to run without attaching. Use it when you're automating
@@ -347,21 +349,21 @@ Enforced by the builder, loader, and runtime:
 
 Every workflow pattern maps directly to TypeScript code:
 
-| Workflow Concept | Programmatic Pattern |
-|---|---|
-| Agent session (send prompt, get response) | `ctx.stage({ name }, {}, {}, async (s) => { /* use s.client, s.session */ })` — **must** include an LLM call (Rule 9) |
-| Background (headless) session | `ctx.stage({ name, headless: true }, {}, {}, async (s) => { /* same API */ })` — invisible in graph, tracked by background counter |
-| Sequential execution | `await ctx.stage(...)` followed by `await ctx.stage(...)` |
-| Parallel execution | `Promise.all([ctx.stage(...), ctx.stage(...)])` |
-| Parallel background tasks | `Promise.all([ctx.stage({ name: "a", headless: true }, ...), ctx.stage({ name: "b", headless: true }, ...)])` |
-| Conditional branching | `if (...) { await ctx.stage({ name: "fix" }, {}, {}, ...) }` |
-| Bounded loops with visible graph nodes | `for (let i = 1; i <= N; i++) { await ctx.stage({ name: \`step-\${i}\` }, {}, {}, ...) }` |
-| Return data from session | `const h = await ctx.stage(opts, {}, {}, async (s) => { return value; }); h.result` |
-| Data flow between sessions | `s.save()` to persist → `s.transcript(handle)` or `s.transcript("name")` to retrieve |
-| Pure deterministic computation (no LLM call) | Plain TypeScript at the top level of `.run()`. **Never** a standalone stage — see Rule 9 and F22. |
-| Deterministic work tied to an LLM call | Inside the same stage callback, before/after the query. E.g. `s.session.query(...)` → parse → validate → `s.save(parsed)`. |
-| Subagent orchestration | Claude: `--agent` via `chatFlags` (interactive) or `agent` SDK option (headless); Copilot: `{ agent: "name" }` in sessionOpts; OpenCode: `agent` param in `s.client.session.prompt()` |
-| Per-session configuration | Pass `clientOpts` (2nd arg) and `sessionOpts` (3rd arg) to `ctx.stage()` |
+| Workflow Concept                             | Programmatic Pattern                                                                                                                                                                  |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Agent session (send prompt, get response)    | `ctx.stage({ name }, {}, {}, async (s) => { /* use s.client, s.session */ })` — **must** include an LLM call (Rule 9)                                                                 |
+| Background (headless) session                | `ctx.stage({ name, headless: true }, {}, {}, async (s) => { /* same API */ })` — invisible in graph, tracked by background counter                                                    |
+| Sequential execution                         | `await ctx.stage(...)` followed by `await ctx.stage(...)`                                                                                                                             |
+| Parallel execution                           | `Promise.all([ctx.stage(...), ctx.stage(...)])`                                                                                                                                       |
+| Parallel background tasks                    | `Promise.all([ctx.stage({ name: "a", headless: true }, ...), ctx.stage({ name: "b", headless: true }, ...)])`                                                                         |
+| Conditional branching                        | `if (...) { await ctx.stage({ name: "fix" }, {}, {}, ...) }`                                                                                                                          |
+| Bounded loops with visible graph nodes       | `for (let i = 1; i <= N; i++) { await ctx.stage({ name: \`step-\${i}\` }, {}, {}, ...) }`                                                                                             |
+| Return data from session                     | `const h = await ctx.stage(opts, {}, {}, async (s) => { return value; }); h.result`                                                                                                   |
+| Data flow between sessions                   | `s.save()` to persist → `s.transcript(handle)` or `s.transcript("name")` to retrieve                                                                                                  |
+| Pure deterministic computation (no LLM call) | Plain TypeScript at the top level of `.run()`. **Never** a standalone stage — see Rule 9 and F22.                                                                                     |
+| Deterministic work tied to an LLM call       | Inside the same stage callback, before/after the query. E.g. `s.session.query(...)` → parse → validate → `s.save(parsed)`.                                                            |
+| Subagent orchestration                       | Claude: `--agent` via `chatFlags` (interactive) or `agent` SDK option (headless); Copilot: `{ agent: "name" }` in sessionOpts; OpenCode: `agent` param in `s.client.session.prompt()` |
+| Per-session configuration                    | Pass `clientOpts` (2nd arg) and `sessionOpts` (3rd arg) to `ctx.stage()`                                                                                                              |
 
 ### When to use a stage vs. plain TypeScript
 
@@ -409,17 +411,17 @@ transcript compression), and `references/computation-and-validation.md`
 
 Map the user's intent to sessions and patterns:
 
-| Question | Maps to |
-|----------|---------|
-| What are the distinct **LLM interactions**? | Each LLM conversation → one `ctx.stage()` call (Rule 9) |
-| Can any LLM calls run in parallel? | `Promise.all([ctx.stage(...), ...])` |
-| Should any parallel LLM calls run in the background? | `ctx.stage({ name, headless: true }, ...)` — invisible in graph, ideal for data-gathering |
+| Question                                                 | Maps to                                                                                                                                                       |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| What are the distinct **LLM interactions**?              | Each LLM conversation → one `ctx.stage()` call (Rule 9)                                                                                                       |
+| Can any LLM calls run in parallel?                       | `Promise.all([ctx.stage(...), ...])`                                                                                                                          |
+| Should any parallel LLM calls run in the background?     | `ctx.stage({ name, headless: true }, ...)` — invisible in graph, ideal for data-gathering                                                                     |
 | Does any step need **pure deterministic code** (no LLM)? | Plain TypeScript at the top of `.run()` — **not** a dedicated stage. Bundle it inside the nearest stage callback if it's directly tied to that stage's query. |
-| Do any steps need to repeat? | `for`/`while` loop with `ctx.stage()` inside |
-| Are there conditional paths? | `if`/`else` wrapping `ctx.stage()` calls |
-| What data flows between steps? | `s.save()` → `s.transcript(handle)` / `s.getMessages(handle)` |
-| Does the workflow need user input? | SDK-specific user input APIs (see `references/user-input.md`) |
-| Do any steps need a specific model? | SDK-specific session config (see `references/session-config.md`) |
+| Do any steps need to repeat?                             | `for`/`while` loop with `ctx.stage()` inside                                                                                                                  |
+| Are there conditional paths?                             | `if`/`else` wrapping `ctx.stage()` calls                                                                                                                      |
+| What data flows between steps?                           | `s.save()` → `s.transcript(handle)` / `s.getMessages(handle)`                                                                                                 |
+| Does the workflow need user input?                       | SDK-specific user input APIs (see `references/user-input.md`)                                                                                                 |
+| Do any steps need a specific model?                      | SDK-specific session config (see `references/session-config.md`)                                                                                              |
 
 Then walk the **Design Advisory Skills** table above (§"Design Advisory
 Skills") — for each row whose trigger applies to your workflow, pull that
@@ -433,11 +435,11 @@ Pass the agent as a runtime argument to `.for()` on the builder — this
 narrows all context types and gives correct `s.client`/`s.session` types.
 Call `.for()` **before** `.run()`:
 
-| Agent | Builder Chain | Primary Session API |
-|-------|---------------|---------------------|
-| Claude | `defineWorkflow({...}).for("claude")` | `s.session.query(prompt)` — sends prompt to the Claude TUI pane |
-| Copilot | `defineWorkflow({...}).for("copilot")` | `s.session.send({ prompt })` — the runtime wraps `send` to block until `session.idle` with no timeout (see `failure-modes.md` §F10); do not use `sendAndWait` in Atomic workflows |
-| OpenCode | `defineWorkflow({...}).for("opencode")` | `s.client.session.prompt({ sessionID: s.session.id, parts: [...] })` |
+| Agent    | Builder Chain                           | Primary Session API                                                                                                                                                               |
+| -------- | --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Claude   | `defineWorkflow({...}).for("claude")`   | `s.session.query(prompt)` — sends prompt to the Claude TUI pane                                                                                                                   |
+| Copilot  | `defineWorkflow({...}).for("copilot")`  | `s.session.send({ prompt })` — the runtime wraps `send` to block until `session.idle` with no timeout (see `failure-modes.md` §F10); do not use `sendAndWait` in Atomic workflows |
+| OpenCode | `defineWorkflow({...}).for("opencode")` | `s.client.session.prompt({ sessionID: s.session.id, parts: [...] })`                                                                                                              |
 
 The runtime manages client/session lifecycle automatically. For native SDK
 types and advanced APIs, import directly from the provider packages
