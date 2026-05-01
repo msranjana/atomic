@@ -18,6 +18,7 @@
 import type { AgentKey } from "../config/index.ts";
 import { COLORS } from "../../theme/colors.ts";
 import { copilotSdkLaunchOptions } from "../../sdk/providers/copilot.ts";
+import { withAtomicTempEnv } from "../../lib/atomic-temp.ts";
 
 export interface AuthCheckResult {
   /** True when the SDK reports the user is authenticated. */
@@ -105,33 +106,35 @@ async function checkClaudeAuth(): Promise<AuthCheckResult> {
   // actually delivered.
   async function* emptyStream(): AsyncGenerator<never, void, void> {}
 
-  const q = query({
-    prompt: emptyStream(),
-    options: {
-      pathToClaudeCodeExecutable: resolveHeadlessClaudeBin(),
-    },
-  });
+  return await withAtomicTempEnv(async () => {
+    const q = query({
+      prompt: emptyStream(),
+      options: {
+        pathToClaudeCodeExecutable: resolveHeadlessClaudeBin(),
+      },
+    });
 
-  try {
-    const init = await q.initializationResult();
-    const account = init.account ?? {};
-    const loggedIn = Boolean(
-      account.email || account.tokenSource || account.apiKeySource,
-    );
-    return {
-      loggedIn,
-      identity: account.email,
-    };
-  } catch (err) {
-    return {
-      loggedIn: false,
-      detail: err instanceof Error ? err.message : String(err),
-    };
-  } finally {
     try {
-      q.close();
-    } catch {
-      // Best effort — the subprocess is torn down on process exit anyway.
+      const init = await q.initializationResult();
+      const account = init.account ?? {};
+      const loggedIn = Boolean(
+        account.email || account.tokenSource || account.apiKeySource,
+      );
+      return {
+        loggedIn,
+        identity: account.email,
+      };
+    } catch (err) {
+      return {
+        loggedIn: false,
+        detail: err instanceof Error ? err.message : String(err),
+      };
+    } finally {
+      try {
+        q.close();
+      } catch {
+        // Best effort — the subprocess is torn down on process exit anyway.
+      }
     }
-  }
+  });
 }

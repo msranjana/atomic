@@ -1046,6 +1046,22 @@ describe("buildPaneCommand", () => {
     expect(command).not.toContain("--port");
   });
 
+  test("claude: scopes temp files to the user's Atomic temp directory", () => {
+    const { envVars } = buildPaneCommand("claude");
+    expect(envVars.TMPDIR).toMatch(/\/\.atomic\/tmp$/);
+    expect(envVars.TMP).toBe(envVars.TMPDIR);
+    expect(envVars.TEMP).toBe(envVars.TMPDIR);
+  });
+
+  test("claude: explicit temp env overrides the Atomic default", () => {
+    const { envVars } = buildPaneCommand("claude", {
+      envVars: { TMPDIR: "/custom/tmp", TMP: "/custom/tmp", TEMP: "/custom/tmp" },
+    });
+    expect(envVars.TMPDIR).toBe("/custom/tmp");
+    expect(envVars.TMP).toBe("/custom/tmp");
+    expect(envVars.TEMP).toBe("/custom/tmp");
+  });
+
   test("overrides.envVars merges with defaults for copilot", () => {
     const { envVars } = buildPaneCommand("copilot", {
       envVars: { MY_VAR: "hello" },

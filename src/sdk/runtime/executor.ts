@@ -68,6 +68,7 @@ import { GraphFrontierTracker } from "./graph-inference.ts";
 import { buildSnapshot, writeSnapshot } from "./status-writer.ts";
 import { errorMessage } from "../errors.ts";
 import { createPainter } from "../../theme/colors.ts";
+import { atomicTempEnv } from "../../lib/atomic-temp.ts";
 
 /** Maximum time (ms) for the SDK probe to succeed after port is discovered. */
 export const SERVER_PROBE_TIMEOUT_MS = 60_000;
@@ -288,9 +289,11 @@ export function buildPaneCommand(
     envVars: defaultEnvVars,
   } = AGENT_CLI[agent];
   const chatFlags = overrides.chatFlags ?? defaultFlags;
+  const claudeTempEnv = agent === "claude" ? atomicTempEnv() : {};
   const envVars = overrides.envVars
     ? { ...defaultEnvVars, ...overrides.envVars }
     : defaultEnvVars;
+  const mergedEnvVars = { ...envVars, ...claudeTempEnv, ...overrides.envVars };
 
   const resolvedCmd = quotePathIfNeeded(resolveCliBinary(cmd));
 
@@ -310,13 +313,13 @@ export function buildPaneCommand(
           ...chatFlags,
           ...extraChatFlags,
         ].join(" "),
-        envVars,
+        envVars: mergedEnvVars,
       };
     }
     case "opencode":
       return {
         command: [resolvedCmd, "--port", "0", ...chatFlags].join(" "),
-        envVars,
+        envVars: mergedEnvVars,
       };
     case "claude": {
       // Claude is started via createClaudeSession() in the workflow's run().
@@ -330,7 +333,7 @@ export function buildPaneCommand(
           : resolveCliBinary(shellCandidate);
       return {
         command: quotePathIfNeeded(resolvedShell),
-        envVars,
+        envVars: mergedEnvVars,
       };
     }
     default:
@@ -501,6 +504,7 @@ export async function executeWorkflow(
   const launcherExt = isWin ? "ps1" : "sh";
   const launcherPath = join(sessionsBaseDir, `orchestrator.${launcherExt}`);
   const logPath = join(sessionsBaseDir, "orchestrator.log");
+  const launcherEnvVars = agent === "claude" ? atomicTempEnv() : {};
 
   // Inputs are passed through as base64-encoded JSON so long multiline
   // text values survive shell quoting without any further escaping.
@@ -522,6 +526,9 @@ export async function executeWorkflow(
   const launcherScript = isWin
     ? [
         `Set-Location "${escPwsh(projectRoot)}"`,
+        ...Object.entries(launcherEnvVars).map(
+          ([key, value]) => `$env:${key} = "${escPwsh(value)}"`,
+        ),
         `$env:ATOMIC_WF_ID = "${escPwsh(workflowRunId)}"`,
         `$env:ATOMIC_WF_TMUX = "${escPwsh(tmuxSessionName)}"`,
         `$env:ATOMIC_WF_AGENT = "${escPwsh(agent)}"`,
@@ -531,6 +538,9 @@ export async function executeWorkflow(
     : [
         "#!/bin/bash",
         `cd "${escBash(projectRoot)}"`,
+        ...Object.entries(launcherEnvVars).map(
+          ([key, value]) => `export ${key}="${escBash(value)}"`,
+        ),
         `export ATOMIC_WF_ID="${escBash(workflowRunId)}"`,
         `export ATOMIC_WF_TMUX="${escBash(tmuxSessionName)}"`,
         `export ATOMIC_WF_AGENT="${escBash(agent)}"`,
@@ -543,7 +553,7 @@ export async function executeWorkflow(
   const shellCmd = isWin
     ? `pwsh -NoProfile -File "${escPwsh(launcherPath)}"`
     : `bash "${escBash(launcherPath)}"`;
-  tmux.createSession(tmuxSessionName, shellCmd, "orchestrator");
+  tmux.createSession(tmuxSessionName, shellCmd, "orchestrator", undefined, launcherEnvVars);
   tmux.setSessionEnv(tmuxSessionName, "ATOMIC_AGENT", agent);
 
   if (detach) {

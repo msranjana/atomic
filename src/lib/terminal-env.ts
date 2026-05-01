@@ -74,7 +74,7 @@ export function buildSpawnEnv(
   explicitEnv: Record<string, string>,
   baseEnv: NodeJS.ProcessEnv = process.env,
 ): Record<string, string> {
-  return mergeTerminalEnv(explicitEnv, baseEnv);
+  return { ...normalizedTerminalEnv(baseEnv), ...explicitEnv };
 }
 
 function buildMinimalEnv(
@@ -96,5 +96,5 @@ export function buildTmuxEnv(
   explicitEnv: Record<string, string>,
   baseEnv: NodeJS.ProcessEnv = process.env,
 ): Record<string, string> {
-  return buildMinimalEnv(explicitEnv, baseEnv);
+  return buildLauncherEnv(explicitEnv, baseEnv);
 }

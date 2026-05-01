@@ -5,6 +5,7 @@ import {
   buildSpawnEnv,
   resolveChatCommand,
 } from "./index.ts";
+import { atomicTempEnv } from "../../../lib/atomic-temp.ts";
 
 const TERMINAL_ENV_KEYS = ["LANG", "LC_ALL", "LC_CTYPE", "TERM", "COLORTERM"] as const;
 
@@ -180,6 +181,15 @@ describe("chat env builders", () => {
       COLORTERM: "truecolor",
       ATOMIC_AGENT: "copilot",
     });
+  });
+
+  test("Claude temp env is preserved when serialized into a launcher", () => {
+    const claudeTempEnv = atomicTempEnv("/home/dev/.atomic/tmp");
+    const env = buildLauncherEnv({ ...claudeTempEnv, ATOMIC_AGENT: "claude" }, devcontainerEnv);
+
+    expect(env.TMPDIR).toBe("/home/dev/.atomic/tmp");
+    expect(env.TMP).toBe("/home/dev/.atomic/tmp");
+    expect(env.TEMP).toBe("/home/dev/.atomic/tmp");
   });
 
   test("buildLauncherEnv does not include inherited secrets or platform keys", () => {

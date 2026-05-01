@@ -30,13 +30,17 @@ import { watch, unlink, mkdir, writeFile } from "node:fs/promises";
 import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import os from "node:os";
 import { claudeHookDirs } from "../../commands/cli/claude-stop-hook.ts";
 import {
   clearInflightTracking,
   waitForInflightDrained,
 } from "../../commands/cli/claude-inflight-hook.ts";
 import { resolveAdditionalInstructionsContent } from "../../services/config/additional-instructions.ts";
+import {
+  atomicContentTempPath,
+  atomicTempPath,
+  withAtomicTempEnv,
+} from "../../lib/atomic-temp.ts";
 
 // ---------------------------------------------------------------------------
 // Session tracking — ensures createClaudeSession is called before claudeQuery
@@ -423,18 +427,17 @@ async function spawnClaudeWithPrompt(
   chatFlags: string[],
   sessionId: string,
 ): Promise<void> {
-  // sessionDir is the workflow's `${name}-${sessionId}` directory under
-  // ~/.atomic/sessions — slug-based, so single-quoting is sufficient on
-  // POSIX and PowerShell alike.
-  const argvPrompt = `'${readPromptInstruction(promptFile)}'`;
+  const settingsPath = workflowHookSettingsPath();
+  const argvPrompt = `"${escBash(readPromptInstruction(promptFile))}"`;
   const cmd = [
     "claude",
     ...chatFlags,
-    // Workflow-owned Stop hook. Placed AFTER chatFlags so commander's
-    // last-wins semantics shadow any user-provided --settings, making this
-    // non-overridable by `.atomic/settings.json` chatFlags overrides.
+    // Workflow-owned hooks. Placed AFTER chatFlags so commander's last-wins
+    // semantics shadow any user-provided --settings, making this
+    // non-overridable by `.atomic/settings.json` chatFlags overrides. Passing
+    // a path avoids Claude Code's content-hashed /tmp/claude-settings*.json.
     "--settings",
-    `'${WORKFLOW_HOOK_SETTINGS}'`,
+    `"${escBash(settingsPath)}"`,
     "--session-id",
     sessionId,
     argvPrompt,
@@ -452,6 +455,19 @@ async function spawnClaudeWithPrompt(
   // before Claude writes the JSONL transcript, so it beats the old
   // transcript-file race and is deterministic.
   await waitForReadyMarker(sessionId);
+}
+
+function workflowHookSettingsPath(): string {
+  const path = atomicContentTempPath(
+    "claude-settings-atomic",
+    ".json",
+    WORKFLOW_HOOK_SETTINGS,
+  );
+  writeFileSync(path, WORKFLOW_HOOK_SETTINGS, {
+    encoding: "utf-8",
+    mode: 0o600,
+  });
+  return path;
 }
 
 /**
@@ -1055,11 +1071,15 @@ export async function claudeQuery(options: ClaudeQueryOptions): Promise<SessionM
       // Read-tool indirection. The tmp file only has to live long enough
       // for Claude's first Read tool call, so we delete it once waitForIdle
       // returns (the turn is complete by then).
-      spawnPromptFile = join(
-        os.tmpdir(),
-        `atomic-claude-prompt-${claudeSessionId}-${randomUUID()}.txt`,
+      spawnPromptFile = atomicTempPath(
+        "atomic-claude-prompt",
+        ".txt",
+        `${claudeSessionId}-${randomUUID()}`,
       );
-      writeFileSync(spawnPromptFile, prompt, "utf-8");
+      writeFileSync(spawnPromptFile, prompt, {
+        encoding: "utf-8",
+        mode: 0o600,
+      });
 
       await spawnClaudeWithPrompt(
         paneId,
@@ -1369,15 +1389,17 @@ export class HeadlessClaudeSessionWrapper {
     let sdkSessionId = "";
     let structuredOutput: unknown = undefined;
     try {
-      for await (const msg of sdkQuery({ prompt, options: headlessSdkOpts })) {
-        if (msg.type === "result") {
-          const record = msg as Record<string, unknown>;
-          sdkSessionId = String(record.session_id ?? "");
-          if (record.subtype === "success" && "structured_output" in record) {
-            structuredOutput = record.structured_output;
+      await withAtomicTempEnv(async () => {
+        for await (const msg of sdkQuery({ prompt, options: headlessSdkOpts })) {
+          if (msg.type === "result") {
+            const record = msg as Record<string, unknown>;
+            sdkSessionId = String(record.session_id ?? "");
+            if (record.subtype === "success" && "structured_output" in record) {
+              structuredOutput = record.structured_output;
+            }
           }
         }
-      }
+      });
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
       throw new Error(`Claude SDK query failed: ${detail}`);

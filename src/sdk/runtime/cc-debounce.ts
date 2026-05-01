@@ -18,9 +18,9 @@
  * confirmation.
  */
 
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readFileSync, writeFileSync } from "node:fs";
+import { ensureAtomicTempDir } from "../../lib/atomic-temp.ts";
 
 /** Quiet period (ms) the user must leave between presses for the next
  *  one to be forwarded. Must exceed every integrated agent's exit-confirm
@@ -44,7 +44,7 @@ export function shouldForward(
  *  something with shell metacharacters. */
 function stateFileFor(paneId: string): string {
   const safe = paneId.replace(/[^a-zA-Z0-9_%-]/g, "_");
-  return join(tmpdir(), `atomic-cc-${safe}`);
+  return join(ensureAtomicTempDir(), `atomic-cc-${safe}`);
 }
 
 function readLastPress(stateFile: string): number {

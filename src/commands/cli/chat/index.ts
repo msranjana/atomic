@@ -48,6 +48,7 @@ import {
   buildSpawnEnv,
   buildTmuxEnv,
 } from "../../../lib/terminal-env.ts";
+import { atomicTempEnv } from "../../../lib/atomic-temp.ts";
 import { resolveCopilotCliPath } from "../../../sdk/providers/copilot.ts";
 
 export {
@@ -287,10 +288,12 @@ export async function chatCommand(options: ChatCommandOptions = {}): Promise<num
   const args = await buildAgentArgs(agentType, passthroughArgs, projectRoot);
   const cmd = [executable, ...args];
   const overrides = await getProviderOverrides(agentType, projectRoot);
+  const claudeTempEnv = agentType === "claude" ? atomicTempEnv() : {};
   // ATOMIC_AGENT must be baked into the launcher env so the agent CLI
   // and anything it spawns can read it from process start.
   const envVars: Record<string, string> = {
     ...config.env_vars,
+    ...claudeTempEnv,
     ...overrides.envVars,
     ATOMIC_AGENT: agentType,
   };

@@ -9,8 +9,8 @@
 import { join } from "node:path";
 import { requiredMuxBinaryCandidatesForPlatform } from "../../lib/spawn.ts";
 import { writeFileSync, unlinkSync } from "node:fs";
-import { tmpdir } from "node:os";
 import type { Subprocess } from "bun";
+import { atomicTempPath } from "../../lib/atomic-temp.ts";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -353,7 +353,11 @@ export function sendLiteralText(paneId: string, text: string): void {
  */
 export function sendViaPasteBuffer(paneId: string, text: string): void {
   const normalized = text.replace(/[\r\n]+/g, " ");
-  const tmp = join(tmpdir(), `atomic-paste-${process.pid}-${Date.now()}.txt`);
+  const tmp = atomicTempPath(
+    "atomic-paste",
+    ".txt",
+    `${process.pid}-${Date.now()}`,
+  );
 
   writeFileSync(tmp, normalized, "utf-8");
   try {
