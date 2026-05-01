@@ -3,6 +3,7 @@ import {
   TERMINAL_ENV_KEYS,
   buildLauncherEnv,
   buildSpawnEnv,
+  buildTmuxEnv,
   mergeTerminalEnv,
   normalizedTerminalEnv,
   pickTerminalEnv,
@@ -220,5 +221,123 @@ describe("buildLauncherEnv", () => {
     expect(env["TERM"]).toBe("xterm-256color");
     // explicit override present
     expect(env["MY_EXPLICIT"]).toBe("yes");
+  });
+});
+
+describe("buildTmuxEnv", () => {
+  const SENSITIVE_BASE = {
+    LANG: "en_US.UTF-8",
+    LC_ALL: "en_US.UTF-8",
+    LC_CTYPE: "en_US.UTF-8",
+    TERM: "xterm-256color",
+    COLORTERM: "truecolor",
+    GH_TOKEN: "ghp_secret",
+    COPILOT_GITHUB_TOKEN: "ghu_secret",
+    ANTHROPIC_API_KEY: "sk-ant-secret",
+    OPENAI_API_KEY: "sk-openai-secret",
+    HOME: "/home/user",
+    PATH: "/usr/bin:/bin",
+    ARBITRARY_VAR: "should-not-appear",
+  };
+
+  test("excludes GH_TOKEN", () => {
+    const env = buildTmuxEnv({}, SENSITIVE_BASE);
+    expect("GH_TOKEN" in env).toBe(false);
+  });
+
+  test("excludes COPILOT_GITHUB_TOKEN", () => {
+    const env = buildTmuxEnv({}, SENSITIVE_BASE);
+    expect("COPILOT_GITHUB_TOKEN" in env).toBe(false);
+  });
+
+  test("excludes ANTHROPIC_API_KEY", () => {
+    const env = buildTmuxEnv({}, SENSITIVE_BASE);
+    expect("ANTHROPIC_API_KEY" in env).toBe(false);
+  });
+
+  test("excludes OPENAI_API_KEY", () => {
+    const env = buildTmuxEnv({}, SENSITIVE_BASE);
+    expect("OPENAI_API_KEY" in env).toBe(false);
+  });
+
+  test("excludes HOME", () => {
+    const env = buildTmuxEnv({}, SENSITIVE_BASE);
+    expect("HOME" in env).toBe(false);
+  });
+
+  test("excludes PATH", () => {
+    const env = buildTmuxEnv({}, SENSITIVE_BASE);
+    expect("PATH" in env).toBe(false);
+  });
+
+  test("excludes arbitrary inherited env vars", () => {
+    const env = buildTmuxEnv({}, SENSITIVE_BASE);
+    expect("ARBITRARY_VAR" in env).toBe(false);
+  });
+
+  test("includes normalized LANG", () => {
+    const env = buildTmuxEnv({}, { LANG: "C" });
+    expect(env["LANG"]).toBe("en_US.UTF-8");
+  });
+
+  test("includes normalized LC_ALL", () => {
+    const env = buildTmuxEnv({}, { LC_ALL: "POSIX" });
+    expect(env["LC_ALL"]).toBe("en_US.UTF-8");
+  });
+
+  test("includes normalized LC_CTYPE", () => {
+    const env = buildTmuxEnv({}, { LC_CTYPE: "en_US.ISO-8859-1" });
+    expect(env["LC_CTYPE"]).toBe("en_US.UTF-8");
+  });
+
+  test("includes normalized TERM (dumb → xterm-256color)", () => {
+    const env = buildTmuxEnv({}, { TERM: "dumb" });
+    expect(env["TERM"]).toBe("xterm-256color");
+  });
+
+  test("includes normalized COLORTERM default", () => {
+    const env = buildTmuxEnv({}, {});
+    expect(env["COLORTERM"]).toBe("truecolor");
+  });
+
+  test("preserves explicit UTF-8 LANG", () => {
+    const env = buildTmuxEnv({}, { LANG: "ja_JP.UTF-8" });
+    expect(env["LANG"]).toBe("ja_JP.UTF-8");
+  });
+
+  test("preserves explicit TERM when not dumb", () => {
+    const env = buildTmuxEnv({}, { TERM: "screen-256color" });
+    expect(env["TERM"]).toBe("screen-256color");
+  });
+
+  test("includes explicit ATOMIC_AGENT", () => {
+    const env = buildTmuxEnv({ ATOMIC_AGENT: "copilot" }, {});
+    expect(env["ATOMIC_AGENT"]).toBe("copilot");
+  });
+
+  test("includes explicit COPILOT_CUSTOM_INSTRUCTIONS_DIRS", () => {
+    const env = buildTmuxEnv({ COPILOT_CUSTOM_INSTRUCTIONS_DIRS: "/a:/b" }, {});
+    expect(env["COPILOT_CUSTOM_INSTRUCTIONS_DIRS"]).toBe("/a:/b");
+  });
+
+  test("explicit env wins over baseEnv for terminal keys", () => {
+    const env = buildTmuxEnv({ LANG: "de_DE.UTF-8", TERM: "screen" }, { LANG: "C", TERM: "dumb" });
+    expect(env["LANG"]).toBe("de_DE.UTF-8");
+    expect(env["TERM"]).toBe("screen");
+  });
+
+  test("only TERMINAL_ENV_KEYS + explicit vars — no leakage", () => {
+    const env = buildTmuxEnv({ ATOMIC_AGENT: "claude" }, SENSITIVE_BASE);
+    const envKeys = Object.keys(env);
+    const allowedKeys = new Set([...(TERMINAL_ENV_KEYS as readonly string[]), "ATOMIC_AGENT"]);
+    const leaked = envKeys.filter((k) => !allowedKeys.has(k));
+    expect(leaked).toEqual([]);
+  });
+
+  test("all TERMINAL_ENV_KEYS present with empty baseEnv", () => {
+    const env = buildTmuxEnv({}, {});
+    for (const key of TERMINAL_ENV_KEYS) {
+      expect(key in env).toBe(true);
+    }
   });
 });

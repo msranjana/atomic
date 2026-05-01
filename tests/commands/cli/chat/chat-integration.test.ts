@@ -30,6 +30,7 @@ import {
   resolveChatCommand,
   buildLauncherEnv,
   buildSpawnEnv,
+  buildTmuxEnv,
   TERMINAL_ENV_KEYS,
 } from "../../../../src/commands/cli/chat/index.ts";
 
@@ -218,5 +219,106 @@ describe("buildSpawnEnv – direct spawn env", () => {
     expect(env["LANG"]).toBe("en_US.UTF-8");
     expect(env["TERM"]).toBe("xterm-256color");
     expect(env["COLORTERM"]).toBe("truecolor");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildTmuxEnv — minimal env for tmux createSession (TTY path)
+// ---------------------------------------------------------------------------
+
+describe("buildTmuxEnv – tmux session env (chat wiring)", () => {
+  const LEAKY_BASE: NodeJS.ProcessEnv = {
+    GH_TOKEN: "ghp_secret",
+    COPILOT_GITHUB_TOKEN: "ghu_secret",
+    ANTHROPIC_API_KEY: "sk-ant-secret",
+    OPENAI_API_KEY: "sk-openai-secret",
+    HOME: "/home/user",
+    PATH: "/usr/bin:/bin",
+    ARBITRARY_VAR: "do-not-leak",
+    LANG: "en_US.UTF-8",
+    LC_ALL: "en_US.UTF-8",
+    LC_CTYPE: "en_US.UTF-8",
+    TERM: "xterm-256color",
+    COLORTERM: "truecolor",
+  };
+
+  test("excludes GH_TOKEN from inherited env", () => {
+    const env = buildTmuxEnv({}, LEAKY_BASE);
+    expect("GH_TOKEN" in env).toBe(false);
+  });
+
+  test("excludes COPILOT_GITHUB_TOKEN from inherited env", () => {
+    const env = buildTmuxEnv({}, LEAKY_BASE);
+    expect("COPILOT_GITHUB_TOKEN" in env).toBe(false);
+  });
+
+  test("excludes ANTHROPIC_API_KEY from inherited env", () => {
+    const env = buildTmuxEnv({}, LEAKY_BASE);
+    expect("ANTHROPIC_API_KEY" in env).toBe(false);
+  });
+
+  test("excludes OPENAI_API_KEY from inherited env", () => {
+    const env = buildTmuxEnv({}, LEAKY_BASE);
+    expect("OPENAI_API_KEY" in env).toBe(false);
+  });
+
+  test("excludes HOME and PATH from inherited env", () => {
+    const env = buildTmuxEnv({}, LEAKY_BASE);
+    expect("HOME" in env).toBe(false);
+    expect("PATH" in env).toBe(false);
+  });
+
+  test("excludes arbitrary inherited vars", () => {
+    const env = buildTmuxEnv({}, LEAKY_BASE);
+    expect("ARBITRARY_VAR" in env).toBe(false);
+  });
+
+  test("includes normalized LANG, LC_ALL, LC_CTYPE, TERM, COLORTERM", () => {
+    const env = buildTmuxEnv({}, { LANG: "C", TERM: "dumb" });
+    expect(env["LANG"]).toBe("en_US.UTF-8");
+    expect(env["LC_ALL"]).toBe("en_US.UTF-8");
+    expect(env["LC_CTYPE"]).toBe("en_US.UTF-8");
+    expect(env["TERM"]).toBe("xterm-256color");
+    expect(env["COLORTERM"]).toBe("truecolor");
+  });
+
+  test("all TERMINAL_ENV_KEYS present", () => {
+    const env = buildTmuxEnv({}, {});
+    for (const key of TERMINAL_ENV_KEYS) {
+      expect(key in env).toBe(true);
+    }
+  });
+
+  test("includes explicit ATOMIC_AGENT", () => {
+    const env = buildTmuxEnv({ ATOMIC_AGENT: "copilot" }, LEAKY_BASE);
+    expect(env["ATOMIC_AGENT"]).toBe("copilot");
+  });
+
+  test("includes explicit COPILOT_CUSTOM_INSTRUCTIONS_DIRS", () => {
+    const env = buildTmuxEnv({ COPILOT_CUSTOM_INSTRUCTIONS_DIRS: "/workspace/.github" }, LEAKY_BASE);
+    expect(env["COPILOT_CUSTOM_INSTRUCTIONS_DIRS"]).toBe("/workspace/.github");
+  });
+
+  test("only TERMINAL_ENV_KEYS + explicit vars — no leakage from sensitive base", () => {
+    const env = buildTmuxEnv({ ATOMIC_AGENT: "copilot", COPILOT_CUSTOM_INSTRUCTIONS_DIRS: "/x" }, LEAKY_BASE);
+    const allowedKeys = new Set([
+      ...(TERMINAL_ENV_KEYS as readonly string[]),
+      "ATOMIC_AGENT",
+      "COPILOT_CUSTOM_INSTRUCTIONS_DIRS",
+    ]);
+    const leaked = Object.keys(env).filter((k) => !allowedKeys.has(k));
+    expect(leaked).toEqual([]);
+  });
+
+  test("buildTmuxEnv is distinct from buildSpawnEnv — no full env inheritance", () => {
+    const base: NodeJS.ProcessEnv = { HOME: "/root", PATH: "/usr/bin", GH_TOKEN: "ghp_x", LANG: "en_US.UTF-8", TERM: "xterm-256color", COLORTERM: "truecolor" };
+    const tmuxEnv = buildTmuxEnv({}, base);
+    const spawnEnv = buildSpawnEnv({}, base);
+    // spawnEnv has full env
+    expect(spawnEnv["HOME"]).toBe("/root");
+    expect(spawnEnv["GH_TOKEN"]).toBe("ghp_x");
+    // tmuxEnv does not
+    expect("HOME" in tmuxEnv).toBe(false);
+    expect("GH_TOKEN" in tmuxEnv).toBe(false);
   });
 });
