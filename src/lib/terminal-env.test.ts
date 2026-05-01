@@ -178,4 +178,47 @@ describe("buildLauncherEnv", () => {
     );
     expect(nonTerminalKeys).toEqual([]);
   });
+
+  test("excludes secret env vars: GH_TOKEN, COPILOT_GITHUB_TOKEN, ANTHROPIC_API_KEY", () => {
+    const base = {
+      LANG: "en_US.UTF-8",
+      TERM: "xterm-256color",
+      COLORTERM: "truecolor",
+      GH_TOKEN: "ghp_secret",
+      COPILOT_GITHUB_TOKEN: "ghu_secret",
+      ANTHROPIC_API_KEY: "sk-ant-secret",
+      HOME: "/home/user",
+      PATH: "/usr/bin:/bin",
+    };
+    const env = buildLauncherEnv({}, base);
+    expect("GH_TOKEN" in env).toBe(false);
+    expect("COPILOT_GITHUB_TOKEN" in env).toBe(false);
+    expect("ANTHROPIC_API_KEY" in env).toBe(false);
+    expect("HOME" in env).toBe(false);
+    expect("PATH" in env).toBe(false);
+    // terminal keys still present
+    expect(env["LANG"]).toBe("en_US.UTF-8");
+    expect(env["TERM"]).toBe("xterm-256color");
+    expect(env["COLORTERM"]).toBe("truecolor");
+  });
+
+  test("buildSpawnEnv preserves full inherited env including non-terminal keys", () => {
+    const base = {
+      HOME: "/home/user",
+      PATH: "/usr/bin:/bin",
+      GH_TOKEN: "ghp_secret",
+      LANG: "C",
+      TERM: "dumb",
+    };
+    const env = buildSpawnEnv({ MY_EXPLICIT: "yes" }, base);
+    // full env inherited
+    expect(env["HOME"]).toBe("/home/user");
+    expect(env["PATH"]).toBe("/usr/bin:/bin");
+    expect(env["GH_TOKEN"]).toBe("ghp_secret");
+    // normalization applied
+    expect(env["LANG"]).toBe("en_US.UTF-8");
+    expect(env["TERM"]).toBe("xterm-256color");
+    // explicit override present
+    expect(env["MY_EXPLICIT"]).toBe("yes");
+  });
 });
