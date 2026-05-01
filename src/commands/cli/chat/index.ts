@@ -46,12 +46,14 @@ import { ensureTmuxInstalled } from "../../../lib/spawn.ts";
 import {
   buildLauncherEnv,
   buildSpawnEnv,
+  buildTmuxEnv,
 } from "../../../lib/terminal-env.ts";
 import { resolveCopilotCliPath } from "../../../sdk/providers/copilot.ts";
 
 export {
   buildLauncherEnv,
   buildSpawnEnv,
+  buildTmuxEnv,
   TERMINAL_ENV_KEYS,
   type TerminalEnvKey,
 } from "../../../lib/terminal-env.ts";
@@ -316,6 +318,7 @@ export async function chatCommand(options: ChatCommandOptions = {}): Promise<num
 
   const spawnEnv = buildSpawnEnv(envVars);
   const launcherEnv = buildLauncherEnv(envVars);
+  const tmuxEnv = buildTmuxEnv(envVars);
 
   // ── No TTY: tmux attach requires a real terminal ──
   if (!process.stdin.isTTY) {
@@ -358,7 +361,7 @@ export async function chatCommand(options: ChatCommandOptions = {}): Promise<num
 
   // ── Create session on the atomic socket and attach ──
   try {
-    const paneId = createSession(windowName, shellCmd, undefined, projectRoot, spawnEnv);
+    const paneId = createSession(windowName, shellCmd, undefined, projectRoot, tmuxEnv);
     spawnAttachedFooter(windowName, paneId, agentType);
     killSessionOnPaneExit(windowName, paneId);
 

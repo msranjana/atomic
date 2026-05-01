@@ -1,10 +1,3 @@
-/**
- * Terminal environment normalization utilities.
- *
- * Ensures UTF-8 locale and sane terminal defaults suitable for
- * Bun `env` fields and shell launcher exports.
- */
-
 const UTF8_RE = /utf-?8/i;
 
 function isUtf8(value: string): boolean {
@@ -17,7 +10,6 @@ const DEFAULT_COLORTERM = "truecolor";
 
 const LOCALE_KEYS = ["LANG", "LC_ALL", "LC_CTYPE"] as const;
 
-/** Terminal-related env keys that should be forwarded to launcher scripts. */
 export const TERMINAL_ENV_KEYS = [
   "LANG",
   "LC_ALL",
@@ -28,17 +20,6 @@ export const TERMINAL_ENV_KEYS = [
 
 export type TerminalEnvKey = (typeof TERMINAL_ENV_KEYS)[number];
 
-/**
- * Build a string-only environment record with normalized UTF-8 locale
- * and sane terminal defaults, derived from `baseEnv`.
- *
- * - `LANG`, `LC_ALL`, `LC_CTYPE`: preserved when already UTF-8; otherwise
- *   replaced with `en_US.UTF-8`.
- * - `TERM`: preserved when set and not `dumb`; defaults to `xterm-256color`.
- * - `COLORTERM`: preserved when set; defaults to `truecolor`.
- * - All other keys from `baseEnv` are carried through unchanged (string
- *   values only — `undefined` entries are dropped).
- */
 export function normalizedTerminalEnv(
   baseEnv: NodeJS.ProcessEnv = process.env,
 ): Record<string, string> {
@@ -69,15 +50,6 @@ export function normalizedTerminalEnv(
   return result;
 }
 
-/**
- * Merge explicit `envVars` on top of {@link normalizedTerminalEnv} defaults.
- *
- * Explicit keys in `envVars` always win. Missing terminal env keys still
- * receive sane defaults from `normalizedTerminalEnv`.
- *
- * @param envVars - Caller-supplied overrides (explicit values win).
- * @param baseEnv - Source environment; defaults to `process.env`.
- */
 export function mergeTerminalEnv(
   envVars: Record<string, string> = {},
   baseEnv: NodeJS.ProcessEnv = process.env,
@@ -86,11 +58,6 @@ export function mergeTerminalEnv(
   return { ...defaults, ...envVars };
 }
 
-/**
- * Pick only {@link TERMINAL_ENV_KEYS} from a string-keyed env record.
- *
- * Keys absent in `env` are omitted from the result; no defaults are applied.
- */
 export function pickTerminalEnv(
   env: Record<string, string>,
 ): Partial<Record<TerminalEnvKey, string>> {
@@ -103,15 +70,6 @@ export function pickTerminalEnv(
   return result;
 }
 
-/**
- * Build an env record for `spawnDirect` / child-process spawning.
- *
- * Inherits the full normalized environment (all keys) from `baseEnv`,
- * then overlays explicit `explicitEnv` overrides.
- *
- * @param explicitEnv - Caller-supplied overrides; always win.
- * @param baseEnv     - Source environment; defaults to `process.env`.
- */
 export function buildSpawnEnv(
   explicitEnv: Record<string, string>,
   baseEnv: NodeJS.ProcessEnv = process.env,
@@ -119,20 +77,24 @@ export function buildSpawnEnv(
   return mergeTerminalEnv(explicitEnv, baseEnv);
 }
 
-/**
- * Build an env record for launcher scripts / shell wrappers.
- *
- * Only the terminal-relevant keys ({@link TERMINAL_ENV_KEYS}) are inherited
- * from `baseEnv`, preventing full `process.env` from leaking into scripts.
- * Explicit `explicitEnv` overrides are then merged on top.
- *
- * @param explicitEnv - Caller-supplied overrides; always win.
- * @param baseEnv     - Source environment; defaults to `process.env`.
- */
-export function buildLauncherEnv(
+function buildMinimalEnv(
   explicitEnv: Record<string, string>,
   baseEnv: NodeJS.ProcessEnv = process.env,
 ): Record<string, string> {
   const terminalEnv = pickTerminalEnv(normalizedTerminalEnv(baseEnv));
   return { ...terminalEnv, ...explicitEnv };
+}
+
+export function buildLauncherEnv(
+  explicitEnv: Record<string, string>,
+  baseEnv: NodeJS.ProcessEnv = process.env,
+): Record<string, string> {
+  return buildMinimalEnv(explicitEnv, baseEnv);
+}
+
+export function buildTmuxEnv(
+  explicitEnv: Record<string, string>,
+  baseEnv: NodeJS.ProcessEnv = process.env,
+): Record<string, string> {
+  return buildMinimalEnv(explicitEnv, baseEnv);
 }
