@@ -152,12 +152,13 @@ locale-gen en_US.UTF-8
 
 # Step 4: set system default locale when update-locale is available
 if command -v update-locale >/dev/null 2>&1; then
-    update-locale LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
+    update-locale LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 LC_CTYPE=en_US.UTF-8
 fi
 
 cat > /etc/profile.d/atomic-locale.sh <<'LOCALE_EOF'
 export LANG="${LANG:-en_US.UTF-8}"
 export LC_ALL="${LC_ALL:-en_US.UTF-8}"
+export LC_CTYPE="${LC_CTYPE:-en_US.UTF-8}"
 LOCALE_EOF
 chmod 644 /etc/profile.d/atomic-locale.sh
 
@@ -168,6 +169,7 @@ if [ -f /etc/bash.bashrc ] && ! grep -q 'atomic-locale' /etc/bash.bashrc 2>/dev/
 # atomic-locale: ensure UTF-8 for agent CLI Unicode rendering
 export LANG="${LANG:-en_US.UTF-8}"
 export LC_ALL="${LC_ALL:-en_US.UTF-8}"
+export LC_CTYPE="${LC_CTYPE:-en_US.UTF-8}"
 BASHRC_LOCALE_EOF
 fi
 
@@ -178,6 +180,7 @@ if [ -f /etc/zsh/zshrc ] && ! grep -q 'atomic-locale' /etc/zsh/zshrc 2>/dev/null
 # atomic-locale: ensure UTF-8 for agent CLI Unicode rendering
 export LANG="${LANG:-en_US.UTF-8}"
 export LC_ALL="${LC_ALL:-en_US.UTF-8}"
+export LC_CTYPE="${LC_CTYPE:-en_US.UTF-8}"
 ZSHRC_LOCALE_EOF
 fi
 
@@ -190,6 +193,9 @@ if not set -q LANG
 end
 if not set -q LC_ALL
     set -gx LC_ALL en_US.UTF-8
+end
+if not set -q LC_CTYPE
+    set -gx LC_CTYPE en_US.UTF-8
 end
 FISH_LOCALE_EOF
     chmod 644 /etc/fish/conf.d/atomic-locale.fish
