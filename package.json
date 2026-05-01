@@ -57,7 +57,7 @@
   ],
   "scripts": {
     "dev": "bun run src/cli.ts",
-    "build": "rm -rf dist && bunx tsc --project tsconfig.build.json",
+    "build": "bun run src/scripts/clean-dist.ts && bunx tsc --project tsconfig.build.json",
     "prepack": "bun run build",
     "test": "bun test --parallel ./src ./tests",
     "test:coverage": "bun test --coverage ./src ./tests",
