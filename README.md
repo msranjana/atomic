@@ -283,7 +283,10 @@ Every chat and workflow runs inside an isolated [tmux](https://github.com/tmux/t
 atomic session list              # all sessions
 atomic session connect           # interactive fuzzy picker
 atomic session connect <name>    # by name
-atomic session kill <name>       # kill one (or all, with confirmation)
+atomic session kill              # interactive multi-select
+atomic session kill <name>       # kill one session by name
+atomic session kill --all        # select all matching sessions, then confirm
+atomic session kill --all --yes  # kill all matching sessions without prompts
 ```
 
 Session names follow `atomic-chat-<id>` or `atomic-wf-<workflow>-<id>`. Scope with `atomic chat session …` or `atomic workflow session …`.
@@ -1080,7 +1083,7 @@ During `atomic chat`, there is no Atomic-owned TUI — `atomic chat -a <agent>` 
 | `atomic workflow list`          | List available workflows, grouped by source                       |
 | `atomic session list`           | List all running sessions on the atomic tmux socket               |
 | `atomic session connect [name]` | Attach to a session (interactive picker when no name given)       |
-| `atomic session kill [name]`    | Kill a session by name, or all sessions when no name is given     |
+| `atomic session kill [name]`    | Kill one session, or pick sessions interactively when no name is given |
 | `atomic completions <shell>`    | Output shell completion script (bash, zsh, fish, powershell)      |
 | `atomic config set <k> <v>`     | Set configuration values (supports `telemetry` and `scm`)         |
 
@@ -1096,19 +1099,19 @@ During `atomic chat`, there is no Atomic-owned TUI — `atomic chat -a <agent>` 
 
 Available at three levels — scoped or global:
 
-| Command                                  | Description                                           |
-| ---------------------------------------- | ----------------------------------------------------- |
-| `atomic session list`                    | List all running sessions                             |
-| `atomic session connect [name]`          | Attach to a session (interactive picker when no name) |
-| `atomic session kill [name]`             | Kill a session, or all sessions when no name is given |
-| `atomic chat session list`               | List running chat sessions only                       |
-| `atomic chat session connect [name]`     | Attach to a chat session                              |
-| `atomic chat session kill [name]`        | Kill a chat session, or all chat sessions             |
-| `atomic workflow session list`           | List running workflow sessions only                   |
-| `atomic workflow session connect [name]` | Attach to a workflow session                          |
-| `atomic workflow session kill [name]`    | Kill a workflow session, or all workflow sessions     |
+| Command                                  | Description                                             |
+| ---------------------------------------- | ------------------------------------------------------- |
+| `atomic session list`                    | List all running sessions                               |
+| `atomic session connect [name]`          | Attach to a session (interactive picker when no name)   |
+| `atomic session kill [name]`             | Kill one session, or interactively pick sessions        |
+| `atomic chat session list`               | List running chat sessions only                         |
+| `atomic chat session connect [name]`     | Attach to a chat session                                |
+| `atomic chat session kill [name]`        | Kill one chat session, or interactively pick chat sessions |
+| `atomic workflow session list`           | List running workflow sessions only                     |
+| `atomic workflow session connect [name]` | Attach to a workflow session                            |
+| `atomic workflow session kill [name]`    | Kill one workflow session, or interactively pick workflow sessions |
 
-`list`, `connect`, and `kill` accept `-a <agent>` (repeatable) to filter by agent. `kill` prompts for confirmation.
+`list`, `connect`, and `kill` accept `-a <agent>` (repeatable) to filter by agent. `kill` confirms before terminating sessions unless `-y` / `--yes` is passed. When no session name is given, `kill` opens a checkbox picker with an "All matching sessions" option; use `--all` to skip the picker and preselect every matching session.
 
 ```bash
 atomic session list                      # all sessions
@@ -1117,8 +1120,11 @@ atomic session connect my-session        # attach by name
 atomic session connect                   # interactive picker
 atomic chat session list -a copilot      # chat sessions for Copilot only
 atomic session kill my-session           # kill one session by name
-atomic session kill                      # kill all sessions (with confirmation)
-atomic workflow session kill -a claude   # kill all Claude workflow sessions
+atomic session kill                      # choose sessions with a multi-select picker
+atomic session kill --all                # kill all sessions after confirmation
+atomic session kill --all --yes          # kill all sessions without prompts
+atomic workflow session kill -a claude   # choose Claude workflow sessions to kill
+atomic workflow session kill -a claude --all --yes
 ```
 
 #### `atomic chat` Flags
