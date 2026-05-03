@@ -37,6 +37,7 @@ import {
 import { installGlobalAgents } from "./agents.ts";
 import { installGlobalSkills } from "./skills.ts";
 import { seedGlobalAdditionalInstructions } from "../config/additional-instructions.ts";
+import { seedGlobalProviderEnvVars } from "../config/settings.ts";
 
 /** Path to the version marker. Honors ATOMIC_SETTINGS_HOME for tests. */
 function syncMarkerPath(): string {
@@ -111,6 +112,7 @@ export async function autoSyncIfStale(): Promise<void> {
         silentStep(installGlobalAgents),
         silentStep(upgradeGlobalToolPackages),
         silentStep(installGlobalSkills),
+        silentStep(seedGlobalProviderEnvVars),
       ];
 
   // All steps run in parallel and silently. Failures are swallowed so the

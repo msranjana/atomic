@@ -14,7 +14,7 @@ import { homedir } from "node:os";
 import { SETTINGS_SCHEMA_URL } from "./settings-schema.ts";
 import { ensureDir } from "../system/copy.ts";
 import { errorMessage } from "../../sdk/errors.ts";
-import type { AgentKey, ProviderOverrides } from "./definitions.ts";
+import { getAgentKeys, type AgentKey, type ProviderOverrides } from "./definitions.ts";
 import type { ScmProvider } from "./atomic-config.ts";
 
 interface AtomicSettings {
@@ -99,5 +99,46 @@ export async function setScmProvider(scm: ScmProvider): Promise<void> {
     await writeGlobalSettings(settings);
   } catch (e) {
     console.warn(`[settings] failed to set scm: ${errorMessage(e)}`);
+  }
+}
+
+/**
+ * Seed `COLORTERM=truecolor` into each agent's `providers.<agent>.envVars`
+ * in `~/.atomic/settings.json` on install / version bump.
+ *
+ * The runtime default in `lib/terminal-env.ts` already injects
+ * `COLORTERM=truecolor` for every spawned agent — this seed surfaces that
+ * default in the user-editable settings file so users with terminals that
+ * misbehave on truecolor have a discoverable place to override it (set
+ * to `""`, `256color`, etc.).
+ *
+ * Only writes a key when it isn't already present, so user edits — including
+ * an explicit empty-string override — are preserved across upgrades.
+ */
+export async function seedGlobalProviderEnvVars(): Promise<void> {
+  try {
+    const settings = await loadSettingsFile(globalSettingsPath());
+    const providers: Partial<Record<AgentKey, ProviderOverrides>> =
+      settings.providers ?? {};
+
+    let changed = false;
+    for (const agentKey of getAgentKeys()) {
+      const provider: ProviderOverrides = providers[agentKey] ?? {};
+      const envVars: Record<string, string> = provider.envVars ?? {};
+      if ("COLORTERM" in envVars) continue;
+      envVars.COLORTERM = "truecolor";
+      provider.envVars = envVars;
+      providers[agentKey] = provider;
+      changed = true;
+    }
+
+    if (!changed) return;
+
+    settings.providers = providers;
+    await writeGlobalSettings(settings);
+  } catch (e) {
+    console.warn(
+      `[settings] failed to seed provider envVars: ${errorMessage(e)}`,
+    );
   }
 }
