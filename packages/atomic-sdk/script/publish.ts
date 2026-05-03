@@ -19,8 +19,17 @@ for (const [key, src] of Object.entries(originalExports as Record<string, string
 pkg.exports = rewritten;
 
 await Bun.write(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
+
+// Default prerelease versions to the `next` tag so `latest` is reserved for stable.
+const defaultTag = (pkg.version as string).includes("-") ? "next" : "latest";
+const tag = process.env.NPM_TAG ?? defaultTag;
+// Provenance requires GitHub Actions OIDC — only enable in CI.
+const args = ["publish", "--access", "public", "--tag", tag];
+if (process.env.GITHUB_ACTIONS === "true") args.push("--provenance");
+
 try {
-  await $`cd ${SDK_PKG_ROOT} && npm publish --provenance --access public --tag ${process.env.NPM_TAG ?? "latest"}`;
+  const result = Bun.spawnSync(["npm", ...args], { cwd: SDK_PKG_ROOT, stdio: ["inherit", "inherit", "inherit"] });
+  if (result.exitCode !== 0) process.exit(result.exitCode ?? 1);
 } finally {
   // Always restore so dev checkouts keep resolving to src/.
   pkg.exports = originalExports;
