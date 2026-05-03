@@ -1,37 +1,47 @@
 #!/usr/bin/env bun
 /**
- * Removes the dist directory relative to the repo root.
+ * Removes the dist directories for both packages/atomic and packages/atomic-sdk.
  *
  * Usage:
- *   bun run src/scripts/clean-dist.ts
+ *   bun run script/clean-dist.ts
  */
 
 import { rm, access } from "node:fs/promises";
-import { resolve } from "node:path";
+import { join } from "node:path";
+import { findRepoRoot } from "../src/lib/workspace-paths.ts";
 
-const ROOT = resolve(import.meta.dir, "../..");
-const DIST = resolve(ROOT, "dist");
+const WORKSPACE_ROOT = findRepoRoot(import.meta.dir);
+
+const DEFAULT_DIST_DIRS: readonly string[] = [
+  join(WORKSPACE_ROOT, "packages", "atomic", "dist"),
+  join(WORKSPACE_ROOT, "packages", "atomic-sdk", "dist"),
+];
 
 /**
- * Removes the repo-local dist directory and verifies it no longer exists.
+ * Removes dist directories and verifies they no longer exist.
  *
- * @throws {Error} with path-specific message if dist still exists after removal.
+ * @param targetDirs - Directories to remove. Defaults to workspace dist dirs.
+ * @throws {Error} with path-specific message if any dir still exists after removal.
  */
-export async function cleanDist(): Promise<void> {
-  await rm(DIST, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+export async function cleanDist(targetDirs: readonly string[] = DEFAULT_DIST_DIRS): Promise<void> {
+  for (const dist of targetDirs) {
+    await rm(dist, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 
-  const stillExists = await access(DIST).then(
-    () => true,
-    () => false,
-  );
+    const stillExists = await access(dist).then(
+      () => true,
+      () => false,
+    );
 
-  if (stillExists) {
-    throw new Error(`Cleanup failed: "${DIST}" still exists after removal`);
+    if (stillExists) {
+      throw new Error(`Cleanup failed: "${dist}" still exists after removal`);
+    }
   }
 }
 
 // Run when executed directly (not imported).
 if (import.meta.main) {
   await cleanDist();
-  console.log(`Removed: ${DIST}`);
+  for (const dist of DEFAULT_DIST_DIRS) {
+    console.log(`Removed: ${dist}`);
+  }
 }
