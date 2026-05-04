@@ -19,11 +19,15 @@
 
 /**
  * True when `dir` lives inside a Bun-compiled binary's virtual filesystem.
- * Compiled Bun executables expose bundled resources under `/$bunfs/`
- * (POSIX) or `\$bunfs\` (Windows, currently inferred — see RFC §9).
+ *
+ * POSIX exposes bundled resources under `/$bunfs/`. Windows uses a different
+ * shape: `<DRIVE>:\~BUN\root\...` (or forward-slash variant `<DRIVE>:/~BUN/root/...`).
+ * See oven-sh/bun#25500 and oven-sh/bun#8476 — the upstream Single-File
+ * Executable docs are the source of truth here.
  */
 export function isCompiledBinaryRuntime(dir: string): boolean {
-  return dir.startsWith("/$bunfs/") || dir.startsWith("\\$bunfs\\");
+  if (dir.startsWith("/$bunfs/") || dir.startsWith("\\$bunfs\\")) return true;
+  return /^[a-z]:[\\/]~BUN[\\/]/i.test(dir);
 }
 
 /**
