@@ -54,12 +54,16 @@ coveragePathIgnorePatterns = [
   "packages/atomic/src/commands/cli/init.ts",
   "packages/atomic/src/commands/cli/init/**",
   "packages/atomic/src/commands/cli/chat/**",
+  # Self-install orchestrators wrap PowerShell / registry / rc-file I/O;
+  # pure helpers are covered by install.test.ts.
+  "packages/atomic/src/commands/cli/install.ts",
   # Build/release scripts (exercised by integration tests, not unit covered)
   "packages/atomic/script/clean-dist.ts",
   "packages/atomic/script/publish.ts",
   "packages/atomic/script/build.ts",
   "packages/atomic/script/bundle-configs.ts",
   "packages/atomic/script/build-assets.ts",
+  "packages/atomic/script/release-assets.ts",
   "packages/atomic-sdk/script/build.ts",
   "packages/atomic-sdk/script/publish.ts",
   # Standalone scratch projects at the repo root — not part of the

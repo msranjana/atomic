@@ -391,12 +391,13 @@ describe("waitForInflightDrained", () => {
     mockStdin(JSON.stringify({ session_id: sessionId, agent_id: agentId }));
     await claudeInflightHookCommand("start");
 
-    // Remove the marker after 80 ms — the wait should resolve shortly after.
+    // Capture `start` before scheduling setTimeout — otherwise schedule-to-fire
+    // skew can shave a ms off `elapsed` and flake the `>= 80` assert.
+    const start = Date.now();
     setTimeout(() => {
       void rm(join(dirs.inflight, sessionId, agentId), { force: true });
     }, 80);
 
-    const start = Date.now();
     await waitForInflightDrained(sessionId, {
       timeoutMs: 2_000,
       pollIntervalMs: 25,
