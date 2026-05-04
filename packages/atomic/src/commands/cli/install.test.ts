@@ -192,6 +192,43 @@ describe("ensureCompletionsSourcedFromRc", () => {
     });
 });
 
+// ─── powershell wrapper script structure ───────────────────────────────────
+//
+// The Windows wrapper is the load-bearing piece that lets a child atomic.exe
+// surface its PATH writes (psmux/bun auto-installs) into the parent pwsh's
+// $env:Path. If any of these structural pieces drift, the wrapper silently
+// stops working — guarding here so a refactor catches the regression.
+
+describe("powershellCompletionScript wrapper", () => {
+    test("registers a Native completer (for direct atomic.exe invocations)", async () => {
+        const { powershellCompletionScript } = await import("../../completions/powershell.ts");
+        expect(powershellCompletionScript).toContain("Register-ArgumentCompleter -Native -CommandName atomic");
+    });
+
+    test("gates the wrapper function on Windows", async () => {
+        const { powershellCompletionScript } = await import("../../completions/powershell.ts");
+        expect(powershellCompletionScript).toContain("$env:OS -eq 'Windows_NT'");
+        expect(powershellCompletionScript).toContain("function atomic");
+    });
+
+    test("wrapper resolves binary at canonical install location with PATH fallback", async () => {
+        const { powershellCompletionScript } = await import("../../completions/powershell.ts");
+        expect(powershellCompletionScript).toContain("$env:LOCALAPPDATA");
+        expect(powershellCompletionScript).toContain("Get-Command atomic -CommandType Application");
+    });
+
+    test("wrapper merges HKCU\\Environment\\Path back into $env:Path", async () => {
+        const { powershellCompletionScript } = await import("../../completions/powershell.ts");
+        expect(powershellCompletionScript).toContain("[Environment]::GetEnvironmentVariable('Path', 'User')");
+        expect(powershellCompletionScript).toContain("$env:Path = ");
+    });
+
+    test("wrapper preserves the wrapped command's exit code", async () => {
+        const { powershellCompletionScript } = await import("../../completions/powershell.ts");
+        expect(powershellCompletionScript).toContain("$global:LASTEXITCODE = $exitCode");
+    });
+});
+
 // ─── cleanupOldArtifacts ───────────────────────────────────────────────────
 
 describe("cleanupOldArtifacts", () => {

@@ -3,9 +3,17 @@
  *
  * Install: atomic completions powershell | Invoke-Expression
  *   or add to $PROFILE for persistence.
+ *
+ * On Windows the script also defines an `atomic` wrapper function. When
+ * atomic auto-installs psmux/bun via winget/scoop/cargo/choco, those
+ * package managers write to `HKCU\\Environment\\Path` — the registry
+ * change persists for new shells but doesn't propagate into the parent
+ * pwsh's `$env:Path`. The wrapper invokes the real binary and then
+ * re-merges user PATH from the registry so a follow-up `psmux -V` in
+ * the same shell just works (no relogin required).
  */
 export const powershellCompletionScript = `
-Register-ArgumentCompleter -Native -CommandName atomic -ScriptBlock {
+$__AtomicCompleter = {
     param($wordToComplete, $commandAst, $cursorPosition)
 
     $tokens = $commandAst.ToString().Substring(0, $cursorPosition) -split '\\s+' |
@@ -190,6 +198,58 @@ Register-ArgumentCompleter -Native -CommandName atomic -ScriptBlock {
 
     $completions | Where-Object { $_.text -like "$wordToComplete*" } | ForEach-Object {
         [System.Management.Automation.CompletionResult]::new($_.text, $_.text, 'ParameterValue', $_.tip)
+    }
+}
+
+# Register for direct atomic.exe invocations.
+Register-ArgumentCompleter -Native -CommandName atomic -ScriptBlock $__AtomicCompleter
+
+# Windows-only: wrap the binary so PATH writes from auto-installs (psmux
+# via winget/scoop/cargo, bun via winget/scoop) become visible in this
+# shell without opening a new one. A child process (atomic.exe) cannot
+# mutate its parent's $env:Path; the wrapper re-merges user PATH from
+# the registry after each call so subsequent commands in the same
+# session see the freshly-installed binaries.
+#
+# The function shadows atomic.exe in command resolution; non-native
+# completer registration mirrors the same scriptblock so tab-complete
+# behaviour is identical whether the user hits the function or the .exe.
+if ($env:OS -eq 'Windows_NT') {
+    Register-ArgumentCompleter -CommandName atomic -ScriptBlock $__AtomicCompleter
+
+    function atomic {
+        # Prefer the canonical install location; fall back to PATH for
+        # \`bun install -g\` users and dev checkouts.
+        $bin = Join-Path $env:LOCALAPPDATA 'atomic\\bin\\atomic.exe'
+        if (-not (Test-Path $bin)) {
+            $cmd = Get-Command atomic -CommandType Application -ErrorAction SilentlyContinue |
+                Select-Object -First 1
+            if (-not $cmd) {
+                Write-Error 'atomic binary not found at the canonical install location and not on PATH'
+                return
+            }
+            $bin = $cmd.Source
+        }
+
+        & $bin @args
+        $exitCode = $LASTEXITCODE
+
+        # Re-merge HKCU\\Environment\\Path into the current shell so any
+        # entries atomic's auto-installs wrote (psmux, bun, ...) are
+        # reachable in this session without reopening it.
+        $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+        if ($userPath) {
+            $existing = @($env:Path -split ';' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+            foreach ($entry in ($userPath -split ';')) {
+                $entry = $entry.Trim()
+                if ($entry -and ($existing -notcontains $entry)) {
+                    $env:Path = "$env:Path;$entry"
+                    $existing += $entry
+                }
+            }
+        }
+
+        $global:LASTEXITCODE = $exitCode
     }
 }
 `;

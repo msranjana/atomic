@@ -260,7 +260,8 @@ jobs:
             }
           }
 
-      - name: Install atomic from npm
+      - name: Install atomic from npm (Unix)
+        if: runner.os != 'Windows'
         run: bun install -g @bastani/atomic@${{ env.RC_VERSION }}
 
       # autoSyncIfStale only runs for non-info commands (`--version` /
@@ -275,19 +276,6 @@ jobs:
           atomic --version
           atomic workflow list >/dev/null
 
-      - name: Trigger lazy auto-install via atomic workflow list (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          # ensureTmuxInstalled's Windows install paths (winget / scoop /
-          # cargo) write to user PATH via [Environment]::SetEnvironmentVariable;
-          # the change doesn't propagate to the current session, so reload
-          # from the registry before checking.
-          $userPath = [Environment]::GetEnvironmentVariable('Path','User')
-          if ($userPath) { $env:Path = "$env:Path;$userPath" }
-          atomic --version
-          atomic workflow list | Out-Null
-
       - name: Verify tmux is now on PATH (Unix)
         if: runner.os != 'Windows'
         shell: bash
@@ -296,23 +284,66 @@ jobs:
           which tmux
           tmux -V
 
-      - name: Verify psmux is now on PATH (Windows)
+      # End-to-end Windows path: install atomic, run `atomic install` (which
+      # writes the pwsh wrapper to $PROFILE), dot-source the wrapper, then
+      # verify that `atomic workflow list` (auto-installs psmux via winget /
+      # scoop / cargo / GitHub release fallback) leaves psmux reachable in
+      # *this* shell — without any manual registry reload. The wrapper is
+      # the whole point: a child atomic.exe can't mutate its parent's
+      # $env:Path, so we re-merge HKCU\Environment\Path inline after each
+      # call. If this verification step finds psmux without a manual reload,
+      # the wrapper is doing its job.
+      - name: Install + wire wrapper + auto-install + verify (Windows, in-shell)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
+          # 1. Install via bun. Binary lives in $env:USERPROFILE\.bun\bin\atomic.exe.
+          bun install -g @bastani/atomic@${{ env.RC_VERSION }}
+
+          # 2. bun writes its bin dir to user PATH; pull it into this
+          #    session so we can invoke `atomic` here.
           $userPath = [Environment]::GetEnvironmentVariable('Path','User')
           if ($userPath) { $env:Path = "$env:Path;$userPath" }
+
+          # 3. Run `atomic install` to copy the binary to its canonical
+          #    install location (%LOCALAPPDATA%\atomic\bin\atomic.exe) and
+          #    register the wrapper + completer in $PROFILE.
+          atomic install
+
+          # 4. Dot-source $PROFILE to load the freshly-written wrapper into
+          #    THIS shell. Subsequent `atomic` calls now go through the
+          #    wrapper function, which re-merges HKCU\Environment\Path
+          #    after each invocation.
+          if (-not (Test-Path $PROFILE)) {
+            throw "atomic install did not create $PROFILE"
+          }
+          . $PROFILE
+
+          # Sanity-check the wrapper is defined and shadows atomic.exe.
+          $wrapper = Get-Command atomic -ErrorAction Stop
+          if ($wrapper.CommandType -ne 'Function') {
+            throw "expected atomic to resolve to Function (the wrapper); got $($wrapper.CommandType)"
+          }
+
+          # 5. Trigger auto-install via a non-info command. autoSyncIfStale
+          #    fires inside atomic; ensureTmuxInstalled installs psmux; the
+          #    package manager writes the new bin dir to user PATH; the
+          #    wrapper then re-merges that into $env:Path on return.
+          atomic --version
+          atomic workflow list | Out-Null
+
+          # 6. Verify psmux is reachable WITHOUT any manual registry reload.
+          #    If the wrapper didn't refresh PATH, this lookup fails and the
+          #    test catches the regression.
           $mux = Get-Command psmux -ErrorAction SilentlyContinue
+          if (-not $mux) { $mux = Get-Command pmux -ErrorAction SilentlyContinue }
+          if (-not $mux) { $mux = Get-Command tmux -ErrorAction SilentlyContinue }
           if (-not $mux) {
-            $mux = Get-Command pmux -ErrorAction SilentlyContinue
+            Write-Output "===== current `$env:Path ====="
+            $env:Path -split ';' | ForEach-Object { Write-Output $_ }
+            throw "wrapper failed: no multiplexer on `$env:Path after auto-install"
           }
-          if (-not $mux) {
-            $mux = Get-Command tmux -ErrorAction SilentlyContinue
-          }
-          if (-not $mux) {
-            throw "no multiplexer (psmux/pmux/tmux) on PATH after auto-install"
-          }
-          Write-Output "multiplexer resolved: $($mux.Source)"
+          Write-Output "wrapper OK: $($mux.Name) resolves to $($mux.Source)"
 
   install-smoke:
     name: Smoke test ${{ matrix.os }} ${{ matrix.arch }}
