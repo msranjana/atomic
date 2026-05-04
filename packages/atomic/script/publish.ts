@@ -52,6 +52,9 @@ if (import.meta.main) {
   const extraArgs: string[] = [];
   if (registry) extraArgs.push(`--registry=${registry}`);
   if (process.env.GITHUB_ACTIONS === "true" && !registry) extraArgs.push("--provenance");
+  // `NPM_OTP` is for local bootstrap publishes from a 2FA-enabled account.
+  // CI runs go through OIDC trusted publishing, which bypasses 2FA.
+  if (process.env.NPM_OTP) extraArgs.push(`--otp=${process.env.NPM_OTP}`);
 
   // 1. Synthesize wrapper.
   const wrapperOut = join(CLI_PKG_ROOT, "dist", "wrapper");
@@ -75,6 +78,12 @@ if (import.meta.main) {
     { label: "wrapper", cwd: wrapperOut, requireDist: false, binPath: undefined, isWindows: false },
   ];
 
+  // Resolve each target's npm package name once for the pre-flight check.
+  const labelToName: Record<string, string> = Object.fromEntries(
+    TARGETS.map((t) => [t.name, `@bastani/atomic-${t.name}`]),
+  );
+  labelToName.wrapper = "@bastani/atomic";
+
   for (const target of targets) {
     if (target.requireDist && !existsSync(target.cwd)) {
       if (registry) {
@@ -82,6 +91,15 @@ if (import.meta.main) {
         continue;
       }
       failures.push({ pkg: target.label, reason: `missing dist dir: ${target.cwd}` });
+      continue;
+    }
+    // Pre-flight check: under OIDC trusted publishing, npm masks "publisher
+    // not configured for this package" as a generic 404 PUT, indistinguishable
+    // from a same-version republish. The post-publish stderr matcher works
+    // for token-auth (E403/EPUBLISHCONFLICT) but not for OIDC's 404, so we
+    // must skip *before* npm publish runs to avoid a false failure.
+    if (!registry && (await isPublished(labelToName[target.label], version))) {
+      console.log(`[publish] ${target.label}@${version} already published — skipping`);
       continue;
     }
     // actions/upload-artifact@v4 zips artifacts and drops Unix mode bits, so
@@ -118,4 +136,14 @@ function isAlreadyPublished(stderr: string): boolean {
   //   - HTTP 409 ("403 Forbidden" on some registries with same body)
   // Match conservatively on the textual signals.
   return /EPUBLISHCONFLICT|previously published|cannot publish over/i.test(stderr);
+}
+
+async function isPublished(name: string, version: string): Promise<boolean> {
+  // `npm view <name>@<version> version` exits 0 when the version exists, 1
+  // (with E404) when missing. Equivalent to OpenCode's `published()` check.
+  const result = Bun.spawnSync(["npm", "view", `${name}@${version}`, "version"], {
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  return result.exitCode === 0;
 }
