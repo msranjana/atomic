@@ -239,4 +239,8 @@ jobs:
                       echo "Could not locate built binary under packages/atomic/dist"
                       exit 1
                   fi
-                  bun packages/atomic/script/chat-smoke.ts "$ATOMIC" opencode
+                  for agent in opencode claude copilot; do
+                      echo "::group::chat-smoke ${agent}"
+                      bun packages/atomic/script/chat-smoke.ts "$ATOMIC" "$agent"
+                      echo "::endgroup::"
+                  done
