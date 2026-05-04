@@ -92,6 +92,14 @@ console.log("--- captured chat output ---");
 console.log(captured);
 console.log("--- assertion ---");
 
+// psmux paints pane content with `\x1B[<n>C` cursor-forward escapes between
+// fields instead of literal whitespace, so a regex anchored on `\s+` between
+// the marker and the env-var dump never matches on Windows. Strip ANSI/CSI
+// escapes once and run all assertions against the clean stream.
+// eslint-disable-next-line no-control-regex
+const ANSI_RE = /\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g;
+const cleaned = captured.replace(ANSI_RE, "");
+
 // Two independent invariants of a healthy chat launch:
 //
 //   1. agent ran INSIDE the multiplexer — the stub prints `$TMUX` / `$PSMUX`
@@ -109,8 +117,8 @@ console.log("--- assertion ---");
 const muxRe = /ATOMIC_CHAT_SMOKE\s+(?:TMUX=\S*atomic|\S*PSMUX=\S*atomic)/;
 const footerRe = new RegExp(agent.toUpperCase());
 
-const muxOk = muxRe.test(captured);
-const footerOk = footerRe.test(captured);
+const muxOk = muxRe.test(cleaned);
+const footerOk = footerRe.test(cleaned);
 
 console.log(
   `${muxOk ? "PASS" : "FAIL"}: stub agent ran inside tmux/psmux session`,
