@@ -361,15 +361,23 @@ function runPowerShell(
     bin: PSHost = "powershell.exe",
 ): string | null {
     // Use Bun.spawnSync — same shape as node:child_process.spawnSync but
-    // Bun-native, avoiding a node-compat shim hop.
-    const result = Bun.spawnSync({
-        cmd: [bin, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
-        env: { ...process.env, ...extraEnv } as Record<string, string>,
-        stdout: "pipe",
-        stderr: "pipe",
-    });
-    if (result.exitCode !== 0) return null;
-    return result.stdout.toString().replace(/\r?\n$/, "");
+    // Bun-native, avoiding a node-compat shim hop. Wrapped in try/catch
+    // because Bun.spawnSync throws ENOENT synchronously on Windows when
+    // `bin` cannot be resolved on PATH (notably when `pwsh.exe` is not
+    // installed and we're probing for it). Returning null lets callers
+    // treat "host absent" the same as "host present but errored".
+    try {
+        const result = Bun.spawnSync({
+            cmd: [bin, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
+            env: { ...process.env, ...extraEnv } as Record<string, string>,
+            stdout: "pipe",
+            stderr: "pipe",
+        });
+        if (result.exitCode !== 0) return null;
+        return result.stdout.toString().replace(/\r?\n$/, "");
+    } catch {
+        return null;
+    }
 }
 
 /**
