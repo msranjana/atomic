@@ -86,6 +86,7 @@ export async function autoSyncIfStale(): Promise<void> {
   // the file and the resolver in `additional-instructions.ts` always finds
   // a non-`undefined` path on machines that have ever run `atomic`.
   await silentStep(seedGlobalAdditionalInstructions);
+  await silentStep(seedGlobalProviderEnvVars);
 
   if (!isInstalledPackage(import.meta.dir)) return;
 
@@ -104,7 +105,6 @@ export async function autoSyncIfStale(): Promise<void> {
         silentStep(installGlobalAgents),
         silentStep(upgradeGlobalToolPackages),
         silentStep(installGlobalSkills),
-        silentStep(seedGlobalProviderEnvVars),
       ];
 
   // All steps run in parallel and silently. Failures are swallowed so the

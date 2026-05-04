@@ -25,6 +25,10 @@ const INFRA_WHITELIST = new Set<string>([
   "research/**",
   "devcontainer-features/**",
   "docs/**",
+  // Standalone scratch projects at the repo root — not part of the
+  // core packages/ tree and not in `workspaces`.
+  "rest-api/**",
+  "examples/**",
 ]);
 
 async function readPatterns(): Promise<string[]> {

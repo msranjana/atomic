@@ -30,8 +30,8 @@
   "scripts": {
     "dev": "bun run packages/atomic/src/cli.ts",
     "build": "bun run packages/atomic/script/build.ts && bun run packages/atomic-sdk/script/build.ts",
-    "test": "bun test --parallel",
-    "test:coverage": "bun test --coverage",
+    "test": "bun test --parallel packages tests",
+    "test:coverage": "bun test --coverage packages tests",
     "typecheck": "bun --filter '*' typecheck",
     "lint": "oxlint --config=oxlint.json packages",
     "lint:fix": "oxlint --config=oxlint.json --fix packages",

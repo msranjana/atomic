@@ -1,436 +1,111 @@
 # Atomic CLI Installer for Windows
 #
-# Bootstrap installer for systems that don't already have bun. Installs
-# bun (if missing) and then installs atomic from npm via bun. The CLI
-# silently syncs tooling deps and bundled skills on first launch — see
-# src/services/system/auto-sync.ts.
-#
-# If you already have bun and `bun pm bin -g` is on PATH, you can skip this
-# script entirely:
-#   bun install -g @bastani/atomic@latest
+# Modeled on Claude Code's install.ps1: download a verified prebuilt
+# binary from GitHub Releases, then hand off to `atomic install` for
+# placement, PATH wiring, mux detection, and shell completions.
 #
 # Usage:
 #   irm https://raw.githubusercontent.com/flora131/atomic/main/install.ps1 | iex
+#
+# Pin a specific version:
+#   $v = "0.4.47"; irm https://raw.githubusercontent.com/flora131/atomic/main/install.ps1 | iex
+#
+# Works on PowerShell 5.1+ — no ANSI escapes, no background jobs.
 
+param(
+    [Parameter(Position=0)]
+    [ValidatePattern('^(stable|latest|\d+\.\d+\.\d+(-[^\s]+)?)$')]
+    [string]$Target = "latest"
+)
+
+Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+$ProgressPreference = 'SilentlyContinue'
 
-$PACKAGE = "@bastani/atomic@latest"
+if (-not [Environment]::Is64BitProcess) {
+    Write-Error "atomic does not support 32-bit Windows. Please use a 64-bit version of Windows."
+    exit 1
+}
 
-# ── Rendering helpers ───────────────────────────────────────────────────────
-#
-# Mirrors install.sh's spinner + bracketed progress bar UI. Commands run
-# as background PowerShell jobs so we can animate a braille spinner while
-# they execute. Output is captured and only surfaced on failure. Falls
-# back to plain line-at-a-time rendering when stdout isn't a TTY.
+$RELEASES_BASE = "https://github.com/flora131/atomic/releases"
+$DOWNLOAD_DIR = Join-Path $env:USERPROFILE ".atomic\downloads"
 
-$script:StepTotal = 0
-$script:StepIndex = 0
-
-# Colour codes — disabled when NO_COLOR is set (https://no-color.org)
-#
-# Palette follows Catppuccin semantics (see .impeccable.md):
-#   blue   → in-flight "progress" (accent)
-#   green  → completed success
-#   red    → failed
-#   yellow → warning
-if ($null -ne $env:NO_COLOR -and $env:NO_COLOR -ne "") {
-    $script:C_RESET = ""; $script:C_DIM = ""; $script:C_BOLD = ""
-    $script:C_RED = ""; $script:C_GREEN = ""; $script:C_YELLOW = ""
-    $script:C_BLUE = ""; $script:C_CYAN = ""
+# Native ARM64 binary on ARM64 Windows; x64 otherwise.
+if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") {
+    $platform = "windows-arm64"
 } else {
-    $script:C_RESET  = "`e[0m"
-    $script:C_DIM    = "`e[2m"
-    $script:C_BOLD   = "`e[1m"
-    $script:C_RED    = "`e[31m"
-    $script:C_GREEN  = "`e[32m"
-    $script:C_YELLOW = "`e[33m"
-    $script:C_BLUE   = "`e[34m"
-    $script:C_CYAN   = "`e[36m"
+    $platform = "windows-x64"
 }
 
-function Write-Info { param($msg) Write-Host "  ${C_CYAN}info${C_RESET} $msg" }
-function Write-Warn { param($msg) Write-Host "  ${C_YELLOW}warn${C_RESET} $msg" }
-function Write-Err2 { param($msg) Write-Host "  ${C_RED}error${C_RESET} $msg" }
-
-function Get-Bar {
-    param(
-        [int]$Completed,
-        [int]$Total,
-        [ValidateSet("progress", "success", "error")][string]$State = "progress"
-    )
-    $width = 30
-    $filled = [Math]::Min($width, [int]($Completed * $width / [Math]::Max(1, $Total)))
-    $empty  = $width - $filled
-    $bar = ""
-
-    $hasTrueColor = ($env:COLORTERM -eq "truecolor" -or $env:COLORTERM -eq "24bit")
-    if ($hasTrueColor -and $filled -gt 0 -and ($null -eq $env:NO_COLOR -or $env:NO_COLOR -eq "")) {
-        switch ($State) {
-            "success" { $sr=126; $sg=201; $sb=138; $er=166; $eg=227; $eb=161 }
-            "error"   { $sr=224; $sg=108; $sb=136; $er=243; $eg=139; $eb=168 }
-            default   { $sr=242; $sg=196; $sb=120; $er=249; $eg=226; $eb=175 }
-        }
-        for ($i = 0; $i -lt $filled; $i++) {
-            if ($filled -gt 1) {
-                $t = $i / ($filled - 1)
-            } else {
-                $t = 1.0
-            }
-            $r = [int]($sr + ($er - $sr) * $t)
-            $g = [int]($sg + ($eg - $sg) * $t)
-            $b = [int]($sb + ($eb - $sb) * $t)
-            $bar += "`e[38;2;${r};${g};${b}m■"
-        }
-        $bar += "`e[0m"
-    } else {
-        $fill = switch ($State) {
-            "success" { $script:C_GREEN }
-            "error"   { $script:C_RED }
-            default   { $script:C_YELLOW }
-        }
-        $bar = "${fill}$('■' * $filled)${C_RESET}"
-    }
-
-    return "${bar}${C_DIM}$('･' * $empty)${C_RESET}"
+if (-not (Test-Path $DOWNLOAD_DIR)) {
+    New-Item -ItemType Directory -Force -Path $DOWNLOAD_DIR | Out-Null
 }
 
-function Format-Line {
-    param(
-        [string]$Glyph,
-        [int]$Fill,
-        [ValidateSet("progress", "success", "error")][string]$State = "progress",
-        [string]$Label
-    )
-    $bar = Get-Bar -Completed $Fill -Total $script:StepTotal -State $State
-    $pct = if ($script:StepTotal -gt 0) { [int]($Fill * 100 / $script:StepTotal) } else { 0 }
-    $pctStr = $pct.ToString().PadLeft(3)
-    return "  $Glyph  $bar  ${C_DIM}${pctStr}%${C_RESET}  $Label"
+# Resolve the manifest URL. `latest` and `stable` both go through
+# GitHub's `releases/latest/download/<asset>` redirect; pinned versions
+# go through `releases/download/v<version>/<asset>`.
+if ($Target -eq "latest" -or $Target -eq "stable") {
+    $manifestUrl = "$RELEASES_BASE/latest/download/manifest.json"
+} else {
+    $manifestUrl = "$RELEASES_BASE/download/v$Target/manifest.json"
 }
 
-# Run a ScriptBlock with a spinner; capture output; surface only on failure.
-#
-# Returns $true on success, $false on failure. Advances $script:StepIndex
-# only on success so the progress bar tells the truth about where we are.
-function Invoke-Step {
-    param(
-        [string]$Label,
-        [ScriptBlock]$Action
-    )
+try {
+    $manifest = Invoke-RestMethod -Uri $manifestUrl -ErrorAction Stop
+}
+catch {
+    Write-Error "Failed to fetch manifest from $manifestUrl : $_"
+    exit 1
+}
 
-    $completed = $script:StepIndex
-    $stepNo = $completed + 1
-    $isTty = -not [Console]::IsOutputRedirected
+$version = $manifest.version
+$checksum = $manifest.platforms.$platform.checksum
+if (-not $checksum) {
+    Write-Error "Platform $platform not found in manifest for version $version"
+    exit 1
+}
 
-    # Non-TTY fallback: plain line output.
-    if (-not $isTty) {
-        Write-Host -NoNewline "  [$stepNo/$($script:StepTotal)] $Label "
-        $logFile = [System.IO.Path]::GetTempFileName()
-        try {
-            & $Action *>&1 | Out-File -FilePath $logFile -Encoding utf8
-            if ($LASTEXITCODE -ne $null -and $LASTEXITCODE -ne 0) {
-                Write-Host "${C_RED}failed${C_RESET}"
-                Get-Content $logFile | ForEach-Object { Write-Host "      $_" }
-                return $false
-            }
-            Write-Host "${C_GREEN}ok${C_RESET}"
-            $script:StepIndex++
-            return $true
-        } finally {
-            Remove-Item $logFile -ErrorAction SilentlyContinue
-        }
-    }
+# Always download by pinned version URL — `releases/latest/download` is
+# unreliable mid-release, and we already know the version from the
+# manifest.
+$binaryUrl = "$RELEASES_BASE/download/v$version/atomic-$platform.exe"
+$binaryPath = Join-Path $DOWNLOAD_DIR "atomic-$version-$platform.exe"
 
-    # TTY path: spin while the action runs as a background job.
-    $logFile = [System.IO.Path]::GetTempFileName()
-    $job = Start-Job -ScriptBlock {
-        param($actText, $log)
-        try {
-            & ([ScriptBlock]::Create($actText)) *>&1 | Out-File -FilePath $log -Encoding utf8
-            if ($LASTEXITCODE -ne $null -and $LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-        } catch {
-            $_ | Out-File -FilePath $log -Encoding utf8 -Append
-            exit 1
-        }
-    } -ArgumentList $Action.ToString(), $logFile
+try {
+    Invoke-WebRequest -Uri $binaryUrl -OutFile $binaryPath -ErrorAction Stop
+}
+catch {
+    Write-Error "Failed to download binary from $binaryUrl : $_"
+    if (Test-Path $binaryPath) { Remove-Item -Force $binaryPath }
+    exit 1
+}
 
-    $frames = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
-    $i = 0
-    [Console]::Write("`e[?25l")  # hide cursor
+$actualChecksum = (Get-FileHash -Path $binaryPath -Algorithm SHA256).Hash.ToLower()
+if ($actualChecksum -ne $checksum.ToLower()) {
+    Write-Error "Checksum verification failed for $binaryPath (expected $checksum, got $actualChecksum)"
+    Remove-Item -Force $binaryPath
+    exit 1
+}
+
+# Hand off to the binary's `install` subcommand for placement +
+# PATH wiring + mux detection + completions. Claude Code does the
+# same — it keeps install logic shipped with the binary so older
+# bootstraps stay forward-compatible.
+Write-Output "Setting up atomic..."
+try {
+    & $binaryPath install
+}
+finally {
     try {
-        while ($job.State -eq 'Running') {
-            $f = $frames[$i % 10]
-            $line = Format-Line -Glyph "${C_BLUE}$f${C_RESET}" -Fill $completed -State "progress" -Label $Label
-            [Console]::Write("`r`e[2K$line")
-            Start-Sleep -Milliseconds 80
-            $i++
-        }
-        Receive-Job $job -ErrorAction SilentlyContinue | Out-Null
-        $succeeded = ($job.State -eq 'Completed')
-        [Console]::Write("`r`e[2K")
-        if ($succeeded) {
-            $script:StepIndex++
-            $line = Format-Line -Glyph "${C_GREEN}✓${C_RESET}" -Fill $script:StepIndex -State "success" -Label "${C_DIM}$Label${C_RESET}"
-            Write-Host $line
-            return $true
-        } else {
-            $line = Format-Line -Glyph "${C_RED}✗${C_RESET}" -Fill $completed -State "error" -Label $Label
-            Write-Host $line
-            if (Test-Path $logFile) {
-                Get-Content $logFile -Tail 15 | ForEach-Object {
-                    Write-Host "    ${C_DIM}$_${C_RESET}"
-                }
-            }
-            return $false
-        }
-    } finally {
-        [Console]::Write("`e[?25h")  # show cursor
-        Remove-Job $job -Force -ErrorAction SilentlyContinue
-        Remove-Item $logFile -ErrorAction SilentlyContinue
+        # Wait briefly for any file handles to release before deleting.
+        Start-Sleep -Seconds 1
+        Remove-Item -Force $binaryPath -ErrorAction SilentlyContinue
+    }
+    catch {
+        Write-Warning "Could not remove temporary file: $binaryPath"
     }
 }
 
-function Refresh-Path {
-    $env:Path = [System.Environment]::GetEnvironmentVariable('Path', 'User') + ";" +
-                [System.Environment]::GetEnvironmentVariable('Path', 'Machine')
-}
-
-# These environment helpers follow Bun's Windows installer. They write the
-# user environment registry value directly so existing %VAR% entries are not
-# accidentally expanded, then notify running shells/editors that it changed.
-function Publish-Env {
-    if (-not ("Win32.NativeMethods" -as [Type])) {
-        Add-Type -Namespace Win32 -Name NativeMethods -MemberDefinition @"
-[DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
-public static extern IntPtr SendMessageTimeout(
-    IntPtr hWnd, uint Msg, UIntPtr wParam, string lParam,
-    uint fuFlags, uint uTimeout, out UIntPtr lpdwResult);
-"@
-    }
-
-    $HWND_BROADCAST = [IntPtr]0xffff
-    $WM_SETTINGCHANGE = 0x1a
-    $result = [UIntPtr]::Zero
-    [Win32.NativeMethods]::SendMessageTimeout(
-        $HWND_BROADCAST,
-        $WM_SETTINGCHANGE,
-        [UIntPtr]::Zero,
-        "Environment",
-        2,
-        5000,
-        [ref]$result
-    ) | Out-Null
-}
-
-function Write-Env {
-    param(
-        [string]$Key,
-        [AllowNull()][string]$Value
-    )
-
-    $registerKey = Get-Item -Path 'HKCU:'
-    $envRegisterKey = $registerKey.OpenSubKey('Environment', $true)
-
-    if ($null -eq $Value) {
-        $envRegisterKey.DeleteValue($Key)
-    } else {
-        $registryValueKind = if ($Value.Contains('%')) {
-            [Microsoft.Win32.RegistryValueKind]::ExpandString
-        } elseif ($envRegisterKey.GetValue($Key)) {
-            $envRegisterKey.GetValueKind($Key)
-        } else {
-            [Microsoft.Win32.RegistryValueKind]::String
-        }
-        $envRegisterKey.SetValue($Key, $Value, $registryValueKind)
-    }
-
-    Publish-Env
-}
-
-function Get-Env {
-    param([string]$Key)
-
-    $registerKey = Get-Item -Path 'HKCU:'
-    $envRegisterKey = $registerKey.OpenSubKey('Environment')
-    $envRegisterKey.GetValue($Key, $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
-}
-
-function Get-BunGlobalBinDir {
-    $binDir = & bun pm bin -g 2>$null | Select-Object -First 1
-    if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($binDir)) {
-        return $binDir.Trim()
-    }
-
-    if (-not [string]::IsNullOrWhiteSpace($env:BUN_INSTALL_BIN)) {
-        return $env:BUN_INSTALL_BIN
-    }
-    if (-not [string]::IsNullOrWhiteSpace($env:BUN_INSTALL)) {
-        return (Join-Path $env:BUN_INSTALL "bin")
-    }
-    return (Join-Path $HOME ".bun\bin")
-}
-
-function Normalize-PathEntry {
-    param([string]$PathEntry)
-
-    if ([string]::IsNullOrWhiteSpace($PathEntry)) { return "" }
-    $value = [System.Environment]::ExpandEnvironmentVariables($PathEntry.Trim().Trim('"'))
-    while ($value.EndsWith("\") -or $value.EndsWith("/")) {
-        $value = $value.Substring(0, $value.Length - 1)
-    }
-    return $value
-}
-
-function Test-PathContains {
-    param(
-        [string]$PathValue,
-        [string]$Entry
-    )
-
-    if ([string]::IsNullOrWhiteSpace($PathValue)) { return $false }
-    $target = Normalize-PathEntry $Entry
-    foreach ($item in ($PathValue -split ';')) {
-        if ((Normalize-PathEntry $item) -ieq $target) {
-            return $true
-        }
-    }
-    return $false
-}
-
-function Ensure-BunGlobalBinOnPath {
-    $binDir = Get-BunGlobalBinDir
-    if (-not (Test-Path $binDir)) {
-        New-Item -ItemType Directory -Path $binDir -Force | Out-Null
-    }
-
-    if (-not (Test-PathContains $env:Path $binDir)) {
-        $env:Path = if ([string]::IsNullOrWhiteSpace($env:Path)) { $binDir } else { "$env:Path;$binDir" }
-    }
-
-    $userPathValue = Get-Env -Key "Path"
-    $userPath = if ([string]::IsNullOrWhiteSpace($userPathValue)) { @() } else { $userPathValue -split ';' }
-    if (-not (Test-PathContains $userPathValue $binDir)) {
-        $newUserPathEntries = @($userPath) + @($binDir)
-        $newUserPath = ($newUserPathEntries | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) -join ';'
-        Write-Env -Key 'Path' -Value $newUserPath
-        $env:Path = @($env:Path -split ';' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) -join ';'
-        if (-not (Test-PathContains $env:Path $binDir)) {
-            $env:Path = "$env:Path;$binDir"
-        }
-        Write-Info "added bun global bin to user PATH ($binDir)"
-    } else {
-        Write-Info "bun global bin already on user PATH ($binDir)"
-    }
-}
-
-# ── Installers ──────────────────────────────────────────────────────────────
-
-function Install-Bun {
-    if (Get-Command bun -ErrorAction SilentlyContinue) {
-        Write-Info "bun already installed"
-        return $true
-    }
-
-    # WinGet (preferred)
-    if (Get-Command winget -ErrorAction SilentlyContinue) {
-        $ok = Invoke-Step -Label "Installing bun (winget)" -Action {
-            winget install Oven-sh.Bun --accept-source-agreements --accept-package-agreements
-        }
-        Refresh-Path
-        if ($ok -and (Get-Command bun -ErrorAction SilentlyContinue)) { return $true }
-        Write-Warn "winget install bun failed, trying scoop"
-    }
-
-    # Scoop
-    if (Get-Command scoop -ErrorAction SilentlyContinue) {
-        $ok = Invoke-Step -Label "Installing bun (scoop)" -Action { scoop install bun }
-        if ($ok -and (Get-Command bun -ErrorAction SilentlyContinue)) { return $true }
-        Write-Warn "scoop install bun failed, trying bun.sh installer"
-    }
-
-    # Official installer
-    $ok = Invoke-Step -Label "Downloading bun" -Action {
-        powershell -c "irm bun.sh/install.ps1 | iex"
-    }
-    Refresh-Path
-    if ($ok -and (Get-Command bun -ErrorAction SilentlyContinue)) { return $true }
-
-    Write-Err2 "Could not install bun — install it manually from https://bun.sh"
-    return $false
-}
-
-function Install-Completions {
-    $profileDir = Split-Path $PROFILE -Parent
-    if (-not (Test-Path $profileDir)) {
-        New-Item -ItemType Directory -Path $profileDir -Force | Out-Null
-    }
-
-    # Cache the script to disk once; $PROFILE dot-sources it on shell
-    # start. Avoids spawning the bun runtime per-session just to print
-    # a static string, which `| Invoke-Expression` forces every time.
-    $cacheDir = Join-Path $HOME ".atomic\completions"
-    if (-not (Test-Path $cacheDir)) {
-        New-Item -ItemType Directory -Path $cacheDir -Force | Out-Null
-    }
-    $scriptPath = Join-Path $cacheDir "atomic.ps1"
-    atomic completions powershell | Out-File -FilePath $scriptPath -Encoding utf8
-
-    $marker = '# Atomic CLI completions (cached)'
-
-    # Strip legacy pipe-to-Invoke-Expression snippet if present.
-    if ((Test-Path $PROFILE) -and
-        (Select-String -Path $PROFILE -Pattern 'atomic completions powershell \| Invoke-Expression' -Quiet)) {
-        $filtered = Get-Content $PROFILE | Where-Object {
-            $_ -notmatch '^# Atomic CLI completions$' -and
-            $_ -notmatch 'atomic completions powershell \| Invoke-Expression'
-        }
-        Set-Content -Path $PROFILE -Value $filtered
-    }
-
-    if ((Test-Path $PROFILE) -and
-        (Select-String -Path $PROFILE -Pattern ([regex]::Escape($marker)) -Quiet)) {
-        return  # already installed
-    }
-    Add-Content -Path $PROFILE -Value "`n$marker`nif (Test-Path `"$scriptPath`") { . `"$scriptPath`" }"
-}
-
-# ── Main ────────────────────────────────────────────────────────────────────
-
-# Count upcoming steps so the progress bar is honest.
-$script:StepTotal = 2  # atomic install + completions
-if (-not (Get-Command bun -ErrorAction SilentlyContinue)) {
-    $script:StepTotal++
-}
-
-Write-Host ""
-
-if (-not (Install-Bun)) { exit 1 }
-
-Ensure-BunGlobalBinOnPath
-
-# Embed the package name as a literal so the scriptblock needs no closure.
-$atomicAction = [ScriptBlock]::Create("bun install -g '$PACKAGE'")
-$ok = Invoke-Step -Label "Installing @bastani/atomic" -Action $atomicAction
-if (-not $ok) {
-    Write-Err2 "Failed to install atomic"
-    exit 1
-}
-
-if (-not (Get-Command atomic -ErrorAction SilentlyContinue)) {
-    Write-Err2 "atomic installed but is not on PATH — add $(Get-BunGlobalBinDir) to PATH"
-    exit 1
-}
-
-# Best-effort: don't fail the install if completions can't be set up
-$ok = Invoke-Step -Label "Installing shell completions" -Action { Install-Completions }
-if (-not $ok) {
-    Write-Warn "Could not install PowerShell completions — run: atomic completions powershell | Invoke-Expression"
-}
-
-Write-Host ""
-Write-Host "  ${C_GREEN}✓${C_RESET} ${C_BOLD}Atomic installed successfully${C_RESET}"
-Write-Host ""
-Write-Host "    Get started:  ${C_CYAN}atomic chat -a <agent>${C_RESET}"
-Write-Host ""
-Write-Host "    ${C_DIM}Tooling deps and skills are synced silently on first launch.${C_RESET}"
-Write-Host "    ${C_DIM}To upgrade later: bun update -g @bastani/atomic${C_RESET}"
-Write-Host ""
+Write-Output ""
+Write-Output "$([char]0x2705) Installation complete!"
+Write-Output ""

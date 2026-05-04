@@ -307,6 +307,34 @@ Examples:
             process.exit(exitCode);
         });
 
+    // ── Install command ────────────────────────────────────────────────────
+    //
+    // Used by the bootstrap installers (install.ps1 / install.cmd /
+    // install.sh): they download a verified binary into a temp dir
+    // and then invoke `<temp>/atomic install`, which copies the binary
+    // into place, persists PATH, and wires up completions.
+    program
+        .command("install")
+        .description("Install atomic to PATH and set up shell completions")
+        .option("--no-completions", "Skip shell completion setup")
+        .action(async (localOpts: { completions?: boolean }) => {
+            const { installCommand } = await import("./commands/cli/install.ts");
+            const exitCode = await installCommand({
+                noCompletions: localOpts.completions === false,
+            });
+            process.exit(exitCode);
+        });
+
+    program
+        .command("uninstall")
+        .description("Remove atomic launcher, PATH entries, and shell completions")
+        .option("--purge", "Also remove ~/.atomic (config, downloads, cache)")
+        .action(async (localOpts: { purge?: boolean }) => {
+            const { uninstallCommand } = await import("./commands/cli/install.ts");
+            const exitCode = await uninstallCommand({ purge: localOpts.purge === true });
+            process.exit(exitCode);
+        });
+
     // ── Completions command ────────────────────────────────────────────────
     program
         .command("completions")

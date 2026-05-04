@@ -62,6 +62,10 @@ coveragePathIgnorePatterns = [
   "packages/atomic/script/build-assets.ts",
   "packages/atomic-sdk/script/build.ts",
   "packages/atomic-sdk/script/publish.ts",
+  # Standalone scratch projects at the repo root — not part of the
+  # core packages/ tree and not in `workspaces`.
+  "rest-api/**",
+  "examples/**",
   "node_modules/**",
   "vendor/**",
   "generated/**",

@@ -15,7 +15,7 @@
   "scripts": {
     "dev": "bun run src/cli.ts",
     "build": "bun run script/build.ts",
-    "publish": "bun run script/publish.ts",
+    "release": "bun run script/publish.ts",
     "typecheck": "bunx tsc --noEmit"
   },
   "dependencies": {
