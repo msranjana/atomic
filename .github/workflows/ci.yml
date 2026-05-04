@@ -112,3 +112,103 @@ jobs:
                   for agent in claude copilot opencode; do
                       atomic chat -a "$agent" --preflight-only
                   done
+                  # Catches the `/$bunfs/...` runtime-asset regression that
+                  # caused `atomic chat` to silently fall back to a non-tmux
+                  # spawn on every published binary. Mirrors the per-platform
+                  # check below, but exercised here against the freshly
+                  # `bun install -g`'d wrapper to cover the end-to-end
+                  # publish layout.
+                  atomic _runtime-assets-smoke
+
+    # Per-platform regression test for the bunfs-materialization bug:
+    # `with { type: "file" }` imports resolve to `/$bunfs/...` paths inside
+    # a compiled binary, which Bun APIs can read but spawned OS processes
+    # (tmux, bun run, ...) cannot. `runtime-assets.ts` copies each asset
+    # to `~/.atomic/runtime/<sdk-version>/` on first use; the smoke command
+    # asserts the materialized paths are subprocess-readable AND that
+    # tmux/psmux can actually load the conf and create a session.
+    #
+    # We run on Linux / macOS / Windows because the bug is platform-specific
+    # in two ways: the bunfs path shape differs (`/$bunfs/...` vs
+    # `<DRIVE>:\~BUN\...`), and the multiplexer (tmux vs psmux) reads the
+    # conf via different syscall paths. A regression on any one of them
+    # would re-introduce the silent-fallback behavior on that platform.
+    runtime-assets-smoke:
+        name: Runtime assets smoke (${{ matrix.os }})
+        strategy:
+            fail-fast: false
+            matrix:
+                os: [ubuntu-latest, macos-latest, windows-latest]
+        runs-on: ${{ matrix.os }}
+
+        steps:
+            - uses: actions/checkout@v6
+
+            - uses: oven-sh/setup-bun@v2
+              with:
+                  bun-version: latest
+
+            - name: Install dependencies
+              run: bun install
+
+            - name: Install tmux (Linux)
+              if: runner.os == 'Linux'
+              run: sudo apt-get update -qq && sudo apt-get install -y tmux
+
+            - name: Install tmux (macOS)
+              if: runner.os == 'macOS'
+              run: brew install tmux || true
+
+            # psmux isn't on the official chocolatey/winget feeds with a
+            # stable id we can rely on, so download the pinned GitHub
+            # release directly — same path as `installPsmuxFromGitHubRelease`
+            # in spawn.ts, but inline so the test doesn't depend on the
+            # binary it's about to test.
+            - name: Install psmux (Windows)
+              if: runner.os == 'Windows'
+              shell: pwsh
+              run: |
+                  $latest = Invoke-RestMethod -Headers @{ Accept = 'application/vnd.github+json' } `
+                      -Uri 'https://api.github.com/repos/psmux/psmux/releases/latest'
+                  $asset = $latest.assets | Where-Object { $_.name -like '*windows-x64.zip' } | Select-Object -First 1
+                  if (-not $asset) { throw 'No psmux windows-x64 release asset found' }
+                  $tmp = New-Item -ItemType Directory -Force -Path (Join-Path $env:RUNNER_TEMP 'psmux')
+                  $zip = Join-Path $tmp 'psmux.zip'
+                  Invoke-WebRequest -UseBasicParsing -Uri $asset.browser_download_url -OutFile $zip
+                  Expand-Archive -LiteralPath $zip -DestinationPath $tmp -Force
+                  $bin = Join-Path $env:LOCALAPPDATA 'Programs\psmux'
+                  New-Item -ItemType Directory -Force -Path $bin | Out-Null
+                  Get-ChildItem $tmp -Filter 'psmux.exe' -Recurse | ForEach-Object {
+                      Copy-Item $_.FullName -Destination (Join-Path $bin 'psmux.exe') -Force
+                  }
+                  echo $bin >> $env:GITHUB_PATH
+
+            - name: Build host-target binary
+              run: bun packages/atomic/script/build.ts
+
+            # Wipe any cache the build step might have warmed via dev-mode
+            # imports so the smoke step exercises the real first-run
+            # materialize-from-bunfs code path, not a hot cache.
+            - name: Clear runtime-assets cache (Unix)
+              if: runner.os != 'Windows'
+              shell: bash
+              run: rm -rf "$HOME/.atomic/runtime"
+
+            - name: Clear runtime-assets cache (Windows)
+              if: runner.os == 'Windows'
+              shell: pwsh
+              run: |
+                  $cache = Join-Path $env:USERPROFILE '.atomic\runtime'
+                  if (Test-Path $cache) { Remove-Item -Recurse -Force $cache }
+
+            - name: Run runtime-assets smoke
+              shell: bash
+              run: |
+                  set -e
+                  ATOMIC=$(find packages/atomic/dist -type f -name 'atomic*' | head -n 1)
+                  if [ -z "$ATOMIC" ]; then
+                      echo "Could not locate built binary under packages/atomic/dist"
+                      exit 1
+                  fi
+                  echo "Smoke-testing: $ATOMIC"
+                  "$ATOMIC" _runtime-assets-smoke

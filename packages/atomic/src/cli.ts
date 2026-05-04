@@ -21,7 +21,7 @@
  *   atomic --help                             Show help
  */
 
-import { Command } from "@commander-js/extra-typings";
+import { Command, Option } from "@commander-js/extra-typings";
 import { VERSION } from "./version.ts";
 import { COLORS } from "@bastani/atomic-sdk/theme/colors";
 import { AGENT_CONFIG, isValidAgent } from "./services/config/index.ts";
@@ -71,9 +71,13 @@ export function createProgram() {
         .command("chat", { isDefault: true })
         .description("Start an interactive chat session with a coding agent")
         .option("-a, --agent <name>", `Agent to chat with (${agentChoices})`)
-        .option(
-            "--preflight-only",
-            "Run onboarding preflight (global-config sync + project setup) and exit 0 without spawning the agent. Skips executable and auth checks.",
+        // Internal flag — exercised by the verdaccio smoke test and the
+        // cross-platform runtime-assets matrix in CI to run onboarding
+        // preflight (global-config sync + project setup) without spawning
+        // the agent or checking executables/auth. Hidden from `--help` so
+        // end users aren't tempted to use it.
+        .addOption(
+            new Option("--preflight-only").hideHelp(),
         )
         .allowUnknownOption()
         .allowExcessArguments(true)
@@ -288,6 +292,23 @@ Examples:
             }
             const { claudeAskHookCommand } = await import("./commands/cli/claude-ask-hook.ts");
             const exitCode = await claudeAskHookCommand(mode);
+            process.exit(exitCode);
+        });
+
+    // ── Internal: runtime-assets smoke check (CI cross-platform harness) ─
+    //
+    // Verifies that bundled runtime assets (tmux.conf, debounce script,
+    // orchestrator entry) materialize out of `/$bunfs/` to a real on-disk
+    // path and that tmux can actually load the conf. Headless — no TTY,
+    // no agent CLI, no auth.
+    program
+        .command("_runtime-assets-smoke", { hidden: true })
+        .description("Internal: verify bundled runtime assets are subprocess-readable")
+        .action(async () => {
+            const { runtimeAssetsSmokeCommand } = await import(
+                "./commands/cli/runtime-assets-smoke.ts"
+            );
+            const exitCode = await runtimeAssetsSmokeCommand();
             process.exit(exitCode);
         });
 

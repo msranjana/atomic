@@ -32,6 +32,7 @@
     "./lib/common-ignore": "./src/lib/common-ignore.ts",
     "./lib/path-root-guard": "./src/lib/path-root-guard.ts",
     "./lib/runtime-env": "./src/lib/runtime-env.ts",
+    "./lib/runtime-assets": "./src/lib/runtime-assets.ts",
     "./services/config/definitions": "./src/services/config/definitions.ts",
     "./services/config/atomic-config": "./src/services/config/atomic-config.ts",
     "./services/config/scm-sync": "./src/services/config/scm-sync.ts",
