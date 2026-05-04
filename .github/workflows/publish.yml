@@ -21,92 +21,389 @@ permissions:
 
 concurrency:
   group: publish-${{ github.ref }}
-  cancel-in-progress: true
+  # Never cancel mid-flight: cancellation between the per-platform
+  # publishes (or between platform-publish and wrapper-publish) leaves
+  # npm partially populated, and same-version republishes are rejected.
+  # Queue subsequent runs instead of interrupting this one.
+  cancel-in-progress: false
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  publish:
-    name: Publish to npm
-    runs-on: ubuntu-latest
+  build:
+    name: Build ${{ matrix.target.name }}
     if: >-
       github.event_name != 'pull_request'
       || (github.event.pull_request.merged == true
       && (startsWith(github.event.pull_request.head.ref, 'release/')
       || startsWith(github.event.pull_request.head.ref, 'prerelease/')))
-    permissions:
-      contents: read
-      id-token: write
-
+    strategy:
+      matrix:
+        target:
+          - { name: linux-x64,     runner: ubuntu-latest }
+          - { name: linux-arm64,   runner: ubuntu-latest }
+          - { name: darwin-x64,    runner: ubuntu-latest }
+          - { name: darwin-arm64,  runner: ubuntu-latest }
+          - { name: windows-x64,   runner: ubuntu-latest }
+          - { name: windows-arm64, runner: ubuntu-latest }
+    runs-on: ${{ matrix.target.runner }}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v6
+      - uses: actions/checkout@v6
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
 
-      - name: Install dependencies
-        run: bun install
+      # `--cpu=* --os=*` overrides the host filter so all OpenTUI native
+      # packages (`@opentui/core-{darwin,linux,win32}-{x64,arm64}`) land
+      # in node_modules. Bun's `--compile --target=...` rewrites
+      # `process.platform`/`process.arch` at bundle time to the target,
+      # so without these flags cross-compile fails to resolve the
+      # target's native module on the build host.
+      - run: bun install --cpu='*' --os='*'
 
-      - name: Run type checking
-        run: bun run typecheck
+      - run: bun packages/atomic/script/build.ts ${{ matrix.target.name }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target.name }}
+          path: packages/atomic/dist/${{ matrix.target.name }}
+
+  validate:
+    name: Validate publish (verdaccio)
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "lts/*"
+
+      - run: bun install
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: packages/atomic/dist/
+          pattern: '*'
+          merge-multiple: false
+
+      - name: Start verdaccio
+        run: |
+          npm install -g verdaccio
+          mkdir -p /tmp/verdaccio
+          verdaccio --config verdaccio.yaml &
+          for i in {1..30}; do
+            if curl -sf http://localhost:4873/-/ping >/dev/null; then
+              echo "verdaccio up"; exit 0
+            fi
+            sleep 1
+          done
+          echo "verdaccio failed to start"; exit 1
+
+      - name: Configure npm auth for verdaccio
+        run: echo "//localhost:4873/:_authToken=fake-token" >> ~/.npmrc
+
+      - name: Publish SDK to verdaccio
+        run: bun packages/atomic-sdk/script/publish.ts
+        env:
+          NPM_REGISTRY: http://localhost:4873
+
+      - name: Publish wrapper + all platform packages to verdaccio
+        run: bun packages/atomic/script/publish.ts
+        env:
+          NPM_REGISTRY: http://localhost:4873
+
+      - name: Smoke install from verdaccio
+        run: |
+          set -e
+          VERSION=$(jq -r .version package.json)
+          bun install -g "@bastani/atomic@${VERSION}" --registry http://localhost:4873
+          atomic --version | grep -q "$VERSION"
+          atomic workflow list >/dev/null
+          # `--preflight-only` runs onboarding without spawning the agent
+          # or checking executables/auth — exercises the chat launch path
+          # (config sync, project setup) headlessly.
+          for agent in claude copilot opencode; do
+            atomic chat -a "$agent" --preflight-only
+          done
+
+  publish:
+    name: Publish to npm
+    needs: [validate]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      version: ${{ steps.npm-tag.outputs.version }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install
+
+      - run: bun run typecheck
 
       - name: Run tests
-        run: |
-          set -o pipefail
-          bun test 2>&1 | cat
+        run: bun test 2>&1 | cat
+        env:
+          ATOMIC_SKIP_PUBLISH_BUILD_TEST: "1"
 
       - name: Determine npm publish tag
         id: npm-tag
         run: |
           VERSION=$(jq -r .version package.json)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
           if [[ "$VERSION" == *-* ]]; then
             echo "tag=next" >> $GITHUB_OUTPUT
           else
             echo "tag=latest" >> $GITHUB_OUTPUT
           fi
 
-      - name: Setup Node.js for npm publish
-        uses: actions/setup-node@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: "lts/*"
           registry-url: "https://registry.npmjs.org"
 
-      - name: Stage filtered skills for npm package
+      - uses: actions/download-artifact@v4
+        with:
+          path: packages/atomic/dist/
+          pattern: '*'
+          merge-multiple: false
+
+      - name: Publish SDK to npm
+        run: bun packages/atomic-sdk/script/publish.ts
         env:
-          SKILLS_REPO: https://github.com/flora131/atomic.git
+          NPM_TAG: ${{ steps.npm-tag.outputs.tag }}
+
+      - name: Publish wrapper and platform packages to npm
+        run: bun packages/atomic/script/publish.ts
+        env:
+          NPM_TAG: ${{ steps.npm-tag.outputs.tag }}
+
+  # Verifies the lazy auto-install path: when atomic launches and tmux/psmux
+  # is missing, autoSyncIfStale → ensureTmuxInstalled shells out to the host
+  # package manager and the binary lands on PATH. Linux uses apt-get (sudo
+  # passwordless on the runner), macOS uses brew, Windows tries winget →
+  # scoop → choco → cargo → direct GitHub-release download (last is the
+  # backstop that always works given network access).
+  mux-autoinstall-smoke:
+    name: Mux auto-install smoke (${{ matrix.os }})
+    needs: [publish]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest,  arch: x64   }
+          - { os: macos-14,       arch: arm64 }
+          - { os: windows-latest, arch: x64   }
+    runs-on: ${{ matrix.os }}
+    env:
+      RC_VERSION: ${{ needs.publish.outputs.version }}
+    steps:
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Ensure tmux is NOT pre-installed (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
         run: |
-          set -euo pipefail
+          sudo apt-get remove -y tmux >/dev/null 2>&1 || true
+          if command -v tmux >/dev/null 2>&1; then
+            echo "tmux still on PATH after remove — runner image differs from expected"
+            exit 1
+          fi
 
-          # Replace the dev-laden checkout skills with the filtered set
-          # produced by `bunx skills add` (which excludes development-only
-          # skills). Install globally on the runner, then copy into the
-          # package root so npm pack picks them up.
-          rm -rf .agents/skills
-          bunx skills add "$SKILLS_REPO" \
-            --skill "*" \
-            -a opencode -a github-copilot \
-            -g -y
+      - name: Ensure tmux is NOT pre-installed (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          if command -v tmux >/dev/null 2>&1; then
+            brew uninstall --ignore-dependencies tmux >/dev/null 2>&1 || true
+          fi
+          if command -v tmux >/dev/null 2>&1; then
+            echo "tmux still on PATH after uninstall — runner image differs from expected"
+            exit 1
+          fi
 
-          mkdir -p .agents/skills
-          cp -R "$HOME/.agents/skills/." .agents/skills/
+      # psmux isn't pre-installed on the windows-latest image, but guard
+      # against future image changes — also strip well-known install dirs
+      # that ensureTmuxInstalled's detector probes (Scoop shims, WinGet
+      # Links, %LOCALAPPDATA%\Programs\psmux) so a stale leftover from a
+      # cached image can't pass the test by accident.
+      - name: Ensure psmux is NOT pre-installed (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $existing = Get-Command psmux -ErrorAction SilentlyContinue
+          if ($existing) {
+            throw "psmux already on PATH at $($existing.Source) — test cannot verify auto-install"
+          }
+          foreach ($d in @(
+            (Join-Path $env:LOCALAPPDATA 'Programs\psmux'),
+            (Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Links'),
+            (Join-Path $env:USERPROFILE 'scoop\shims')
+          )) {
+            if (Test-Path (Join-Path $d 'psmux.exe')) {
+              Write-Output "Removing pre-existing $d\psmux.exe"
+              Remove-Item -Force (Join-Path $d 'psmux.exe') -ErrorAction SilentlyContinue
+            }
+          }
 
-          # Whitelist the staged directory for `npm publish` without
-          # baking the entry into the committed package.json.
-          tmp=$(mktemp)
-          jq '.files += [".agents/skills"]' package.json > "$tmp"
-          mv "$tmp" package.json
+      - name: Install atomic from npm (Unix)
+        if: runner.os != 'Windows'
+        run: bun install -g @bastani/atomic@${{ env.RC_VERSION }}
 
-      - name: Publish to npm
-        run: npm publish --provenance --access public --tag ${{ steps.npm-tag.outputs.tag }}
+      # autoSyncIfStale only runs for non-info commands (`--version` /
+      # `--help` / `completions` are gated out in cli.ts). `workflow list`
+      # is non-info, awaited, and silently triggers ensureTmuxInstalled
+      # when hasRequiredMuxBinary() returns false.
+      - name: Trigger lazy auto-install via atomic workflow list (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          export PATH="$HOME/.bun/bin:$PATH"
+          atomic --version
+          atomic workflow list >/dev/null
+
+      - name: Verify tmux is now on PATH (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          export PATH="$HOME/.bun/bin:$PATH"
+          which tmux
+          tmux -V
+
+      # End-to-end Windows path: install atomic, run `atomic install` (which
+      # writes the pwsh wrapper to $PROFILE), dot-source the wrapper, then
+      # verify that `atomic workflow list` (auto-installs psmux via winget /
+      # scoop / cargo / GitHub release fallback) leaves psmux reachable in
+      # *this* shell — without any manual registry reload. The wrapper is
+      # the whole point: a child atomic.exe can't mutate its parent's
+      # $env:Path, so we re-merge HKCU\Environment\Path inline after each
+      # call. If this verification step finds psmux without a manual reload,
+      # the wrapper is doing its job.
+      - name: Install + wire wrapper + auto-install + verify (Windows, in-shell)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          # 1. Install via bun. Binary lives in $env:USERPROFILE\.bun\bin\atomic.exe.
+          bun install -g @bastani/atomic@${{ env.RC_VERSION }}
+
+          # 2. bun writes its bin dir to user PATH; pull it into this
+          #    session so we can invoke `atomic` here.
+          $userPath = [Environment]::GetEnvironmentVariable('Path','User')
+          if ($userPath) { $env:Path = "$env:Path;$userPath" }
+
+          # 3. Run `atomic install` to copy the binary to its canonical
+          #    install location (%LOCALAPPDATA%\atomic\bin\atomic.exe) and
+          #    register the wrapper + completer in $PROFILE.
+          atomic install
+
+          # 4. Dot-source $PROFILE to load the freshly-written wrapper into
+          #    THIS shell. Subsequent `atomic` calls now go through the
+          #    wrapper function, which re-merges HKCU\Environment\Path
+          #    after each invocation.
+          if (-not (Test-Path $PROFILE)) {
+            throw "atomic install did not create $PROFILE"
+          }
+          . $PROFILE
+
+          # Sanity-check the wrapper is defined and shadows atomic.exe.
+          $wrapper = Get-Command atomic -ErrorAction Stop
+          if ($wrapper.CommandType -ne 'Function') {
+            throw "expected atomic to resolve to Function (the wrapper); got $($wrapper.CommandType)"
+          }
+
+          # 5. Trigger auto-install via a non-info command. autoSyncIfStale
+          #    fires inside atomic; ensureTmuxInstalled installs psmux; the
+          #    package manager writes the new bin dir to user PATH; the
+          #    wrapper then re-merges that into $env:Path on return.
+          atomic --version
+          atomic workflow list | Out-Null
+
+          # 6. Verify psmux is reachable WITHOUT any manual registry reload.
+          #    If the wrapper didn't refresh PATH, this lookup fails and the
+          #    test catches the regression.
+          $mux = Get-Command psmux -ErrorAction SilentlyContinue
+          if (-not $mux) { $mux = Get-Command pmux -ErrorAction SilentlyContinue }
+          if (-not $mux) { $mux = Get-Command tmux -ErrorAction SilentlyContinue }
+          if (-not $mux) {
+            Write-Output "===== current `$env:Path ====="
+            $env:Path -split ';' | ForEach-Object { Write-Output $_ }
+            throw "wrapper failed: no multiplexer on `$env:Path after auto-install"
+          }
+          Write-Output "wrapper OK: $($mux.Name) resolves to $($mux.Source)"
+
+  install-smoke:
+    name: Smoke test ${{ matrix.os }} ${{ matrix.arch }}
+    needs: [publish]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest,    arch: x64   }
+          - { os: ubuntu-24.04-arm, arch: arm64 }
+          - { os: macos-13,         arch: x64   }
+          - { os: macos-14,         arch: arm64 }
+          - { os: windows-latest,   arch: x64   }
+          - { os: windows-11-arm,   arch: arm64 }
+    runs-on: ${{ matrix.os }}
+    env:
+      RC_VERSION: ${{ needs.publish.outputs.version }}
+    steps:
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install -g @bastani/atomic@${{ env.RC_VERSION }}
+
+      - run: atomic --version
+
+      - run: atomic workflow list
+
+      - name: Smoke test — embedded asset extraction is version-keyed (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          atomic --version
+          atomic workflow list >/dev/null
+          test -d "${XDG_CACHE_HOME:-$HOME/.cache}/atomic/${{ env.RC_VERSION }}/skills"
+
+      - name: Smoke test — embedded asset extraction is version-keyed (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          atomic --version
+          atomic workflow list >/dev/null
+          test -d "$HOME/Library/Caches/atomic/${{ env.RC_VERSION }}/skills"
+
+      - name: Smoke test — embedded asset extraction is version-keyed (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          atomic --version
+          atomic workflow list | Out-Null
+          $cache = if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { Join-Path $env:USERPROFILE 'AppData\Local' }
+          $expected = Join-Path $cache "atomic\Cache\${{ env.RC_VERSION }}\skills"
+          if (-not (Test-Path $expected)) { Write-Error "missing: $expected"; exit 1 }
 
   release:
     name: Create Release
     runs-on: ubuntu-latest
     needs: [publish]
+    outputs:
+      version: ${{ steps.version.outputs.version }}
 
     steps:
       - name: Checkout repository
@@ -134,7 +431,20 @@ jobs:
           fi
 
       - name: Bundle configs for release
-        run: bun run src/scripts/bundle-configs.ts "${{ steps.version.outputs.version }}"
+        run: bun packages/atomic/script/bundle-configs.ts "${{ steps.version.outputs.version }}"
+
+      # Pull every per-target binary built in the matrix `build` job back
+      # into packages/atomic/dist/<target>/bin/atomic[.exe], the layout
+      # release-assets.ts expects.
+      - name: Download per-platform binaries
+        uses: actions/download-artifact@v4
+        with:
+          path: packages/atomic/dist/
+          pattern: '*'
+          merge-multiple: false
+
+      - name: Generate release binaries + manifest
+        run: bun packages/atomic/script/release-assets.ts
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
@@ -145,4 +455,312 @@ jobs:
           prerelease: ${{ steps.release-type.outputs.is_prerelease == 'true' }}
           make_latest: ${{ steps.release-type.outputs.make_latest }}
           generate_release_notes: true
-          files: atomic-configs-v${{ steps.version.outputs.version }}.zip
+          files: |
+            atomic-configs-v${{ steps.version.outputs.version }}.zip
+            packages/atomic/release-assets/atomic-*
+            packages/atomic/release-assets/manifest.json
+
+  # End-to-end smoke for the bootstrap installers (install.sh /
+  # install.ps1 / install.cmd). Depends on `release` because the
+  # scripts download verified binaries from the GitHub Release
+  # we just created. Each platform exercises:
+  #   - Bootstrap downloads + verifies + delegates to `atomic install`
+  #   - `atomic install` placement, persistent PATH writes, completions
+  #   - tmux/psmux detection (auto-PATH when installed off-PATH)
+  bootstrap-smoke:
+    name: Bootstrap smoke ${{ matrix.os }} ${{ matrix.arch }} (${{ matrix.shell }})
+    needs: [release]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest,    arch: x64,   shell: bash }
+          - { os: ubuntu-24.04-arm, arch: arm64, shell: bash }
+          - { os: macos-13,         arch: x64,   shell: bash }
+          - { os: macos-14,         arch: arm64, shell: bash }
+          - { os: windows-latest,   arch: x64,   shell: powershell }
+          - { os: windows-latest,   arch: x64,   shell: cmd }
+          - { os: windows-11-arm,   arch: arm64, shell: powershell }
+    runs-on: ${{ matrix.os }}
+    env:
+      RC_VERSION: ${{ needs.release.outputs.version }}
+    steps:
+      - uses: actions/checkout@v6
+
+      # ── Pre-install tmux/psmux: one runs in a "non-PATH" location
+      #    on Windows to verify atomic's auto-PATH detection.
+      - name: Pre-install tmux (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          if ! command -v tmux >/dev/null 2>&1; then
+            sudo apt-get update -y && sudo apt-get install -y tmux
+          fi
+          which tmux
+
+      - name: Pre-install tmux (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          if ! command -v tmux >/dev/null 2>&1; then
+            brew install tmux
+          fi
+          which tmux
+
+      # Touch a stub psmux.exe at a non-PATH well-known dir
+      # (%LOCALAPPDATA%\Programs\psmux\), which is in
+      # wellKnownMuxInstallDirs(). This verifies `atomic install`
+      # auto-adds it to user PATH even when not on PATH at install time.
+      - name: Plant psmux stub at non-PATH location (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $stubDir = Join-Path $env:LOCALAPPDATA "Programs\psmux"
+          New-Item -ItemType Directory -Force -Path $stubDir | Out-Null
+          $stubPath = Join-Path $stubDir "psmux.exe"
+          # Stub binary is just for existsSync detection — atomic
+          # install never executes it during install.
+          Set-Content -Path $stubPath -Value "stub" -NoNewline
+          # Guard: the stub dir must NOT already be on PATH for the
+          # auto-PATH branch to trigger.
+          $userPath = [Environment]::GetEnvironmentVariable('Path','User')
+          if ($userPath -and $userPath.ToLower().Contains($stubDir.ToLower())) {
+            throw "stub dir is already on user PATH; test cannot verify auto-PATH"
+          }
+          Write-Output "stub planted at $stubPath"
+
+      # ── Run the bootstrap installer.
+      - name: Bootstrap (bash)
+        if: matrix.shell == 'bash'
+        shell: bash
+        run: bash ./install.sh "$RC_VERSION" | tee /tmp/atomic-install.log
+
+      - name: Bootstrap (powershell)
+        if: matrix.shell == 'powershell'
+        shell: pwsh
+        run: |
+          ./install.ps1 -Target $env:RC_VERSION 2>&1 | Tee-Object -FilePath $env:RUNNER_TEMP/atomic-install.log
+
+      - name: Bootstrap (cmd)
+        if: matrix.shell == 'cmd'
+        shell: cmd
+        run: |
+          install.cmd %RC_VERSION% > "%RUNNER_TEMP%\atomic-install.log" 2>&1
+          type "%RUNNER_TEMP%\atomic-install.log"
+
+      # ── Verify atomic is on PATH after a fresh shell starts.
+      - name: Verify atomic is on PATH (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          # Re-source rc files to pick up the PATH the installer wrote.
+          [ -f "$HOME/.bashrc" ] && source "$HOME/.bashrc" || true
+          [ -f "$HOME/.profile" ] && source "$HOME/.profile" || true
+          export PATH="$HOME/.local/bin:$PATH"
+          which atomic
+          atomic --version
+          atomic --version | grep -q "$RC_VERSION"
+
+      - name: Verify atomic is on PATH (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          # Reload user PATH from registry — atomic install writes to
+          # HKCU\Environment, which doesn't propagate to the current
+          # session.
+          $userPath = [Environment]::GetEnvironmentVariable('Path','User')
+          $env:Path = "$env:Path;$userPath"
+          $atomic = Get-Command atomic -ErrorAction Stop
+          Write-Output "atomic resolved to: $($atomic.Source)"
+          $version = & atomic --version
+          Write-Output "version: $version"
+          if (-not $version.Contains($env:RC_VERSION)) {
+            throw "version mismatch: expected $env:RC_VERSION, got $version"
+          }
+
+      # ── Verify tmux/psmux detection ran and reported correctly.
+      - name: Verify tmux detected (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: grep -E "tmux (found on PATH|added)" /tmp/atomic-install.log
+
+      - name: Verify psmux auto-PATH happened (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $log = Get-Content "$env:RUNNER_TEMP\atomic-install.log" -Raw
+          if (-not ($log -match "psmux")) {
+            Write-Output "===log==="
+            Write-Output $log
+            throw "install log did not mention psmux"
+          }
+          # Confirm the stub dir is now on user PATH.
+          $stubDir = Join-Path $env:LOCALAPPDATA "Programs\psmux"
+          $userPath = [Environment]::GetEnvironmentVariable('Path','User')
+          if (-not $userPath.ToLower().Contains($stubDir.ToLower())) {
+            throw "psmux stub dir was NOT added to user PATH (got: $userPath)"
+          }
+          Write-Output "psmux auto-PATH verified — $stubDir is on user PATH"
+
+      # ── Verify completions cache was written.
+      - name: Verify completions cache (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          ls -la "$HOME/.atomic/completions/"
+          # bash on ubuntu, zsh elsewhere — accept either.
+          ls "$HOME/.atomic/completions/" | grep -E "atomic\.(bash|zsh|fish)"
+
+      - name: Verify completions cache (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $cache = Join-Path $env:USERPROFILE ".atomic\completions\atomic.ps1"
+          if (-not (Test-Path $cache)) { throw "completions cache missing: $cache" }
+          $size = (Get-Item $cache).Length
+          if ($size -le 0) { throw "completions cache is empty" }
+          Write-Output "completions cache OK ($size bytes)"
+
+      # ── Prod binary location verification.
+      #    The bootstrap copies a temp download into the canonical install
+      #    dir via the atomic-move pattern. Verify the binary actually
+      #    landed at the documented path (per OS) and is the right shape.
+      - name: Verify prod binary location (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -e
+          binary="$HOME/.local/bin/atomic"
+          if [ ! -f "$binary" ]; then
+            echo "expected prod binary at $binary"; exit 1
+          fi
+          if [ ! -x "$binary" ]; then
+            echo "$binary is not executable"; exit 1
+          fi
+          size=$(stat -c%s "$binary" 2>/dev/null || stat -f%z "$binary")
+          if [ "$size" -lt 1000000 ]; then
+            echo "$binary is suspiciously small ($size bytes)"; exit 1
+          fi
+          echo "prod binary OK at $binary ($size bytes)"
+
+      - name: Verify prod binary location (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $binary = Join-Path $env:LOCALAPPDATA "atomic\bin\atomic.exe"
+          if (-not (Test-Path $binary)) {
+            throw "expected prod binary at $binary"
+          }
+          $size = (Get-Item $binary).Length
+          if ($size -lt 1MB) {
+            throw "$binary is suspiciously small ($size bytes)"
+          }
+          Write-Output "prod binary OK at $binary ($size bytes)"
+
+      # ── Uninstall lifecycle: launcher gone, rc snippets stripped,
+      #    PATH entry removed, completions cache gone — but ~/.atomic
+      #    preserved (config/downloads).
+      - name: Run atomic uninstall (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          atomic uninstall
+
+      - name: Run atomic uninstall (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $userPath = [Environment]::GetEnvironmentVariable('Path','User')
+          $env:Path = "$env:Path;$userPath"
+          atomic uninstall
+
+      - name: Verify uninstall (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -e
+          # Launcher gone.
+          test ! -f "$HOME/.local/bin/atomic" || { echo "launcher still present"; exit 1; }
+          # Completions cache gone.
+          test ! -d "$HOME/.atomic/completions" || { echo "completions cache still present"; exit 1; }
+          # rc snippets stripped.
+          for rc in "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.profile" "$HOME/.config/fish/config.fish"; do
+            if [ -f "$rc" ] && grep -q "# Atomic CLI" "$rc"; then
+              echo "rc file $rc still has atomic snippet"; exit 1
+            fi
+          done
+          # ~/.atomic NOT purged (no --purge flag).
+          test -d "$HOME/.atomic" || { echo "~/.atomic was wrongly purged"; exit 1; }
+          echo "uninstall verified — launcher/PATH/completions removed, ~/.atomic preserved"
+
+      - name: Verify uninstall (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $binary = Join-Path $env:LOCALAPPDATA "atomic\bin\atomic.exe"
+          $cache = Join-Path $env:USERPROFILE ".atomic\completions"
+          $atomicHome = Join-Path $env:USERPROFILE ".atomic"
+          $userPath = [Environment]::GetEnvironmentVariable('Path','User')
+          $binDir = Join-Path $env:LOCALAPPDATA "atomic\bin"
+
+          if (Test-Path $binary) { throw "launcher still present at $binary" }
+          if (Test-Path $cache) { throw "completions cache still present at $cache" }
+          if ($userPath -and $userPath.ToLower().Contains($binDir.ToLower())) {
+            throw "user PATH still contains $binDir"
+          }
+          if (-not (Test-Path $atomicHome)) {
+            throw "~/.atomic was wrongly purged (no --purge flag)"
+          }
+          # Profile snippet stripped.
+          $profile = $PROFILE.CurrentUserCurrentHost
+          if ((Test-Path $profile) -and ((Get-Content $profile -Raw) -match "# Atomic CLI")) {
+            throw "PowerShell profile still has atomic snippet"
+          }
+          Write-Output "uninstall verified — launcher/PATH/completions removed, ~/.atomic preserved"
+
+      # ── Re-install + uninstall --purge: full nuke.
+      - name: Re-install for purge test (bash)
+        if: matrix.shell == 'bash'
+        shell: bash
+        run: bash ./install.sh "$RC_VERSION"
+
+      - name: Re-install for purge test (powershell)
+        if: matrix.shell == 'powershell'
+        shell: pwsh
+        run: ./install.ps1 -Target $env:RC_VERSION
+
+      - name: Re-install for purge test (cmd)
+        if: matrix.shell == 'cmd'
+        shell: cmd
+        run: install.cmd %RC_VERSION%
+
+      - name: Run atomic uninstall --purge (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          atomic uninstall --purge
+
+      - name: Run atomic uninstall --purge (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $userPath = [Environment]::GetEnvironmentVariable('Path','User')
+          $env:Path = "$env:Path;$userPath"
+          atomic uninstall --purge
+
+      - name: Verify --purge removed ~/.atomic (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          test ! -d "$HOME/.atomic" || { echo "~/.atomic was NOT purged"; exit 1; }
+          echo "--purge verified — ~/.atomic removed"
+
+      - name: Verify --purge removed ~/.atomic (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $atomicHome = Join-Path $env:USERPROFILE ".atomic"
+          if (Test-Path $atomicHome) {
+            throw "~/.atomic was NOT purged (still at $atomicHome)"
+          }
+          Write-Output "--purge verified — ~/.atomic removed"

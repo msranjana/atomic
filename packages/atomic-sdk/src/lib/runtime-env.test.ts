@@ -1,0 +1,46 @@
+import { test, expect, describe } from "bun:test";
+import { isCompiledBinaryRuntime, isInstalledPackage } from "./runtime-env.ts";
+
+describe("isCompiledBinaryRuntime", () => {
+  test("true for POSIX bunfs prefix", () => {
+    expect(isCompiledBinaryRuntime("/$bunfs/root/src/lib")).toBe(true);
+  });
+
+  test("true for Windows bunfs prefix", () => {
+    expect(isCompiledBinaryRuntime("\\$bunfs\\root\\src\\lib")).toBe(true);
+  });
+
+  test("false for node_modules path", () => {
+    expect(isCompiledBinaryRuntime("/home/user/node_modules/@bastani/atomic-sdk/src/lib")).toBe(false);
+  });
+
+  test("false for dev checkout path", () => {
+    expect(isCompiledBinaryRuntime("/home/user/projects/atomic/packages/atomic-sdk/src/lib")).toBe(false);
+  });
+
+  test("false for empty string", () => {
+    expect(isCompiledBinaryRuntime("")).toBe(false);
+  });
+});
+
+describe("isInstalledPackage", () => {
+  test("true for node_modules path", () => {
+    expect(isInstalledPackage("/home/user/node_modules/@bastani/atomic-sdk/src/lib")).toBe(true);
+  });
+
+  test("true for POSIX bunfs path", () => {
+    expect(isInstalledPackage("/$bunfs/root/src/lib")).toBe(true);
+  });
+
+  test("true for Windows bunfs path", () => {
+    expect(isInstalledPackage("\\$bunfs\\root\\src\\lib")).toBe(true);
+  });
+
+  test("false for dev checkout path", () => {
+    expect(isInstalledPackage("/home/user/projects/atomic/packages/atomic-sdk/src/lib")).toBe(false);
+  });
+
+  test("false for empty string", () => {
+    expect(isInstalledPackage("")).toBe(false);
+  });
+});

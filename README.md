@@ -15,6 +15,20 @@
 
 ---
 
+## Migration from 0.6.x
+
+If you were importing from `@bastani/atomic` for SDK use (`defineWorkflow`,
+`createRegistry`, `WorkflowPicker`), switch to `@bastani/atomic-sdk`:
+
+    bun remove @bastani/atomic
+    bun add    @bastani/atomic-sdk
+
+Update imports: `from "@bastani/atomic/workflows"` →
+`from "@bastani/atomic-sdk/workflows"`. The CLI (`atomic` command) keeps the
+same package name; nothing changes for global-install users.
+
+---
+
 ## Why Atomic
 
 Coding agents are great inside a single session. They can inspect code, use tools, make edits, and explain their work. The trouble starts when the task is ambiguous/complex, tied to specific outcomes/exit criteria, long-running, or tied to a large codebase: you end up reminding the agent of the process, moving output between sessions, checking whether it followed the right steps, and deciding when a human needs to review the work. Atomic turns that process into code. A workflow can branch, retry, run stages in parallel, isolate sessions, pass only the right transcript forward, pause for human approval, and run inside a devcontainer so the agent is not loose on your host machine.
@@ -35,43 +49,46 @@ Install, generate context, try Ralph, then write your own workflow — four step
 
 Atomic doesn't replace your coding agent or terminal — it gives them a workflow to follow. Three things have to exist on the host before a workflow can run:
 
-- **[Bun](https://bun.sh/)** as the JavaScript runtime — Atomic and the SDK ship source that relies on `Bun.spawn`, native pty handling, and Bun-specific module resolution. **They do not run on Node.js.** The bootstrap installer below installs Bun for you; if you install `@bastani/atomic` manually, install Bun first.
 - **A terminal multiplexer** — every stage runs inside a detachable session on a dedicated `atomic` socket (your personal tmux is untouched). That's how workflows survive terminal disconnects, how `-d/--detach` puts a run in the background, and how `atomic session connect` reattaches later from any shell.
-  - **macOS / Linux:** [tmux](https://github.com/tmux/tmux) — `brew install tmux` or your distro's package manager
-  - **Windows:** [psmux](https://github.com/psmux/psmux) — a PowerShell-native tmux-compatible shim, detected as `psmux` / `pmux` / `tmux` on `PATH`
+  - **macOS / Linux:** [tmux](https://github.com/tmux/tmux) — auto-installed on first `atomic` run via `brew` (macOS) or `apt`/`dnf`/`yum`/`pacman`/`zypper`/`apk` (Linux) when one is on `PATH`
+  - **Windows:** [psmux](https://github.com/psmux/psmux) — auto-installed on first `atomic` run via `winget` / `scoop` / `choco` / `cargo`; detected as `psmux` / `pmux` / `tmux` on `PATH`
 - **At least one coding agent** installed and logged in — Atomic spawns the agent's own CLI at each stage and talks to it via its SDK, so the CLI has to be present and authenticated:
   - [Claude Code](https://code.claude.com/docs/en/quickstart) — run `claude` and authenticate
   - [OpenCode](https://opencode.ai) — run `opencode` and authenticate
   - [GitHub Copilot CLI](https://github.com/features/copilot/cli) — run `copilot` and authenticate
-- **Windows only:** PowerShell 7+ ([install guide](https://learn.microsoft.com/en-us/powershell/scripting/install/installing-powershell-on-windows))
 
-> The bootstrap installer below installs Bun and Atomic but **does not** install tmux/psmux or the coding agents. Install those separately before running any workflow — `bun run src/claude-worker.ts` will fail loudly at stage spawn if either is missing. Using a [devcontainer](#alternative-devcontainer-recommended-for-autonomous-workflows) short-circuits all of this: the atomic feature bundles Bun + tmux + the agent CLI into the container image.
+> The bootstrap installer below ships a prebuilt binary — it does **not** require Bun, Node, or any other runtime on your machine. tmux/psmux are not bundled but are **auto-installed lazily on the first non-info `atomic` command** (e.g. `atomic workflow list`) — atomic shells out to your platform's package manager (`brew`/`apt`/`dnf`/`yum`/`pacman`/`zypper`/`apk` on Unix, `winget`/`scoop`/`choco`/`cargo` on Windows), or you can pre-install yourself if you'd rather skip that step. Coding agents are **not** auto-installed — install and authenticate those separately. Using a [devcontainer](#alternative-devcontainer-recommended-for-autonomous-workflows) short-circuits all of this: the atomic feature bundles tmux + the agent CLI into the container image.
 
-### 1. Install — CLI + SDK share the same package
+### 1. Install
 
-`@bastani/atomic` ships both surfaces. A **global** install gives you the `atomic` CLI; a **project-local** install gives you the SDK import. Most users do both, but either stands alone.
+`@bastani/atomic` is the CLI; `@bastani/atomic-sdk` is the library. Pick the one(s) you need.
 
-**CLI path** — bootstrap script installs [Bun](https://bun.sh/), the `atomic` binary, and shell completions in one step:
+**CLI path** — bootstrap script downloads a verified prebuilt binary, installs it to `~/.local/bin` (or `%LOCALAPPDATA%\atomic\bin` on Windows), updates your PATH, and sets up shell completions. No Bun/Node prerequisite.
 
 ```bash
 # macOS / Linux
 curl -fsSL https://raw.githubusercontent.com/flora131/atomic/main/install.sh | bash
 
-# Windows (PowerShell 7+)
+# Windows (PowerShell 5.1+ or 7+)
 irm https://raw.githubusercontent.com/flora131/atomic/main/install.ps1 | iex
+
+# Windows (cmd.exe — for environments without PowerShell)
+curl -fsSL https://raw.githubusercontent.com/flora131/atomic/main/install.cmd -o install.cmd && install.cmd && del install.cmd
 ```
 
-Upgrade later with `bun update -g @bastani/atomic`.
+Pin a specific version by passing it as an argument: `bash install.sh 0.4.47`, `./install.ps1 0.4.47`, or `install.cmd 0.4.47`.
+
+Upgrade later by re-running the same one-liner.
 
 **SDK-only path** — if you only want to `defineWorkflow(...)` in your own TypeScript project and never need the `atomic` binary, skip the bootstrap and just add the library:
 
 ```bash
 bun init -y                                      # new project
-bun add @bastani/atomic                          # the SDK
+bun add @bastani/atomic-sdk                      # the SDK
 bun add @anthropic-ai/claude-agent-sdk           # the provider SDK you target
 ```
 
-Skip steps 2–3 below (those use the CLI) and jump straight to [step 4](#4-build-your-own-workflow--sdk). You'll still need tmux/psmux + an authenticated agent CLI at runtime — see [Prerequisites](#prerequisites).
+Skip steps 2–3 below (those use the CLI) and jump straight to [step 4](#4-build-your-own-workflow--sdk). If you only want the SDK, `bun add @bastani/atomic-sdk` — the CLI binary is not required. You'll still need tmux/psmux + an authenticated agent CLI at runtime — see [Prerequisites](#prerequisites).
 
 <details>
 <summary><b>Alternative: Already have Bun? Install the CLI directly from npm</b></summary>
@@ -90,15 +107,7 @@ If your shell cannot find `atomic` after the install, add the directory from `bu
 <details>
 <summary><b>Authenticated downloads (CI / enterprise)</b></summary>
 
-Set `GITHUB_TOKEN` to avoid GitHub API rate limits when running the bootstrap script in CI:
-
-```bash
-# macOS / Linux
-GITHUB_TOKEN=ghp_... curl -fsSL https://raw.githubusercontent.com/flora131/atomic/main/install.sh | bash
-
-# Windows PowerShell
-$env:GITHUB_TOKEN='ghp_...'; irm https://raw.githubusercontent.com/flora131/atomic/main/install.ps1 | iex
-```
+The bootstrap downloads from `github.com/flora131/atomic/releases` (no API calls), so no token is required for normal use. If your environment proxies or rate-limits unauthenticated `github.com` traffic, route the download through your proxy or use `bun install -g @bastani/atomic` instead.
 
 </details>
 
@@ -175,13 +184,13 @@ atomic workflow -n ralph -a claude "Build a REST API for user management"
 Every team has a process — code review, CI checks, PR creation, approval, merge. Encode it as TypeScript once; everyone runs the same pipeline.
 
 ```bash
-bun init && bun add @bastani/atomic
+bun init && bun add @bastani/atomic-sdk
 ```
 
 Author the workflow in `src/workflows/review-to-merge/claude.ts`:
 
 ```ts
-import { defineWorkflow } from "@bastani/atomic/workflows";
+import { defineWorkflow } from "@bastani/atomic-sdk/workflows";
 
 export default defineWorkflow({
   name: "review-to-merge",
@@ -240,7 +249,7 @@ import {
   getInputSchema,
   runWorkflow,
   MissingDependencyError,
-} from "@bastani/atomic/workflows";
+} from "@bastani/atomic-sdk/workflows";
 import workflow from "./workflows/review-to-merge/claude.ts";
 
 const program = new Command();
@@ -308,15 +317,15 @@ Atomic ships **two** things that share one workflow runtime. You can use either 
 
 |                       | Atomic CLI                                                                                                                                                                                                                               | Atomic SDK                                                                                                                                                                                                                                                                                                                                                                            |
 | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **What it is**        | Global `atomic` binary                                                                                                                                                                                                                   | `@bastani/atomic/workflows` TypeScript library                                                                                                                                                                                                                                                                                                                                        |
-| **Install**           | `bun install -g @bastani/atomic` (or `install.sh` / `install.ps1`)                                                                                                                                                                       | `bun add @bastani/atomic` inside your project                                                                                                                                                                                                                                                                                                                                         |
+| **What it is**        | Global `atomic` binary                                                                                                                                                                                                                   | `@bastani/atomic-sdk/workflows` TypeScript library                                                                                                                                                                                                                                                                                                                                    |
+| **Install**           | `install.sh` / `install.ps1` / `install.cmd` (no runtime prereq) or `bun install -g @bastani/atomic`                                                                                                                                                                       | `bun add @bastani/atomic-sdk` inside your project                                                                                                                                                                                                                                                                                                                                     |
 | **Entrypoint**        | `atomic <command>`                                                                                                                                                                                                                       | `bun run src/<agent>-worker.ts`                                                                                                                                                                                                                                                                                                                                                       |
 | **Code required?**    | No — everything is pre-built. You can also ask the agent inside `atomic chat` to use the `workflow-creator` skill, decide when a complex task needs its own workflow, and build/run that workflow on the fly.                            | No to start — describe the workflow in natural language and use the `workflow-creator` skill to generate it. Then refine it in natural language or edit the TypeScript workflow and composition root directly, with full visibility into exactly what will run.                                                                                                                       |
 | **What you get**      | `atomic chat` (agent REPL), three autonomous built-in workflows (`ralph`, `deep-research-codebase`, `open-claude-design`), session management, the live workflow panel, Atomic skills (`/init`, `/research-codebase`, `/create-spec`, …) | `defineWorkflow`, `createRegistry`, `runWorkflow`, metadata accessors (`getName`, `getInputSchema`, …), session primitives (`listSessions`, `getSessionStatus`, `attachSession` / `detachSession`, `nextWindow` / `previousWindow` / `gotoOrchestrator`), typed errors (`MissingDependencyError`, `SessionNotFoundError`, …), `ctx.stage`, `s.save` / `s.transcript`, headless stages |
 | **When to reach for** | You want autonomous execution of a standard pattern out of the box, interactive chat with your agent's full toolset, or a CLI agent that can create a purpose-built workflow before doing complex work.                                  | You want to control the outer loop yourself — review flows, deployment gates, custom research pipelines — with full visibility into the TypeScript your team will run identically.                                                                                                                                                                                                    |
 | **Read next**         | [Quick Start](#quick-start) (steps 1–3)                                                                                                                                                                                                  | [Quick Start step 4](#4-build-your-own-workflow--sdk) and [Building your own atomic-powered app](#building-your-own-atomic-powered-app)                                                                                                                                                                                                                                               |
 
-Both surfaces call the same runtime underneath (tmux/psmux session graph, provider SDKs, detach/reattach) — they're two entry points, not two products. Neither depends on the other: you can `bun add @bastani/atomic` in a project without ever installing the global binary, and you can use `atomic chat` and the built-in workflows without writing any TypeScript.
+Both surfaces call the same runtime underneath (tmux/psmux session graph, provider SDKs, detach/reattach) — they're two entry points, not two products. Neither depends on the other: you can `bun add @bastani/atomic-sdk` in a project without ever installing the global binary, and you can use `atomic chat` and the built-in workflows without writing any TypeScript.
 
 ## Example use cases
 
@@ -425,9 +434,9 @@ Each agent gets its own configuration directory (`.claude/`, `.opencode/`, `.git
 
 ### Workflow SDK — Build Reliable Engineering Workflows
 
-The Workflow SDK (`@bastani/atomic/workflows`) lets you encode your team's process as TypeScript — spawn agent sessions dynamically with native control flow (`for`, `if`, `Promise.all()`), pass state explicitly, and watch each stage appear in a live graph as it runs.
+The Workflow SDK (`@bastani/atomic-sdk/workflows`) lets you encode your team's process as TypeScript — spawn agent sessions dynamically with native control flow (`for`, `if`, `Promise.all()`), pass state explicitly, and watch each stage appear in a live graph as it runs.
 
-Set up a workflow project (`bun init && bun add @bastani/atomic`), define your workflow with `defineWorkflow`, then call `runWorkflow({ workflow, inputs })` from inside whatever CLI library you prefer (Commander, citty, yargs, an OpenTUI app, …). The SDK ships pure primitives — no opinionated wrapper:
+Set up a workflow project (`bun init && bun add @bastani/atomic-sdk`), define your workflow with `defineWorkflow`, then call `runWorkflow({ workflow, inputs })` from inside whatever CLI library you prefer (Commander, citty, yargs, an OpenTUI app, …). The SDK ships pure primitives — no opinionated wrapper:
 
 ```bash
 bun run src/claude-worker.ts --prompt="describe this project"
@@ -483,7 +492,7 @@ Copy an example directory into your project as a starting point — swap the wor
 <summary><b>Example: Sequential workflow (describe → summarize)</b></summary>
 
 ```ts
-import { defineWorkflow } from "@bastani/atomic/workflows";
+import { defineWorkflow } from "@bastani/atomic-sdk/workflows";
 
 export default defineWorkflow({
   name: "my-workflow",
@@ -521,7 +530,7 @@ export default defineWorkflow({
 <summary><b>Example: Parallel workflow (describe → [summarize-a, summarize-b] → merge)</b></summary>
 
 ```ts
-import { defineWorkflow } from "@bastani/atomic/workflows";
+import { defineWorkflow } from "@bastani/atomic-sdk/workflows";
 
 export default defineWorkflow({
   name: "parallel-demo",
@@ -569,7 +578,7 @@ export default defineWorkflow({
 Declare `inputs` on `defineWorkflow` and the CLI materialises one `--<field>=<value>` flag per entry. Required fields, enum membership, and unknown-flag rejection are validated before any tmux session spawns. The interactive picker renders the same schema as a form.
 
 ```ts
-import { defineWorkflow } from "@bastani/atomic/workflows";
+import { defineWorkflow } from "@bastani/atomic-sdk/workflows";
 
 export default defineWorkflow({
   name: "gen-spec",
@@ -629,7 +638,7 @@ bun run src/claude-worker.ts \
 Stages can run headlessly (`headless: true`) — they execute the provider SDK in-process instead of spawning a tmux window. Headless stages are invisible in the graph but tracked via a background counter in the statusline.
 
 ```ts
-import { defineWorkflow, extractAssistantText } from "@bastani/atomic/workflows";
+import { defineWorkflow, extractAssistantText } from "@bastani/atomic-sdk/workflows";
 
 export default defineWorkflow({
   name: "headless-demo",
@@ -789,7 +798,7 @@ The runtime auto-creates `s.client` and `s.session` — use them directly inside
 3. `transcript()` / `getMessages()` only access completed sessions (callback returned + saves flushed)
 4. Each session runs in its own tmux window with the chosen agent
 5. Run a workflow by calling `runWorkflow({ workflow, inputs })` from inside any CLI library (Commander, citty, yargs, …). Use `listWorkflows(registry)` to iterate when registering multiple workflows.
-6. Set up your workflow project with `bun init && bun add @bastani/atomic`
+6. Set up your workflow project with `bun init && bun add @bastani/atomic-sdk`
 7. Background (headless) stages use the same callback API — `s.client`, `s.session`, `s.save()`, return values all work identically
 
 For the authoring walkthrough ask Atomic to use the `workflow-creator` skill or read `.agents/skills/workflow-creator/`.
@@ -1216,7 +1225,7 @@ Add-Content $PROFILE "`nif (Test-Path `"$cache`") { . `"$cache`" }"
 
 </details>
 
-> The bootstrap installer (`install.sh` / `install.ps1`) sets this up automatically and migrates older `eval "$(atomic completions …)"` snippets to the cached form.
+> The bootstrap installer (`install.sh` / `install.ps1` / `install.cmd`) sets this up automatically and migrates older `eval "$(atomic completions …)"` snippets to the cached form.
 
 ### Atomic-Provided Skills (invokable from any agent chat)
 
@@ -1242,7 +1251,7 @@ Native slash commands (`/help`, `/clear`, `/compact`, `/model`, `/theme`, `/agen
 
 ## Building your own atomic-powered app
 
-`@bastani/atomic/workflows` is a library, not just a CLI. Use it directly to build your own TypeScript app that runs your team's workflows.
+`@bastani/atomic-sdk/workflows` is a library, not just a CLI. Use it directly to build your own TypeScript app that runs your team's workflows.
 
 > **SDK-only users:** you don't need the global `atomic` binary, but you still need the runtime prerequisites — **[Bun](https://bun.sh/) (the SDK does not run on Node.js)**, a terminal multiplexer (tmux on macOS/Linux, psmux on Windows), and at least one authenticated coding agent CLI (`claude`, `opencode`, or `copilot`). See [Prerequisites](#prerequisites) for the "why" and install commands. The SDK spawns the agent CLI at each stage and wraps it in a detachable multiplexer session.
 >
@@ -1273,7 +1282,7 @@ The SDK ships pure functions you compose into whatever CLI shape you want:
 ```ts
 // src/claude-worker.ts
 import { Command } from "@commander-js/extra-typings";
-import { getInputSchema, runWorkflow } from "@bastani/atomic/workflows";
+import { getInputSchema, runWorkflow } from "@bastani/atomic-sdk/workflows";
 import workflow from "./workflows/review-to-merge/claude.ts";
 
 const program = new Command();
@@ -1304,7 +1313,7 @@ import {
   getName,
   listWorkflows,
   runWorkflow,
-} from "@bastani/atomic/workflows";
+} from "@bastani/atomic-sdk/workflows";
 import reviewToMerge from "./workflows/review-to-merge/claude.ts";
 import genSpec from "./workflows/gen-spec/claude.ts";
 
@@ -1331,7 +1340,7 @@ See [`examples/multi-workflow/`](./examples/multi-workflow) for a complete runna
 `runWorkflow({ workflow, inputs })` is a plain async function — you don't need a CLI at all:
 
 ```ts
-import { runWorkflow } from "@bastani/atomic/workflows";
+import { runWorkflow } from "@bastani/atomic-sdk/workflows";
 import workflow from "./workflows/review-to-merge/claude.ts";
 
 const { id, tmuxSessionName } = await runWorkflow({
@@ -1349,7 +1358,7 @@ The SDK no longer ships a Commander adapter — it doesn't need one. Just call `
 
 ```ts
 import { Command } from "@commander-js/extra-typings";
-import { getInputSchema, runWorkflow } from "@bastani/atomic/workflows";
+import { getInputSchema, runWorkflow } from "@bastani/atomic-sdk/workflows";
 import workflow from "./workflows/deploy/claude.ts";
 
 const program = new Command("my-app");
@@ -1374,7 +1383,7 @@ There's no re-entry boilerplate — the SDK ships its own internal orchestrator 
 The interactive picker (the same one `atomic workflow -a claude` opens) is exposed as a component:
 
 ```ts
-import { WorkflowPicker } from "@bastani/atomic/workflows/components";
+import { WorkflowPicker } from "@bastani/atomic-sdk/workflows/components";
 ```
 
 Mount it inside your own OpenTUI app or imperatively via `WorkflowPickerPanel.create({ agent, registry })`.
@@ -1468,8 +1477,13 @@ All three agents share the same skill set via `.agents/skills/`. Claude Code acc
 ### Update
 
 ```bash
-bun update -g @bastani/atomic      # latest stable
-bun install -g @bastani/atomic@next # prerelease
+# Re-running the bootstrap upgrades to the latest stable release in place.
+curl -fsSL https://raw.githubusercontent.com/flora131/atomic/main/install.sh | bash         # macOS / Linux
+irm https://raw.githubusercontent.com/flora131/atomic/main/install.ps1 | iex                  # Windows PowerShell
+
+# Or if you installed via npm:
+bun update -g @bastani/atomic
+bun install -g @bastani/atomic@next  # prerelease
 ```
 
 The first `atomic` run after upgrading auto-syncs tooling deps and global skills — no separate command needed.
@@ -1477,6 +1491,14 @@ The first `atomic` run after upgrading auto-syncs tooling deps and global skills
 ### Uninstall
 
 ```bash
+# macOS / Linux — remove the binary and rc-file PATH/completions hooks
+rm -f ~/.local/bin/atomic
+sed -i.bak '/# Atomic CLI/,+5d' ~/.bashrc ~/.zshrc 2>/dev/null || true
+
+# Windows — remove the binary; PATH entry persists harmlessly until cleaned manually
+Remove-Item -Path "$env:LOCALAPPDATA\atomic" -Recurse -Force
+
+# If installed via npm
 bun remove -g @bastani/atomic
 ```
 
