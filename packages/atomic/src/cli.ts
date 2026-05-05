@@ -274,20 +274,71 @@ Examples:
     //
     // Mirrors OpenCode's "every fresh-process entry is a CLI sub-command"
     // model. The launcher script written by `executeWorkflow()` runs:
-    //   <bun> <cli.ts> _orchestrator-entry <workflowSource> <agent> <inputsB64>
+    //   <bun> <cli.ts> _orchestrator-entry <name> <agent> <inputsB64> <source>
     // in dev, or
-    //   <atomic-binary> _orchestrator-entry <workflowSource> <agent> <inputsB64>
+    //   <atomic-binary> _orchestrator-entry <name> <agent> <inputsB64> <source>
     // in compiled-binary mode. The SDK never ships a separately-runnable
     // bundle that a sub-process would `bun run` from outside the package's
     // module resolution context — that pattern broke `@opentui/core`'s
     // dynamic platform-binding import.
+    //
+    // Why both `name` and `source`: in a `bun build --compile` binary every
+    // bundled module's `import.meta.path` collapses to `/$bunfs/root/<binary>`,
+    // so the `definition.source` captured at workflow-module-eval time is
+    // the binary itself, and dynamic-importing it would re-load cli.ts
+    // (no default export). In compiled-binary mode we resolve the workflow
+    // by `name + agent` against the builtin registry that's already linked
+    // into the binary; in dev / installed-package mode we fall back to
+    // dynamic import so third-party SDK consumers can spawn workflows
+    // whose definitions aren't in the builtin registry.
     program
         .command("_orchestrator-entry", { hidden: true })
         .description("Internal: load a workflow definition and run the orchestrator panel")
-        .argument("<workflowSource>", "Absolute path to the workflow's source file")
+        .argument("<workflowName>", "Workflow name (matches builtin registry)")
         .argument("<agent>", "claude | copilot | opencode")
         .argument("[inputsB64]", "Base64-encoded JSON record of structured inputs", "")
-        .action(async (workflowSource: string, agent: string, inputsB64: string) => {
+        .argument("[workflowSource]", "Workflow source path (dynamic-import fallback for non-builtin workflows in dev)", "")
+        .action(async (
+            workflowName: string,
+            agent: string,
+            inputsB64: string,
+            workflowSource: string,
+        ) => {
+            const { isCompiledBinaryRuntime } = await import(
+                "@bastani/atomic-sdk/lib/runtime-env"
+            );
+
+            // Compiled binary: source path is bunfs-collapsed and can't
+            // be dynamic-imported. Resolve by name+agent in the builtin
+            // registry, which is statically linked into the binary.
+            if (isCompiledBinaryRuntime(workflowSource)) {
+                if (!isValidAgent(agent)) {
+                    console.error(
+                        `${COLORS.red}[atomic/orchestrator-entry] Invalid agent "${agent}".${COLORS.reset}`,
+                    );
+                    process.exit(1);
+                }
+                const { createBuiltinRegistry } = await import(
+                    "./commands/builtin-registry.ts"
+                );
+                const def = createBuiltinRegistry().resolve(workflowName, agent);
+                if (!def) {
+                    console.error(
+                        `${COLORS.red}[atomic/orchestrator-entry] No workflow named "${workflowName}" for agent "${agent}" in the builtin registry.${COLORS.reset}`,
+                    );
+                    process.exit(1);
+                }
+                const { runOrchestratorWithDefinition } = await import(
+                    "@bastani/atomic-sdk/runtime/orchestrator-entry"
+                );
+                await runOrchestratorWithDefinition(def, inputsB64);
+                return;
+            }
+
+            // Dev / installed-package: dynamic-import the workflow file.
+            // Preserves third-party SDK use where the workflow lives at
+            // an arbitrary on-disk path that the builtin registry doesn't
+            // know about.
             const { runOrchestratorEntry } = await import(
                 "@bastani/atomic-sdk/runtime/orchestrator-entry"
             );
