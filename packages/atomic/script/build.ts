@@ -85,7 +85,7 @@ for (const t of requested) {
   const outfile = join(outdir, "bin", `atomic${t.ext ?? ""}`);
   const result = Bun.spawnSync({
     cmd: [
-      "bun", "build", "--compile", "--minify",
+      process.execPath, "build", "--compile", "--minify",
       "--target", t.bunTarget,
       "--outfile", outfile,
       join(CLI_PKG_ROOT, "src", "cli.ts"),

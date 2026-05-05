@@ -17,10 +17,5 @@
       "enabled": false
     }
   },
-  "instructions": [
-    "/home/alilavaee/.atomic/AGENTS.md",
-    "/home/vscode/.atomic/AGENTS.md",
-    "/home/alexlavaee/.atomic/AGENTS.md"
-  ],
   "permission": "allow"
 }
