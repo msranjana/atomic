@@ -12,10 +12,15 @@
  *     forces every variant in so cross-compile builds for non-host
  *     platforms succeed.
  *
- *  2. **Programmatic `Bun.build({ compile: { target } })` per target.**
- *     The `target: "bun-<os>-<arch>"` flag tells Bun which platform
- *     binaries to embed; no need for `--external '@opentui/*'` or any
- *     other workaround.
+ *  2. **`bun build --compile --target=bun-<os>-<arch>` per target.**
+ *     Shells out via `Bun.spawnSync` rather than calling `Bun.build({ compile })`
+ *     directly because the programmatic compile API on Windows produces
+ *     binaries where `import.meta.main` is `false` at the entrypoint —
+ *     which silently no-ops the `if (import.meta.main) { await main() }`
+ *     gate in `cli.ts`, leaving `atomic.exe` running but never parsing
+ *     argv. The CLI form sets it correctly on every platform. The
+ *     `--target` flag still tells Bun which platform binaries to embed,
+ *     so cross-compile semantics are unchanged.
  *
  * Embedded asset tarballs (`.claude.tar`, `.opencode.tar`,
  * `.github.tar`, `.agents/skills.tar`) are emitted before the build loop
@@ -78,17 +83,18 @@ for (const t of requested) {
   await mkdir(join(outdir, "bin"), { recursive: true });
 
   const outfile = join(outdir, "bin", `atomic${t.ext ?? ""}`);
-  const result = await Bun.build({
-    entrypoints: [join(CLI_PKG_ROOT, "src", "cli.ts")],
-    minify: true,
-    compile: {
-      target: t.bunTarget,
-      outfile,
-    },
+  const result = Bun.spawnSync({
+    cmd: [
+      "bun", "build", "--compile", "--minify",
+      "--target", t.bunTarget,
+      "--outfile", outfile,
+      join(CLI_PKG_ROOT, "src", "cli.ts"),
+    ],
+    stdio: ["inherit", "inherit", "inherit"],
+    cwd: WORKSPACE_ROOT,
   });
   if (!result.success) {
-    for (const log of result.logs) console.error(log);
-    process.exit(1);
+    process.exit(result.exitCode ?? 1);
   }
 
   await writeFile(join(outdir, "package.json"), JSON.stringify({
