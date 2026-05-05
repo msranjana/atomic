@@ -49,11 +49,20 @@ if (process.platform === "win32") {
   chmodSync(stubPath, 0o755);
 }
 
+// On Windows `process.env` is a case-insensitive proxy, but
+// `Object.entries(process.env)` enumerates the OS-cased key ("Path"),
+// so a plain-object copy ends up with `env.Path` populated and
+// `env.PATH` undefined. Strip any case-variant of "PATH" up front and
+// rewrite it under the platform-canonical key — otherwise the augmented
+// env we hand bun-pty drops the inherited PATH entirely, and the child
+// `atomic.exe` can't find psmux/pwsh on PATH despite the parent having
+// them.
 const env: Record<string, string> = {};
 for (const [key, value] of Object.entries(process.env)) {
-  if (value !== undefined) env[key] = value;
+  if (value !== undefined && key.toLowerCase() !== "path") env[key] = value;
 }
-env.PATH = `${stubDir}${delimiter}${env.PATH ?? ""}`;
+const pathKey = process.platform === "win32" ? "Path" : "PATH";
+env[pathKey] = `${stubDir}${delimiter}${process.env.PATH ?? ""}`;
 
 console.log(`Chat-smoke binary: ${atomicBin}`);
 console.log(`Stub agent dir:    ${stubDir}`);
