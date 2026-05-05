@@ -214,9 +214,9 @@ npm registry. Each of its six runners (Ubuntu/macOS/Windows × x64/arm64)
 exercises the **exact** install path users hit, against a **local verdaccio**
 holding the just-built artifacts:
 
-- A regression in postinstall, optionalDependencies resolution, the wrapper
-  shim, or `atomic install` lifecycle fails the matrix and **never reaches
-  npm**. npm publishes are permanent — once a bad version is up, it stays up.
+- A regression in optionalDependencies resolution, the wrapper shim, or
+  `atomic install` lifecycle fails the matrix and **never reaches npm**.
+  npm publishes are permanent — once a bad version is up, it stays up.
 - The verdaccio instance is per-runner and torn down with the VM, so there's
   no shared state. Verdaccio's `@bastani/*` packages config is `proxy: ` (no
   uplink) so a missing local tarball can't silently fall back to a previously

@@ -1,7 +1,7 @@
 # Verdaccio config for the publish-validation job.
 # Lets the validate workflow exercise the real publish + install code path
 # against a throwaway local registry — catches publish-layout regressions
-# (synthesised wrapper, optionalDependencies resolution, postinstall) before
+# (synthesised wrapper, optionalDependencies resolution) before
 # we touch the public registry.
 #
 # Anonymous publish is intentional: the validate job runs in a hermetic CI

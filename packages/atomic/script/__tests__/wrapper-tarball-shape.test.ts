@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { $ } from "bun";
 import { synthesizeWrapper } from "../publish.ts";
 
-test("wrapper tarball contains exactly bin/atomic, postinstall.mjs, package.json, LICENSE", async () => {
+test("wrapper tarball contains exactly bin/atomic, package.json, LICENSE", async () => {
   const dir = await mkdtemp(join(tmpdir(), "atomic-wrapper-shape-"));
   try {
     await synthesizeWrapper(dir, {
@@ -15,7 +15,7 @@ test("wrapper tarball contains exactly bin/atomic, postinstall.mjs, package.json
     const out = await $`npm pack --dry-run --json`.cwd(dir).quiet().text();
     const parsed = JSON.parse(out) as Array<{ files: Array<{ path: string }> }>;
     const files = parsed[0].files.map((f) => f.path).sort();
-    expect(files).toEqual(["LICENSE", "bin/atomic", "package.json", "postinstall.mjs"]);
+    expect(files).toEqual(["LICENSE", "bin/atomic", "package.json"]);
     for (const f of files) {
       expect(f.startsWith(".claude/")).toBe(false);
       expect(f.startsWith(".agents/")).toBe(false);

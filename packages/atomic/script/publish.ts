@@ -14,7 +14,6 @@ export async function synthesizeWrapper(
   const { version, repository } = opts;
   await mkdir(join(outDir, "bin"), { recursive: true });
   await copyFile(join(CLI_PKG_ROOT, "bin", "atomic"),             join(outDir, "bin", "atomic"));
-  await copyFile(join(CLI_PKG_ROOT, "script", "postinstall.mjs"), join(outDir, "postinstall.mjs"));
   await copyFile(join(WORKSPACE_ROOT, "LICENSE"),                  join(outDir, "LICENSE"));
   await writeFile(join(outDir, "package.json"), JSON.stringify({
     name: "@bastani/atomic",
@@ -28,8 +27,7 @@ export async function synthesizeWrapper(
     // and silently strips the entry, leaving the wrapper without a CLI
     // entrypoint. Use the bare `bin/atomic` form.
     bin: { atomic: "bin/atomic" },
-    files: ["bin", "postinstall.mjs", "LICENSE"],
-    scripts: { postinstall: "node ./postinstall.mjs" },
+    files: ["bin", "LICENSE"],
     optionalDependencies: Object.fromEntries(
       TARGETS.map((t) => [`@bastani/atomic-${t.name}`, version]),
     ),
