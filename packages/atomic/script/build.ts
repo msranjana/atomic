@@ -78,8 +78,14 @@ if (buildingForOtherPlatform) {
   await $`bun install --os="*" --cpu="*" @opentui/core@${opentuiCoreSpec}`.cwd(WORKSPACE_ROOT);
 }
 
+// Allow tests to redirect output to an isolated dir so concurrent test
+// files don't fight over `dist/` file locks (Windows holds the binary
+// open while another test spawns it; rm-then-rebuild then races EACCES).
+const DIST_BASE =
+  process.env.ATOMIC_BUILD_DIST_DIR ?? join(CLI_PKG_ROOT, "dist");
+
 for (const t of requested) {
-  const outdir = join(CLI_PKG_ROOT, "dist", t.name);
+  const outdir = join(DIST_BASE, t.name);
   await mkdir(join(outdir, "bin"), { recursive: true });
 
   const outfile = join(outdir, "bin", `atomic${t.ext ?? ""}`);

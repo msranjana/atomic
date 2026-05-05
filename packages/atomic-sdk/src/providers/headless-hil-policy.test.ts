@@ -84,9 +84,16 @@ describe("resolveHeadlessClaudeBin", () => {
 
   test("returns the `claude` binary when present on PATH", () => {
     const dir = mkdtempSync(join(tmpdir(), "atomic-claude-bin-"));
-    const bin = join(dir, "claude");
-    writeFileSync(bin, "#!/usr/bin/env sh\nexit 0\n");
-    chmodSync(bin, 0o755);
+    // Windows PATH lookup only matches files with a PATHEXT extension —
+    // use a `.cmd` shim there so `Bun.which("claude")` finds it.
+    const isWindows = process.platform === "win32";
+    const bin = join(dir, isWindows ? "claude.cmd" : "claude");
+    if (isWindows) {
+      writeFileSync(bin, "@echo off\r\nexit /B 0\r\n");
+    } else {
+      writeFileSync(bin, "#!/usr/bin/env sh\nexit 0\n");
+      chmodSync(bin, 0o755);
+    }
     withPath(dir, () => {
       expect(resolveHeadlessClaudeBin()).toBe(bin);
     });

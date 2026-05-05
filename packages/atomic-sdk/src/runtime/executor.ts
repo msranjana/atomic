@@ -5,13 +5,14 @@
  * 1. `executeWorkflow()` is called by the CLI command (e.g. atomic) or by
  *    the SDK's `runWorkflow()` primitive
  * 2. It creates a tmux session with an orchestrator pane that runs the
- *    SDK-owned `orchestrator-entry.ts` with three positional args:
- *    `<workflowSource> <agent> <inputsB64>`
+ *    CLI's hidden `_orchestrator-entry` sub-command with four positional
+ *    args: `<workflowName> <agent> <inputsB64> <workflowSource>`
  * 3. The CLI then attaches to the tmux session (user sees it live)
- * 4. The orchestrator pane imports the workflow module by `source`,
- *    calls `runOrchestrator(definition, inputs)`, which then calls
- *    `definition.run(workflowCtx)` — the user's callback uses
- *    `ctx.stage()` to spawn agent sessions
+ * 4. The orchestrator pane resolves the workflow definition (via builtin
+ *    registry in compiled-binary mode, or by dynamic-importing
+ *    `<workflowSource>` in dev), calls `runOrchestrator(definition, inputs)`,
+ *    which then calls `definition.run(workflowCtx)` — the user's callback
+ *    uses `ctx.stage()` to spawn agent sessions
  *
  * The dev's CLI is never re-imported. The SDK orchestrator entry script
  * is the only re-exec target, so there is no orchestrator-mode env var
@@ -520,10 +521,19 @@ export async function executeWorkflow(
   // Write a launcher script for the orchestrator pane.
   // Re-executes the atomic CLI's hidden `_orchestrator-entry` sub-command
   // with positional args:
-  //   atomic _orchestrator-entry <workflowSource> <agent> <inputsB64>
+  //   atomic _orchestrator-entry <workflowName> <agent> <inputsB64> <workflowSource>
   // (or `bun <cli.ts> _orchestrator-entry …` in dev). Mirrors OpenCode's
   // single-binary architecture — every fresh-process entry into atomic
   // goes through a CLI sub-command, never a free-standing JS bundle.
+  //
+  // Why both `name` and `source`: in a `bun build --compile` binary every
+  // bundled module's `import.meta.path` collapses to `/$bunfs/root/<binary>`,
+  // so the `definition.source` captured at workflow-module-eval time
+  // points at the binary itself. The CLI's `_orchestrator-entry` resolves
+  // by name+agent against the builtin registry in that case; in dev /
+  // installed-package mode it falls back to dynamic-importing the source
+  // so third-party SDK consumers (whose workflows aren't in the builtin
+  // registry) keep working.
   const isWin = process.platform === "win32";
   const launcherExt = isWin ? "ps1" : "sh";
   const launcherPath = join(sessionsBaseDir, `orchestrator.${launcherExt}`);
@@ -557,7 +567,7 @@ export async function executeWorkflow(
     runtime,
     cliPath,
     subcommand: "_orchestrator-entry",
-    args: [workflowSource, agent, inputsB64],
+    args: [definition.name, agent, inputsB64, workflowSource],
   });
 
   const launcherScript = isWin
@@ -1987,12 +1997,13 @@ import { validateOrchestratorEnv } from "./executor-env.ts";
 /**
  * Run the orchestrator for a compiled workflow definition.
  *
- * Called by the SDK's `orchestrator-entry.ts` after it imports the
- * workflow module by `source` and decodes the inputs payload from argv.
- * The runtime environment (`ATOMIC_WF_ID`, `ATOMIC_WF_TMUX`,
- * `ATOMIC_WF_AGENT`, `ATOMIC_WF_CWD`) is set by the launcher script that
- * `executeWorkflow()` writes — those vars describe *where* this
- * orchestrator is running, not what to do.
+ * Called by the SDK's `orchestrator-entry.ts` after it has resolved the
+ * workflow definition (either via builtin-registry lookup in compiled-
+ * binary mode, or by dynamic-importing `source` in dev) and decoded the
+ * inputs payload from argv. The runtime environment (`ATOMIC_WF_ID`,
+ * `ATOMIC_WF_TMUX`, `ATOMIC_WF_AGENT`, `ATOMIC_WF_CWD`) is set by the
+ * launcher script that `executeWorkflow()` writes — those vars describe
+ * *where* this orchestrator is running, not what to do.
  */
 export async function runOrchestrator(
   definition: WorkflowDefinition,

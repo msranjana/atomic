@@ -472,13 +472,14 @@ describe("getSessionStatus", () => {
       sessions: [],
     };
     const readSpy = mock(async () => snapshot);
+    const fakeBase = process.platform === "win32" ? "C:\\fake\\base" : "/fake/base";
     const result = await getSessionStatus(
       "atomic-wf-claude-ralph-deadbeef",
-      makeDeps({ readSnapshot: readSpy, sessionsBaseDir: "/fake/base" }),
+      makeDeps({ readSnapshot: readSpy, sessionsBaseDir: fakeBase }),
     );
     expect(result).toEqual(snapshot);
     expect(readSpy).toHaveBeenCalledTimes(1);
-    expect(readSpy).toHaveBeenCalledWith("/fake/base/deadbeef");
+    expect(readSpy).toHaveBeenCalledWith(join(fakeBase, "deadbeef"));
   });
 });
 

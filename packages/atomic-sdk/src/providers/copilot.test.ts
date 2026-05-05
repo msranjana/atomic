@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   copilotSubprocessEnv,
@@ -10,13 +10,24 @@ import {
   resolveCopilotCliPath,
 } from "./copilot.ts";
 
+const IS_WINDOWS = process.platform === "win32";
+// Windows PATH lookup (Bun.which / OS where) only matches files with a
+// PATHEXT extension. Linux/macOS match by exact name + executable bit.
+// Use a `.cmd` shim on Windows so the same test can assert PATH
+// resolution cross-platform.
+const COPILOT_BIN_NAME = IS_WINDOWS ? "copilot.cmd" : "copilot";
+
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 function makeTempCopilotBin(): { dir: string; bin: string } {
   const dir = mkdtempSync(join(tmpdir(), "atomic-copilot-test-"));
-  const bin = join(dir, "copilot");
-  writeFileSync(bin, "#!/bin/sh\necho copilot\n", { encoding: "utf-8" });
-  chmodSync(bin, 0o755);
+  const bin = join(dir, COPILOT_BIN_NAME);
+  if (IS_WINDOWS) {
+    writeFileSync(bin, "@echo off\r\necho copilot\r\n", { encoding: "utf-8" });
+  } else {
+    writeFileSync(bin, "#!/bin/sh\necho copilot\n", { encoding: "utf-8" });
+    chmodSync(bin, 0o755);
+  }
   return { dir, bin };
 }
 
@@ -97,7 +108,8 @@ describe("resolveCopilotCliPath", () => {
   test("PATH-resolved copilot binary populates cliPath when env var unset", () => {
     delete process.env["COPILOT_CLI_PATH"];
     const { dir, bin } = makeTempCopilotBin();
-    process.env["PATH"] = `${dir}:${origPath ?? ""}`;
+    // Prepend tempdir so it's the first hit, using OS-correct PATH delim.
+    process.env["PATH"] = `${dir}${delimiter}${origPath ?? ""}`;
     const result = resolveCopilotCliPath();
     expect(result).toBe(bin);
   });
@@ -198,7 +210,7 @@ describe("copilotSdkLaunchOptions", () => {
   test("cliPath populated from PATH-resolved binary", () => {
     delete process.env["COPILOT_CLI_PATH"];
     const { dir, bin } = makeTempCopilotBin();
-    process.env["PATH"] = `${dir}:${origPath ?? ""}`;
+    process.env["PATH"] = `${dir}${delimiter}${origPath ?? ""}`;
     const opts = copilotSdkLaunchOptions();
     expect(opts.cliPath).toBe(bin);
   });
@@ -281,28 +293,38 @@ describe("isCopilotShim", () => {
 // ── enumeratePathCandidates ───────────────────────────────────────────────
 
 describe("enumeratePathCandidates", () => {
+  // The function does a literal `existsSync(join(dir, cmd))` lookup with
+  // no PATHEXT magic, so on Windows we must pass the explicit
+  // `copilot.cmd` filename (matching the stub) and split with the OS
+  // PATH delimiter.
   test("returns empty array when PATH has no matching binary", () => {
     const empty = makeEmptyTempDir();
-    expect(enumeratePathCandidates("copilot", empty)).toEqual([]);
+    expect(enumeratePathCandidates(COPILOT_BIN_NAME, empty)).toEqual([]);
   });
 
   test("returns single match when one dir has binary", () => {
     const { dir, bin } = makeTempCopilotBin();
-    const result = enumeratePathCandidates("copilot", dir);
+    const result = enumeratePathCandidates(COPILOT_BIN_NAME, dir);
     expect(result).toEqual([bin]);
   });
 
   test("returns ordered matches from multiple PATH dirs", () => {
     const { dir: dir1, bin: bin1 } = makeTempCopilotBin();
     const { dir: dir2, bin: bin2 } = makeTempCopilotBin();
-    const result = enumeratePathCandidates("copilot", `${dir1}:${dir2}`);
+    const result = enumeratePathCandidates(
+      COPILOT_BIN_NAME,
+      `${dir1}${delimiter}${dir2}`,
+    );
     expect(result).toEqual([bin1, bin2]);
   });
 
   test("skips dirs that do not contain the binary", () => {
     const empty = makeEmptyTempDir();
     const { dir, bin } = makeTempCopilotBin();
-    const result = enumeratePathCandidates("copilot", `${empty}:${dir}`);
+    const result = enumeratePathCandidates(
+      COPILOT_BIN_NAME,
+      `${empty}${delimiter}${dir}`,
+    );
     expect(result).toEqual([bin]);
   });
 });
@@ -352,14 +374,14 @@ describe("resolveCopilotCliPath shim rejection", () => {
   test("skips shim and returns second PATH candidate (real binary)", () => {
     const shimDir = makeNodeShimDir();
     const { dir: realDir, bin: realBin } = makeTempCopilotBin();
-    process.env["PATH"] = `${shimDir}:${realDir}`;
+    process.env["PATH"] = `${shimDir}${delimiter}${realDir}`;
     expect(resolveCopilotCliPath()).toBe(realBin);
   });
 
   test("returns first non-shim when multiple real binaries on PATH", () => {
     const { dir: dir1, bin: bin1 } = makeTempCopilotBin();
     const { dir: dir2 } = makeTempCopilotBin();
-    process.env["PATH"] = `${dir1}:${dir2}`;
+    process.env["PATH"] = `${dir1}${delimiter}${dir2}`;
     expect(resolveCopilotCliPath()).toBe(bin1);
   });
 });

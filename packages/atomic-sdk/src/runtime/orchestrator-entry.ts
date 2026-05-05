@@ -2,10 +2,15 @@
  * SDK-owned orchestrator entry point.
  *
  * Called by the CLI's hidden `_orchestrator-entry` sub-command in the tmux
- * pane that the workflow launcher script spawns. Receives the workflow
- * source path, agent, and base64-encoded inputs as positional arguments,
- * imports the workflow module, validates the default export, and hands off
- * to `runOrchestrator()`.
+ * pane that the workflow launcher script spawns. Two paths:
+ *   - `runOrchestratorWithDefinition` — used in compiled-binary mode where
+ *     the CLI has already resolved the workflow against its builtin
+ *     registry. Avoids the dynamic-import-by-source path because Bun
+ *     collapses every bundled module's `import.meta.path` to the binary's
+ *     bunfs entry.
+ *   - `runOrchestratorEntry` — dev / installed-package fallback. Imports
+ *     the workflow module by `source` so third-party SDK consumers can
+ *     spawn workflows whose definitions aren't in the builtin registry.
  *
  * This module is deliberately not its own executable. Mirroring OpenCode's
  * single-binary architecture, every fresh-process entry into atomic goes
@@ -25,6 +30,25 @@ function isWorkflowDefinition(value: unknown): value is WorkflowDefinition {
     value !== null &&
     (value as { __brand?: unknown }).__brand === "WorkflowDefinition"
   );
+}
+
+/**
+ * Run the orchestrator panel against an already-resolved WorkflowDefinition.
+ *
+ * Used by the CLI's `_orchestrator-entry` sub-command in compiled-binary
+ * mode, where every bundled module's `import.meta.path` collapses to the
+ * binary's bunfs entry (`/$bunfs/root/<binary>`) and a dynamic
+ * `await import(sourcePath)` of the captured `definition.source` would
+ * re-import the CLI entry instead of the workflow file. The CLI looks the
+ * workflow up in its builtin registry by `name + agent` and hands the
+ * already-evaluated definition straight to this function.
+ */
+export async function runOrchestratorWithDefinition(
+  def: WorkflowDefinition,
+  inputsB64: string,
+): Promise<void> {
+  const inputs = decodeInputs(inputsB64);
+  await runOrchestrator(def, inputs);
 }
 
 /** Decode the base64 inputs payload into a string-keyed record. */

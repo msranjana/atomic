@@ -471,6 +471,19 @@ describe("_parseWindowsNetstatOutput", () => {
 // ---------------------------------------------------------------------------
 
 describe("getListeningPortForPid polling loop", () => {
+  // On Windows the real platform implementation shells out to powershell
+  // (`Get-NetTCPConnection`, `Get-CimInstance`), each spawn taking ~1.3s
+  // for runtime cold-start — too slow to honor the tight test timeouts
+  // below. Inject a fast no-op stub so we can exercise the polling-loop
+  // contract independent of the platform's syscall latency. Linux/macOS
+  // have fast spawn paths so this is just for parity.
+  const installFastSpawn = (): (() => void) =>
+    _setPortDiscoverySpawnSyncForTest(() => ({
+      stdout: { toString: () => "" },
+      stderr: { toString: () => "" },
+      success: true,
+    }));
+
   test("returns port on first non-null read", async () => {
     // We can't inject the resolver directly, but we can test via E2E with a
     // very short timeout on the real process — testing the loop logic is
@@ -479,26 +492,36 @@ describe("getListeningPortForPid polling loop", () => {
     // we get a port.
     //
     // For pure unit testing of the loop, we verify the timeout path.
-    const result = await getListeningPortForPid(-999999, {
-      timeoutMs: 50,
-      pollIntervalMs: 10,
-    });
-    // PID -999999 doesn't exist, so either process-alive check returns false
-    // or we timeout. Either way, null.
-    expect(result).toBeNull();
+    const restore = installFastSpawn();
+    try {
+      const result = await getListeningPortForPid(-999999, {
+        timeoutMs: 50,
+        pollIntervalMs: 10,
+      });
+      // PID -999999 doesn't exist, so either process-alive check returns
+      // false or we timeout. Either way, null.
+      expect(result).toBeNull();
+    } finally {
+      restore();
+    }
   });
 
   test("returns null on timeout for non-listening PID", async () => {
     // Use a real but non-listening PID (our parent shell or similar)
     // The process exists but has no listening TCP socket.
     // With a very short timeout we should get null quickly.
-    const result = await getListeningPortForPid(process.ppid ?? 1, {
-      timeoutMs: 200,
-      pollIntervalMs: 50,
-    });
-    // Either it times out (null) or parent happens to listen (number).
-    // We can't assert exact value but we can assert type.
-    expect(result === null || typeof result === "number").toBe(true);
+    const restore = installFastSpawn();
+    try {
+      const result = await getListeningPortForPid(process.ppid ?? 1, {
+        timeoutMs: 200,
+        pollIntervalMs: 50,
+      });
+      // Either it times out (null) or parent happens to listen (number).
+      // We can't assert exact value but we can assert type.
+      expect(result === null || typeof result === "number").toBe(true);
+    } finally {
+      restore();
+    }
   });
 
   test("returns null immediately for dead PID", async () => {
