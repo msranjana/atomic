@@ -27,7 +27,8 @@ afterEach(() => {
 
 describe("atomic temp helpers", () => {
   test("uses a per-user directory under ~/.atomic/tmp", () => {
-    expect(atomicTempDir("/home/alice")).toBe("/home/alice/.atomic/tmp");
+    const home = process.platform === "win32" ? "C:\\Users\\alice" : "/home/alice";
+    expect(atomicTempDir(home)).toBe(join(home, ".atomic", "tmp"));
   });
 
   test("creates the temp directory with owner-only permissions", () => {

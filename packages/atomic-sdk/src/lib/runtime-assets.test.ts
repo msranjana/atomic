@@ -15,14 +15,19 @@ import {
 } from "./runtime-assets.ts";
 
 describe("runtimeAssetsCacheDir", () => {
+  // Use a platform-appropriate fake home so the assertion's separator
+  // matches what `path.join` produces. Hard-coding `/home/test` makes
+  // the prefix check fail on Windows (backslash vs forward slash).
+  const fakeHome = process.platform === "win32" ? "C:\\Users\\test" : "/home/test";
+
   test("lives under ~/.atomic/runtime/<sdk-version>", () => {
-    const dir = runtimeAssetsCacheDir("/home/test");
-    expect(dir.startsWith("/home/test/.atomic/runtime/")).toBe(true);
+    const dir = runtimeAssetsCacheDir(fakeHome);
+    expect(dir.startsWith(join(fakeHome, ".atomic", "runtime") + (process.platform === "win32" ? "\\" : "/"))).toBe(true);
   });
 
   test("is stable across calls within a single SDK version", () => {
-    expect(runtimeAssetsCacheDir("/home/test")).toBe(
-      runtimeAssetsCacheDir("/home/test"),
+    expect(runtimeAssetsCacheDir(fakeHome)).toBe(
+      runtimeAssetsCacheDir(fakeHome),
     );
   });
 

@@ -8,16 +8,27 @@ import { getEmbeddedAsset, BUNDLES } from "./embedded-assets.ts";
 
 let cacheDir: string;
 let originalXdg: string | undefined;
+let originalLocalAppData: string | undefined;
+// `cacheRoot()` in `embedded-assets.ts` reads LOCALAPPDATA on Windows and
+// XDG_CACHE_HOME on Linux/macOS — set both so the test's tmp dir is picked
+// up regardless of host OS, and the cache subdir is `cacheDir/atomic[/Cache]/...`.
+const CACHE_PREFIX_SEGMENTS = process.platform === "win32"
+  ? ["atomic", "Cache"]
+  : ["atomic"];
 
 beforeEach(async () => {
   cacheDir = await mkdtemp(join(tmpdir(), "atomic-embedded-"));
   originalXdg = process.env.XDG_CACHE_HOME;
+  originalLocalAppData = process.env.LOCALAPPDATA;
   process.env.XDG_CACHE_HOME = cacheDir;
+  process.env.LOCALAPPDATA = cacheDir;
 });
 
 afterEach(async () => {
   if (originalXdg === undefined) delete process.env.XDG_CACHE_HOME;
   else process.env.XDG_CACHE_HOME = originalXdg;
+  if (originalLocalAppData === undefined) delete process.env.LOCALAPPDATA;
+  else process.env.LOCALAPPDATA = originalLocalAppData;
   await rm(cacheDir, { recursive: true, force: true });
 });
 
@@ -47,7 +58,7 @@ test("tar failure does not write marker", async () => {
 
   await expect(getEmbeddedAsset("claude")).rejects.toThrow(/tar failed for claude/);
 
-  const marker = join(cacheDir, "atomic", VERSION, "claude", ".extracted");
+  const marker = join(cacheDir, ...CACHE_PREFIX_SEGMENTS, VERSION, "claude", ".extracted");
   expect(existsSync(marker)).toBe(false);
 
   spy.mockRestore();
@@ -62,8 +73,8 @@ test("VERSION drives cache subdir, not 'dev'", async () => {
 
   const result = await getEmbeddedAsset("claude");
 
-  expect(result).toBe(join(cacheDir, "atomic", VERSION, "claude"));
-  expect(result).not.toContain("/dev/");
+  expect(result).toBe(join(cacheDir, ...CACHE_PREFIX_SEGMENTS, VERSION, "claude"));
+  expect(result).not.toMatch(/[\\/]dev[\\/]/);
 
   spy.mockRestore();
 });

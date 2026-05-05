@@ -919,9 +919,22 @@ describe("discoverCopilotBinary / shouldOverrideCopilotCliPath", () => {
     rmSync(sandbox, { recursive: true, force: true });
   });
 
-  function putExe(dir: string, name: string, contents = "#!/bin/sh\necho $0"): string {
+  /**
+   * Cross-platform stub binary writer. `discoverCopilotBinary` and
+   * `isNodeOnPath` look for `<name>.exe` on Windows (PATHEXT-aware) and
+   * the bare name on Unix; this helper writes whichever the host
+   * resolver expects so the same test logic works everywhere.
+   */
+  function putExe(dir: string, name: string, contents?: string): string {
+    if (process.platform === "win32") {
+      const p = join(dir, `${name}.exe`);
+      // Real PE binary content isn't required — the resolver only does a
+      // file-exists/`isFile` check on Windows (no executable bit there).
+      writeFileSync(p, contents ?? "stub\r\n");
+      return p;
+    }
     const p = join(dir, name);
-    writeFileSync(p, contents);
+    writeFileSync(p, contents ?? "#!/bin/sh\necho $0");
     chmodSync(p, 0o755);
     return p;
   }
@@ -1016,7 +1029,10 @@ describe("buildPaneCommand", () => {
     const { command } = buildPaneCommand("copilot");
     // Accept either a bare name (binary not on PATH in test env) or an
     // absolute path resolved via Bun.which — both end in "copilot".
-    expect(command).toMatch(/^("[^"]*\/)?[^\s"]*copilot"?\s/);
+    // Windows paths use `\\` separators and the resolved binary has a
+    // `.exe` suffix; the optional `(\.exe)?` and dual-separator class
+    // keep this matcher cross-platform.
+    expect(command).toMatch(/^("[^"]*[\\/])?[^\s"]*copilot(\.exe)?"?\s/);
   });
 
   test("opencode: command contains --port 0 but not --ui-server", () => {
@@ -1027,28 +1043,40 @@ describe("buildPaneCommand", () => {
 
   test("opencode: command invokes the opencode binary as the first token", () => {
     const { command } = buildPaneCommand("opencode");
-    expect(command).toMatch(/^("[^"]*\/)?[^\s"]*opencode"?\s/);
+    expect(command).toMatch(/^("[^"]*[\\/])?[^\s"]*opencode(\.exe)?"?\s/);
   });
 
   test("claude: command resolves to a shell and does not contain --port", () => {
     const { command } = buildPaneCommand("claude");
     // SHELL is typically already absolute (e.g. /bin/zsh) so it passes through
-    // unchanged; bare fallbacks ("sh"/"pwsh") get resolved via Bun.which.
+    // unchanged; bare fallbacks ("sh"/"pwsh") get resolved via Bun.which —
+    // which returns a `.exe`-suffixed path on Windows.
     const expected =
       process.env.SHELL || (process.platform === "win32" ? "pwsh" : "sh");
-    const stripped = command.replace(/^"|"$/g, "");
+    // The command emitted into the tmux pane line is bash-escaped (each
+    // `\` and `"` is prefixed with a literal `\`) and wrapped in quotes
+    // when the path has special chars. Reverse both transforms to recover
+    // the original path before comparing — Windows shell paths
+    // (e.g. `C:\Program Files\PowerShell\7\pwsh.exe`) hit this branch.
+    const stripped = command
+      .replace(/^"|"$/g, "")
+      .replace(/\\(.)/g, "$1");
     if (expected.includes("/") || expected.includes("\\")) {
       expect(stripped).toBe(expected);
     } else {
       // Bare fallback either resolved via Bun.which or returned as-is.
-      expect(stripped.endsWith(expected) || stripped === expected).toBe(true);
+      const variants = [expected, `${expected}.exe`];
+      expect(
+        variants.some((v) => stripped.endsWith(v) || stripped === v),
+      ).toBe(true);
     }
     expect(command).not.toContain("--port");
   });
 
   test("claude: scopes temp files to the user's Atomic temp directory", () => {
     const { envVars } = buildPaneCommand("claude");
-    expect(envVars.TMPDIR).toMatch(/\/\.atomic\/tmp$/);
+    // `path.join`'s separator differs by platform; accept either form.
+    expect(envVars.TMPDIR).toMatch(/[\\/]\.atomic[\\/]tmp$/);
     expect(envVars.TMP).toBe(envVars.TMPDIR);
     expect(envVars.TEMP).toBe(envVars.TMPDIR);
   });
