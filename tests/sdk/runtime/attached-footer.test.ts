@@ -54,16 +54,24 @@ describe("attached footer command harness", () => {
     expect(script).not.toContain("\\$HOME");
   });
 
-  test("resolves the CLI path with Windows separators when simulating win32", () => {
-    expect(
-      resolveAttachedFooterCliPath("C:\\repo\\packages\\atomic-sdk\\src\\runtime", "win32"),
-    ).toBe("C:\\repo\\packages\\atomic\\src\\cli.ts");
+  test("returns an explicit override verbatim", () => {
+    // Mirrors Claude Code SDK's pathToClaudeCodeExecutable semantics — the
+    // override IS the resolution. Bare command names round-trip so the shell
+    // can PATH-resolve them at exec time.
+    expect(resolveAttachedFooterCliPath("/usr/local/bin/atomic")).toBe(
+      "/usr/local/bin/atomic",
+    );
+    expect(resolveAttachedFooterCliPath("atomic")).toBe("atomic");
   });
 
-  test("resolves the CLI path with POSIX separators on Unix-like platforms", () => {
-    expect(
-      resolveAttachedFooterCliPath("/repo/packages/atomic-sdk/src/runtime", "linux"),
-    ).toBe("/repo/packages/atomic/src/cli.ts");
+  test("default resolution lands inside @bastani/atomic-sdk (never a sibling package)", () => {
+    // Pre-fix bug: the resolver walked into a sibling `atomic/` package
+    // looking for the user-facing CLI, which broke SDK-only consumers.
+    // The new resolver delegates to `import.meta.resolve` so it stays
+    // inside the SDK's own published layout.
+    const cli = resolveAttachedFooterCliPath();
+    expect(cli).toContain("atomic-sdk");
+    expect(cli.endsWith("cli.ts") || cli.endsWith("cli.js")).toBe(true);
   });
 
   test("builds guarded footer close hooks for tmux", () => {
