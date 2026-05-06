@@ -47,6 +47,14 @@ coveragePathIgnorePatterns = [
   "packages/atomic-sdk/src/components/orchestrator-panel.tsx",
   "packages/atomic-sdk/src/components/compact-switcher.tsx",
   "packages/atomic-sdk/src/components/session-graph-panel.tsx",
+  # tui: Box/Text/Footer are reference-identity markers (function bodies
+  # never execute — the parser intercepts via `===`), and mux.ts/renderer.ts
+  # wrap subprocess calls into a running tmux/psmux server. The compile
+  # path is covered by tui/compiler/parser.test.tsx and the consumer JSX
+  # (attachedStatusline) is covered by runtime/attached-footer.test.ts.
+  "packages/atomic-sdk/src/tui/components.tsx",
+  "packages/atomic-sdk/src/tui/mux.ts",
+  "packages/atomic-sdk/src/tui/renderer.ts",
   # Commander subcommand builder — action handlers call process.exit and
   # dynamically import subprocess orchestration modules.
   "packages/atomic/src/commands/cli/management-commands.ts",

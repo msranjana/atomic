@@ -19,7 +19,7 @@
 
 import { test, expect, describe } from "bun:test";
 import { existsSync } from "node:fs";
-import { resolveSdkCliPath } from "./self-exec.ts";
+import { buildSelfExecCommand, resolveSdkCliPath } from "./self-exec.ts";
 
 describe("resolveSdkCliPath", () => {
   test("override is returned verbatim (absolute path)", () => {
@@ -77,5 +77,125 @@ describe("resolveSdkCliPath", () => {
     expect(cli).not.toContain("/atomic/dist/");
     expect(cli).not.toContain("\\atomic\\src\\");
     expect(cli).not.toContain("\\atomic\\dist\\");
+  });
+});
+
+describe("buildSelfExecCommand", () => {
+  describe("posix / bash", () => {
+    test("dev runtime emits `<bun> <cli> <subcommand> <args…>`, all values double-quoted", () => {
+      const cmd = buildSelfExecCommand({
+        runtime: "/usr/bin/bun",
+        cliPath: "/repo/packages/atomic-sdk/src/cli.ts",
+        subcommand: "_orchestrator-entry",
+        args: ["session-1", "/work dir/value"],
+        platform: "linux",
+      });
+      expect(cmd).toBe(
+        `"/usr/bin/bun" "/repo/packages/atomic-sdk/src/cli.ts" _orchestrator-entry "session-1" "/work dir/value"`,
+      );
+    });
+
+    test("compiled-binary runtime (runtime === cliPath) drops the cli script argument", () => {
+      // The binary auto-injects argv[1]; emitting the script explicitly
+      // would put a stray <binary> token before the subcommand and
+      // Commander would mis-route the call.
+      const cmd = buildSelfExecCommand({
+        runtime: "/opt/atomic",
+        cliPath: "/opt/atomic",
+        subcommand: "_cc-debounce",
+        args: [],
+        platform: "darwin",
+      });
+      expect(cmd).toBe(`"/opt/atomic" _cc-debounce`);
+    });
+
+    test("flag-shaped argv tokens are emitted bare; values are double-quoted", () => {
+      const cmd = buildSelfExecCommand({
+        runtime: "/usr/bin/bun",
+        cliPath: "/repo/cli.ts",
+        subcommand: "_x",
+        args: ["--name", "agent-1", "-v", "value with spaces"],
+        platform: "linux",
+      });
+      expect(cmd).toBe(
+        `"/usr/bin/bun" "/repo/cli.ts" _x --name "agent-1" -v "value with spaces"`,
+      );
+    });
+
+    test("special bash characters in values are escaped with a backslash", () => {
+      const cmd = buildSelfExecCommand({
+        runtime: "/usr/bin/bun",
+        cliPath: "/repo/cli.ts",
+        subcommand: "_x",
+        args: ['a"b', "$VAR", "back`tick", "bang!"],
+        platform: "linux",
+      });
+      expect(cmd).toBe(
+        `"/usr/bin/bun" "/repo/cli.ts" _x "a\\"b" "\\$VAR" "back\\\`tick" "bang\\!"`,
+      );
+    });
+
+    test("newlines and NUL bytes inside argv are flattened to spaces / dropped", () => {
+      const cmd = buildSelfExecCommand({
+        runtime: "/usr/bin/bun",
+        cliPath: "/repo/cli.ts",
+        subcommand: "_x",
+        args: ["line1\nline2", "with\0nul"],
+        platform: "linux",
+      });
+      expect(cmd).toBe(
+        `"/usr/bin/bun" "/repo/cli.ts" _x "line1 line2" "withnul"`,
+      );
+    });
+  });
+
+  describe("win32 / pwsh", () => {
+    test("dev runtime emits single-quoted pwsh literals for runtime, cli, subcommand and args", () => {
+      const cmd = buildSelfExecCommand({
+        runtime: "C:\\Program Files\\bun\\bun.exe",
+        cliPath: "C:\\repo\\cli.ts",
+        subcommand: "_orchestrator-entry",
+        args: ["session-1", "C:\\work dir\\value"],
+        platform: "win32",
+      });
+      expect(cmd).toBe(
+        `'C:\\Program Files\\bun\\bun.exe' 'C:\\repo\\cli.ts' '_orchestrator-entry' 'session-1' 'C:\\work dir\\value'`,
+      );
+    });
+
+    test("compiled-binary runtime (runtime === cliPath) drops the cli script argument", () => {
+      const cmd = buildSelfExecCommand({
+        runtime: "C:\\opt\\atomic.exe",
+        cliPath: "C:\\opt\\atomic.exe",
+        subcommand: "_cc-debounce",
+        args: ["a", "b"],
+        platform: "win32",
+      });
+      expect(cmd).toBe(
+        `'C:\\opt\\atomic.exe' '_cc-debounce' 'a' 'b'`,
+      );
+    });
+
+    test("single quotes inside values are doubled per pwsh single-quoted literal rules", () => {
+      const cmd = buildSelfExecCommand({
+        runtime: "bun.exe",
+        cliPath: "cli.ts",
+        subcommand: "_x",
+        args: ["it's a value"],
+        platform: "win32",
+      });
+      expect(cmd).toBe(`'bun.exe' 'cli.ts' '_x' 'it''s a value'`);
+    });
+
+    test("newlines and NUL bytes inside argv are flattened to spaces / dropped", () => {
+      const cmd = buildSelfExecCommand({
+        runtime: "bun.exe",
+        cliPath: "cli.ts",
+        subcommand: "_x",
+        args: ["line1\nline2", "with\0nul"],
+        platform: "win32",
+      });
+      expect(cmd).toBe(`'bun.exe' 'cli.ts' '_x' 'line1 line2' 'withnul'`);
+    });
   });
 });
