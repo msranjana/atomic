@@ -59,6 +59,13 @@ async function dispatch(
   cliInputs: Record<string, string>,
   detach: boolean,
 ): Promise<void> {
+  // The SDK's `runWorkflow` auto-defaults `pathToAtomicExecutable` to
+  // `process.execPath` in compiled-binary hosts, so atomic's compiled
+  // CLI self-dispatches `_orchestrator-entry` through its own binary
+  // (handled by atomic's hidden Commander command, which falls back to
+  // the builtin registry when the SDK's source-path dispatcher can't
+  // resolve). In dev mode (`bun packages/atomic/src/cli.ts …`) the
+  // auto-default returns undefined and the SDK's host-bun branch fires.
   await runWorkflow({
     workflow,
     inputs: cliInputs,

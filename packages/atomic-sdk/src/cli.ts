@@ -1,63 +1,16 @@
 #!/usr/bin/env bun
 /**
- * SDK-bundled internal CLI dispatcher.
+ * SDK-bundled internal CLI dispatcher entry point.
  *
- * The SDK self-execs into a fresh sub-process to spawn long-running pieces
- * of a workflow (orchestrator pane, attached footer, cc-debounce hook). To
- * avoid coupling SDK consumers to the user-facing `@bastani/atomic` CLI
- * package, the SDK ships its own dispatcher right here. `lib/self-exec.ts`
- * resolves to this file by default; consumers may override the resolved
- * path through `runWorkflow({ pathToAtomicExecutable })` (mirrors the
- * Claude Code SDK's `pathToClaudeCodeExecutable`).
+ * Spawned by the SDK's host-bun resolver as `<bun> <this-script>
+ * _orchestrator-entry|_cc-debounce <args>` whenever `runWorkflow` is
+ * called from a host that ships at a real on-disk path (workspace dev or
+ * `node_modules` install).
  *
- * Subcommands handled:
- *   _orchestrator-entry <workflowName> <agent> [inputsB64] [workflowSource]
- *   _cc-debounce <paneId>
- *
- * Compiled-binary mode is intentionally not handled here: when the runtime
- * is a `bun build --compile` of the user-facing CLI, `resolveSdkCliPath()`
- * returns `process.execPath` and the binary's own dispatcher receives the
- * argv. This script only runs when the SDK lives at an installed-package
- * path or in workspace dev mode.
+ * The dispatch logic lives as a top-level argv side-effect in
+ * `./lib/auto-dispatch.ts` (so it ALSO fires when consumers import the
+ * SDK barrel into a `bun build --compile` binary — that's the entire
+ * reason compiled hosts no longer need any boilerplate). This script
+ * just imports that side-effect so it runs when bun loads the file.
  */
-
-import { Command } from "@commander-js/extra-typings";
-
-const program = new Command()
-  .name("atomic-sdk")
-  .description("Internal dispatcher used by @bastani/atomic-sdk self-exec")
-  .helpCommand(false);
-
-program
-  .command("_orchestrator-entry", { hidden: true })
-  .description("Internal: load a workflow definition and run the orchestrator panel")
-  .argument("<workflowName>", "Workflow name")
-  .argument("<agent>", "claude | copilot | opencode")
-  .argument("[inputsB64]", "Base64-encoded JSON record of structured inputs", "")
-  .argument(
-    "[workflowSource]",
-    "Workflow source path (dynamic-import target)",
-    "",
-  )
-  .action(async (
-    _workflowName: string,
-    agent: string,
-    inputsB64: string,
-    workflowSource: string,
-  ) => {
-    const { runOrchestratorEntry } = await import(
-      "./runtime/orchestrator-entry.ts"
-    );
-    await runOrchestratorEntry(workflowSource, agent, inputsB64);
-  });
-
-program
-  .command("_cc-debounce", { hidden: true })
-  .description("Internal: debounce Ctrl+C presses inside Atomic-managed tmux panes")
-  .argument("<paneId>", "tmux pane id (e.g. %0)")
-  .action(async (paneId: string) => {
-    const { runCcDebounce } = await import("./runtime/cc-debounce.ts");
-    process.exit(runCcDebounce(paneId));
-  });
-
-await program.parseAsync(process.argv);
+import "./lib/auto-dispatch.ts";
