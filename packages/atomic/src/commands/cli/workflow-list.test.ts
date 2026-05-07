@@ -11,6 +11,7 @@
 import { describe, test, expect, beforeAll, beforeEach, afterAll, afterEach, mock } from "bun:test";
 import { workflowListCommand } from "./workflow-list.ts";
 import type { AgentType, WorkflowDefinition } from "@bastani/atomic-sdk/workflows";
+import type { BrokenWorkflow } from "@bastani/atomic-sdk";
 
 function def(agent: AgentType, name: string, description = ""): WorkflowDefinition {
   return {
@@ -20,7 +21,6 @@ function def(agent: AgentType, name: string, description = ""): WorkflowDefiniti
     description,
     inputs: [],
     minSDKVersion: null,
-    source: import.meta.path,
     run: async () => {},
   } as unknown as WorkflowDefinition;
 }
@@ -227,6 +227,255 @@ describe("workflowListCommand", () => {
     expect(cap.stdout).toContain("plan version B");
     // Two separate groups means "ralph" appears as a heading twice.
     expect(cap.stdout.match(/\bralph\b/g)?.length).toBe(2);
+  });
+});
+
+function brokenEntry(alias: string, reason: string, source = "/path/to/settings.json"): BrokenWorkflow {
+  return {
+    alias,
+    origin: "local",
+    agents: ["claude"],
+    reason,
+    source,
+    fix: "Check your settings.json",
+  };
+}
+
+describe("workflowListCommand — broken workflows", () => {
+  test("no skipped section when activeBroken empty", async () => {
+    const cap = captureOutput();
+    let code: number;
+    try {
+      code = await workflowListCommand(
+        {},
+        { list: () => fixture, broken: () => [] },
+      );
+    } finally {
+      cap.restore();
+    }
+    expect(code).toBe(0);
+    expect(cap.stdout).not.toContain("skipped");
+    expect(cap.stdout).not.toContain("✗");
+  });
+
+  test("skipped section appears after healthy section when broken non-empty", async () => {
+    const brokenList: readonly BrokenWorkflow[] = [
+      brokenEntry("bad-wf", "SyntaxError: unexpected token"),
+    ];
+    const cap = captureOutput();
+    let code: number;
+    try {
+      code = await workflowListCommand(
+        {},
+        { list: () => fixture, broken: () => brokenList },
+      );
+    } finally {
+      cap.restore();
+    }
+    expect(code).toBe(0);
+    // healthy content appears first
+    const ralphIdx = cap.stdout.indexOf("ralph");
+    const skippedIdx = cap.stdout.indexOf("skipped");
+    expect(ralphIdx).toBeGreaterThan(-1);
+    expect(skippedIdx).toBeGreaterThan(ralphIdx);
+  });
+
+  test("skipped row format: ✗ <alias>   failed to load — <reason>", async () => {
+    const brokenList: readonly BrokenWorkflow[] = [
+      brokenEntry("my-wf", "TypeError: cannot read property"),
+    ];
+    const cap = captureOutput();
+    try {
+      await workflowListCommand(
+        {},
+        { list: () => [], broken: () => brokenList },
+      );
+    } finally {
+      cap.restore();
+    }
+    expect(cap.stdout).toContain("✗");
+    expect(cap.stdout).toContain("my-wf");
+    expect(cap.stdout).toContain("failed to load — TypeError: cannot read property");
+  });
+
+  test("summary line format: <N> custom workflow(s) skipped — fix at <path>", async () => {
+    const sourcePath = "/home/user/.config/atomic/settings.json";
+    const brokenList: readonly BrokenWorkflow[] = [
+      brokenEntry("wf-a", "some error", sourcePath),
+      brokenEntry("wf-b", "another error", sourcePath),
+    ];
+    const cap = captureOutput();
+    try {
+      await workflowListCommand(
+        {},
+        { list: () => [], broken: () => brokenList },
+      );
+    } finally {
+      cap.restore();
+    }
+    expect(cap.stdout).toContain(`2 custom workflow(s) skipped — fix at ${sourcePath}`);
+  });
+
+  test("multiple broken entries sorted deterministically by alias", async () => {
+    const brokenList: readonly BrokenWorkflow[] = [
+      brokenEntry("zebra-wf", "err"),
+      brokenEntry("alpha-wf", "err"),
+      brokenEntry("middle-wf", "err"),
+    ];
+    const cap = captureOutput();
+    try {
+      await workflowListCommand(
+        {},
+        { list: () => [], broken: () => brokenList },
+      );
+    } finally {
+      cap.restore();
+    }
+    const alphaIdx = cap.stdout.indexOf("alpha-wf");
+    const middleIdx = cap.stdout.indexOf("middle-wf");
+    const zebraIdx = cap.stdout.indexOf("zebra-wf");
+    expect(alphaIdx).toBeGreaterThan(-1);
+    expect(alphaIdx).toBeLessThan(middleIdx);
+    expect(middleIdx).toBeLessThan(zebraIdx);
+  });
+
+  test("long reason truncated at 80 chars with ellipsis", async () => {
+    const longReason = "x".repeat(100);
+    const brokenList: readonly BrokenWorkflow[] = [
+      brokenEntry("wf", longReason),
+    ];
+    const cap = captureOutput();
+    try {
+      await workflowListCommand(
+        {},
+        { list: () => [], broken: () => brokenList },
+      );
+    } finally {
+      cap.restore();
+    }
+    // Should NOT contain the full 100-char reason
+    expect(cap.stdout).not.toContain(longReason);
+    // Should contain the truncated prefix + ellipsis
+    expect(cap.stdout).toContain("x".repeat(80) + "…");
+  });
+
+  test("no broken section when deps.broken is omitted (backward compat)", async () => {
+    const cap = captureOutput();
+    let code: number;
+    try {
+      // deliberately omit broken field — old callers
+      code = await workflowListCommand({}, { list: () => fixture });
+    } finally {
+      cap.restore();
+    }
+    expect(code).toBe(0);
+    expect(cap.stdout).not.toContain("skipped");
+  });
+
+  test("multi-agent broken entry renders exactly one row when no agent filter", async () => {
+    const multiAgentEntry: BrokenWorkflow = {
+      alias: "shared-wf",
+      origin: "local",
+      agents: ["claude", "opencode"],
+      reason: "ImportError: missing dep",
+      source: "/path/to/settings.json",
+      fix: "Check your settings.json",
+    };
+    const cap = captureOutput();
+    try {
+      await workflowListCommand(
+        {},
+        { list: () => [], broken: () => [multiAgentEntry] },
+      );
+    } finally {
+      cap.restore();
+    }
+    // Exactly one ✗ row for the single entry
+    expect(cap.stdout.match(/✗/g)?.length).toBe(1);
+    expect(cap.stdout).toContain("shared-wf");
+    expect(cap.stdout).toContain("1 custom workflow(s) skipped");
+  });
+
+  test("-a claude filter: only entries whose agents include claude render", async () => {
+    const claudeEntry: BrokenWorkflow = {
+      alias: "claude-only-wf",
+      origin: "local",
+      agents: ["claude"],
+      reason: "SyntaxError",
+      source: "/path/settings.json",
+      fix: "fix it",
+    };
+    const opencodeEntry: BrokenWorkflow = {
+      alias: "opencode-only-wf",
+      origin: "local",
+      agents: ["opencode"],
+      reason: "ParseError",
+      source: "/path/settings.json",
+      fix: "fix it",
+    };
+    const bothEntry: BrokenWorkflow = {
+      alias: "both-wf",
+      origin: "local",
+      agents: ["claude", "opencode"],
+      reason: "TypeError",
+      source: "/path/settings.json",
+      fix: "fix it",
+    };
+    const brokenList: readonly BrokenWorkflow[] = [claudeEntry, opencodeEntry, bothEntry];
+    const cap = captureOutput();
+    try {
+      await workflowListCommand(
+        { agent: "claude" },
+        { list: () => [], broken: () => brokenList },
+      );
+    } finally {
+      cap.restore();
+    }
+    // claude-only and both entries include claude
+    expect(cap.stdout).toContain("claude-only-wf");
+    expect(cap.stdout).toContain("both-wf");
+    // opencode-only entry does NOT include claude
+    expect(cap.stdout).not.toContain("opencode-only-wf");
+  });
+
+  test("summary uses visible.length after agent filter", async () => {
+    const sourcePath = "/path/settings.json";
+    const entry1: BrokenWorkflow = {
+      alias: "wf-1",
+      origin: "local",
+      agents: ["claude"],
+      reason: "err",
+      source: sourcePath,
+      fix: "fix",
+    };
+    const entry2: BrokenWorkflow = {
+      alias: "wf-2",
+      origin: "local",
+      agents: ["claude", "opencode"],
+      reason: "err",
+      source: sourcePath,
+      fix: "fix",
+    };
+    const entry3: BrokenWorkflow = {
+      alias: "wf-3",
+      origin: "local",
+      agents: ["opencode"],
+      reason: "err",
+      source: sourcePath,
+      fix: "fix",
+    };
+    const brokenList: readonly BrokenWorkflow[] = [entry1, entry2, entry3];
+    const cap = captureOutput();
+    try {
+      // Filter to claude: entry1 and entry2 qualify (2 of 3)
+      await workflowListCommand(
+        { agent: "claude" },
+        { list: () => [], broken: () => brokenList },
+      );
+    } finally {
+      cap.restore();
+    }
+    expect(cap.stdout).toContain(`2 custom workflow(s) skipped — fix at ${sourcePath}`);
   });
 });
 

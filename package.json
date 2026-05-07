@@ -35,9 +35,9 @@
     "test": "bun test --parallel packages tests",
     "test:coverage": "bun test --coverage packages tests",
     "typecheck": "bun --filter '*' typecheck",
-    "lint": "oxlint --config=oxlint.json packages",
+    "lint": "oxlint --config=oxlint.json packages && bun run scripts/lint-custom-workflows.ts",
     "lint:fix": "oxlint --config=oxlint.json --fix packages",
-    "prepare": "prek install || true"
+    "prepare": "[ -n \"$CI\" ] || prek install || true"
   },
   "devDependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.132",
@@ -46,6 +46,7 @@
     "@opentui/react": "^0.2.3",
     "@types/bun": "^1.3.13",
     "@types/react": "^19.2.14",
+    "ajv": "^8.20.0",
     "bun-pty": "0.4.8",
     "oxlint": "^1.63.0",
     "react": "^19.2.6",

@@ -2,19 +2,21 @@
 
 import { test, expect, describe, afterEach } from "bun:test";
 import { createTestRenderer } from "@opentui/core/testing";
+import { TextAttributes, hexToRgb } from "@opentui/core";
 import { act } from "react";
 import {
   WorkflowPicker,
   WorkflowPickerPanel,
   buildEntries,
   buildPickerTheme,
+  buildPickerRows,
   buildRows,
   fuzzyMatch,
   isFieldValid,
   type PickerTheme,
   type WorkflowPickerResult,
 } from "../../../packages/atomic-sdk/src/components/workflow-picker-panel.tsx";
-import type { WorkflowDefinition, WorkflowInput } from "../../../packages/atomic-sdk/src/types.ts";
+import type { BrokenWorkflow, WorkflowDefinition, WorkflowInput } from "../../../packages/atomic-sdk/src/types.ts";
 import { createRegistry } from "../../../packages/atomic-sdk/src/registry.ts";
 import { resolveTheme } from "../../../packages/atomic-sdk/src/runtime/theme.ts";
 import {
@@ -1011,4 +1013,553 @@ describe("WorkflowPickerPanel class", () => {
       p.destroy();
     });
   });
+
+  // ─── R3 regression: picker filters brokenIndex by agent ──────────────────
+  //
+  // The panel constructor applies a `filteredBroken` boundary: only entries
+  // whose key starts with `${agent}/` are passed to <WorkflowPicker>.
+  // This test enforces that invariant — a multi-agent brokenIndex must not
+  // leak entries from a non-selected agent into the rendered list.
+  test("R3: brokenIndex filtered by agent — claude/foo shown, copilot/bar absent", async () => {
+    coreSetup = await createTestRenderer({ width: 120, height: 40 });
+    setReactActEnvironment(true);
+
+    const registry = createRegistry().register(
+      makeWorkflow({ name: "healthy-claude", agent: "claude" }),
+    );
+
+    const multiAgentBrokenIndex: ReadonlyMap<string, BrokenWorkflow> = new Map([
+      ["claude/foo", makeBroken({ alias: "foo", agents: ["claude"] })],
+      ["copilot/bar", makeBroken({ alias: "bar", agents: ["copilot"] })],
+    ]);
+
+    act(() => {
+      panel = WorkflowPickerPanel.createWithRenderer(coreSetup!.renderer, {
+        agent: "claude",
+        registry,
+        brokenIndex: multiAgentBrokenIndex,
+      });
+    });
+
+    await act(async () => {
+      await coreSetup!.renderOnce();
+    });
+
+    const frame = coreSetup!.captureCharFrame();
+
+    // claude/foo broken entry must appear (rendered with ✗ glyph).
+    expect(frame).toContain("foo");
+    expect(frame).toContain("✗");
+
+    // copilot/bar must NOT appear — filtered out at panel constructor boundary.
+    expect(frame).not.toContain("bar");
+  });
 });
+
+// ─── Broken workflow fixtures ─────────────────────
+
+function makeBroken(overrides: Partial<BrokenWorkflow> = {}): BrokenWorkflow {
+  return {
+    alias: "broken-wf",
+    origin: "local",
+    agents: ["claude"],
+    reason: "command not found on PATH",
+    source: "/settings.json",
+    fix: "install the command",
+    ...overrides,
+  };
+}
+
+function makeBrokenIndex(
+  entries: Array<[key: string, broken: BrokenWorkflow]>,
+): ReadonlyMap<string, BrokenWorkflow> {
+  return new Map(entries);
+}
+
+// ─── buildPickerRows unit tests ───────────────────
+
+describe("buildPickerRows", () => {
+  test("healthy-only: returns same rows as buildEntries (empty query)", () => {
+    const rows = buildPickerRows("", WORKFLOWS);
+    expect(rows.every((r) => r.kind === "healthy")).toBe(true);
+    expect(rows).toHaveLength(WORKFLOWS.length);
+  });
+
+  test("broken-only: returns broken rows with correct alias+agent", () => {
+    const broken = makeBroken({ alias: "my-broken", agents: ["claude"] });
+    const index = makeBrokenIndex([["claude/my-broken", broken]]);
+    const rows = buildPickerRows("", [], index);
+    expect(rows).toHaveLength(1);
+    const row = rows[0]!;
+    expect(row.kind).toBe("broken");
+    if (row.kind === "broken") {
+      expect(row.alias).toBe("my-broken");
+      expect(row.agent).toBe("claude");
+      expect(row.broken).toBe(broken);
+    }
+  });
+
+  test("mixed: healthy rows appear before broken in same agent group", () => {
+    const broken = makeBroken({ alias: "z-broken", agents: ["claude"] });
+    const index = makeBrokenIndex([["claude/z-broken", broken]]);
+    const rows = buildPickerRows("", WORKFLOWS, index);
+    // WORKFLOWS has 3 claude workflows; broken should come after them.
+    const claudeRows = rows.filter(
+      (r) => (r.kind === "healthy" ? r.wf.agent : r.agent) === "claude",
+    );
+    const lastHealthyIdx = claudeRows.findLastIndex((r) => r.kind === "healthy");
+    const firstBrokenIdx = claudeRows.findIndex((r) => r.kind === "broken");
+    expect(lastHealthyIdx).toBeLessThan(firstBrokenIdx);
+  });
+
+  test("empty query: broken row count matches brokenIndex size", () => {
+    const index = makeBrokenIndex([
+      ["claude/broken-a", makeBroken({ alias: "broken-a" })],
+      ["copilot/broken-b", makeBroken({ alias: "broken-b", agents: ["copilot"] })],
+    ]);
+    const rows = buildPickerRows("", WORKFLOWS, index);
+    const brokenRows = rows.filter((r) => r.kind === "broken");
+    expect(brokenRows).toHaveLength(2);
+  });
+
+  test("filter by query matches broken alias", () => {
+    const broken = makeBroken({ alias: "unique-broken-alias" });
+    const index = makeBrokenIndex([["claude/unique-broken-alias", broken]]);
+    const rows = buildPickerRows("unique-broken", [], index);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.kind).toBe("broken");
+  });
+
+  test("filter: non-matching query excludes broken rows", () => {
+    const broken = makeBroken({ alias: "foo-broken" });
+    const index = makeBrokenIndex([["claude/foo-broken", broken]]);
+    const rows = buildPickerRows("xxxxxxxxx", [], index);
+    expect(rows).toHaveLength(0);
+  });
+
+  test("malformed key (no slash) is skipped", () => {
+    const broken = makeBroken();
+    const index = makeBrokenIndex([["noslash", broken]]);
+    const rows = buildPickerRows("", [], index);
+    expect(rows).toHaveLength(0);
+  });
+});
+
+// ─── WorkflowPicker rendering: broken rows ────────
+
+async function renderPickerWithBroken(opts: {
+  brokenIndex?: ReadonlyMap<string, BrokenWorkflow>;
+  workflows?: WorkflowDefinition[];
+  onSubmit?: (r: WorkflowPickerResult) => void;
+  onCancel?: () => void;
+  width?: number;
+  height?: number;
+}) {
+  const onSubmit = opts.onSubmit ?? (() => {});
+  const onCancel = opts.onCancel ?? (() => {});
+  testSetup = await renderReact(
+    <WorkflowPicker
+      theme={TEST_THEME}
+      agent="claude"
+      workflows={opts.workflows ?? WORKFLOWS}
+      brokenIndex={opts.brokenIndex}
+      onSubmit={onSubmit}
+      onCancel={onCancel}
+    />,
+    { width: opts.width ?? 120, height: opts.height ?? 40 },
+  );
+  await testSetup.renderOnce();
+  return testSetup;
+}
+
+describe("WorkflowPicker broken row rendering", () => {
+  test("healthy-only render unchanged (snapshot baseline)", async () => {
+    const setup = await renderPickerWithBroken({ brokenIndex: new Map() });
+    const frame = setup.captureCharFrame();
+    // All three healthy workflows visible, no broken glyph.
+    expect(frame).toContain("ralph");
+    expect(frame).toContain("z-deep-research");
+    expect(frame).toContain("z-freeform");
+    expect(frame).not.toContain("✗");
+  });
+
+  test("broken row appears in list with ✗ glyph", async () => {
+    const index = makeBrokenIndex([
+      ["claude/my-broken-wf", makeBroken({ alias: "my-broken-wf" })],
+    ]);
+    const setup = await renderPickerWithBroken({ brokenIndex: index });
+    const frame = setup.captureCharFrame();
+    expect(frame).toContain("my-broken-wf");
+    expect(frame).toContain("✗");
+  });
+
+  test("mixed healthy + broken: both visible, broken count matches", async () => {
+    const index = makeBrokenIndex([
+      ["claude/broken-one", makeBroken({ alias: "broken-one" })],
+      ["claude/broken-two", makeBroken({ alias: "broken-two" })],
+    ]);
+    const setup = await renderPickerWithBroken({ brokenIndex: index });
+    const frame = setup.captureCharFrame();
+    // Healthy still visible.
+    expect(frame).toContain("ralph");
+    // Both broken entries visible.
+    expect(frame).toContain("broken-one");
+    expect(frame).toContain("broken-two");
+  });
+
+  test("broken row focused state: ✗ still shown", async () => {
+    const index = makeBrokenIndex([
+      ["claude/alpha-broken", makeBroken({ alias: "alpha-broken" })],
+    ]);
+    // alpha-broken sorts before "ralph" alphabetically so it won't be index 0 in claude group
+    // because healthy rows come first; navigate to it.
+    const setup = await renderPickerWithBroken({
+      workflows: [],
+      brokenIndex: index,
+    });
+    // With no healthy rows, broken-row is at index 0 (already focused).
+    const frame = setup.captureCharFrame();
+    expect(frame).toContain("alpha-broken");
+    expect(frame).toContain("✗");
+  });
+
+  test("focused broken row shows BrokenPreview in right pane", async () => {
+    const broken = makeBroken({
+      alias: "bad-wf",
+      reason: "spawn failed: ENOENT",
+      source: "/home/user/.config/atomic/settings.json",
+      fix: "install the command or fix path",
+    });
+    const index = makeBrokenIndex([["claude/bad-wf", broken]]);
+    const setup = await renderPickerWithBroken({
+      workflows: [],
+      brokenIndex: index,
+    });
+    const frame = setup.captureCharFrame();
+    // Preview pane shows title + ✗ + reason.
+    expect(frame).toContain("bad-wf");
+    expect(frame).toContain("✗ Failed to load");
+    expect(frame).toContain("spawn failed: ENOENT");
+    expect(frame).toContain("fix");
+    expect(frame).toContain("install the command or fix path");
+  });
+
+  test("enter on broken: dispatch handler NOT called", async () => {
+    let submitCalled = false;
+    const index = makeBrokenIndex([
+      ["claude/bad-wf", makeBroken({ alias: "bad-wf" })],
+    ]);
+    const setup = await renderPickerWithBroken({
+      workflows: [],
+      brokenIndex: index,
+      onSubmit: () => { submitCalled = true; },
+    });
+    // Navigate to broken row (already first since no healthy rows).
+    await press(setup, (i) => i.pressEnter());
+    expect(submitCalled).toBe(false);
+  });
+
+  test("enter on broken: statusline flashes 'cannot run' message with alias", async () => {
+    const index = makeBrokenIndex([
+      ["claude/bad-wf", makeBroken({ alias: "bad-wf" })],
+    ]);
+    const setup = await renderPickerWithBroken({
+      workflows: [],
+      brokenIndex: index,
+    });
+    await press(setup, (i) => i.pressEnter());
+    const frame = setup.captureCharFrame();
+    expect(frame).toContain("cannot run");
+    expect(frame).toContain("bad-wf");
+    expect(frame).toContain("failed to load");
+  });
+
+  test("filter '/' matches broken alias — broken row stays visible", async () => {
+    const index = makeBrokenIndex([
+      ["claude/unique-broken", makeBroken({ alias: "unique-broken" })],
+    ]);
+    const setup = await renderPickerWithBroken({
+      brokenIndex: index,
+    });
+    await press(setup, (i) => i.typeText("unique-broken"));
+    const frame = setup.captureCharFrame();
+    expect(frame).toContain("unique-broken");
+  });
+
+  test("filter query that only matches broken shows broken + no healthy", async () => {
+    const index = makeBrokenIndex([
+      ["claude/zzz-only-broken", makeBroken({ alias: "zzz-only-broken" })],
+    ]);
+    const setup = await renderPickerWithBroken({ brokenIndex: index });
+    await press(setup, (i) => i.typeText("zzz-only-broken"));
+    const frame = setup.captureCharFrame();
+    expect(frame).toContain("zzz-only-broken");
+    // Healthy workflows not shown.
+    expect(frame).not.toContain("ralph");
+  });
+
+  test("enter on healthy workflow still works when brokenIndex present", async () => {
+    const index = makeBrokenIndex([
+      ["claude/broken-extra", makeBroken({ alias: "broken-extra" })],
+    ]);
+    const setup = await renderPickerWithBroken({ brokenIndex: index });
+    // First row is "ralph" (healthy, alphabetically first in claude group).
+    await press(setup, (i) => i.pressEnter());
+    const frame = setup.captureCharFrame();
+    // Transitions to PROMPT phase.
+    expect(frame).toContain("PROMPT");
+    expect(frame).toContain("INPUTS");
+  });
+
+  test("three-state snapshot: healthy + broken + healthy-selected combo", async () => {
+    // RFC §8.3 three-state lock: render with mixed list, verify all three
+    // state elements present simultaneously.
+    const index = makeBrokenIndex([
+      ["claude/my-broken", makeBroken({ alias: "my-broken" })],
+    ]);
+    const setup = await renderPickerWithBroken({ brokenIndex: index });
+
+    // Initial state: first entry focused (ralph, healthy), broken row visible.
+    const frameInitial = setup.captureCharFrame();
+    expect(frameInitial).toContain("ralph");          // healthy focused
+    expect(frameInitial).toContain("my-broken");      // broken visible
+    expect(frameInitial).toContain("run ralph loop"); // healthy preview
+
+    // Navigate to broken entry (after all healthy rows).
+    // WORKFLOWS has 3 entries; broken is at index 3.
+    for (let i = 0; i < 3; i++) {
+      await press(setup, (input) => input.pressArrow("down"));
+    }
+    const frameBroken = setup.captureCharFrame();
+    expect(frameBroken).toContain("my-broken");       // broken focused
+    expect(frameBroken).toContain("✗ Failed to load"); // broken preview
+    expect(frameBroken).toContain("ralph");            // healthy still in list
+
+    // Navigate back to a healthy row.
+    for (let i = 0; i < 3; i++) {
+      await press(setup, (input) => input.pressArrow("up"));
+    }
+    const frameBack = setup.captureCharFrame();
+    expect(frameBack).toContain("run ralph loop");    // healthy preview restored
+    expect(frameBack).not.toContain("✗ Failed to load");
+  });
+
+  // ─── §5.7.1 token / no-bold assertions ───────────
+
+  test("BrokenPreview: alias has no bold, source+fix use same color (textMuted = subtext0)", async () => {
+    const broken = makeBroken({
+      alias: "deep-spec",
+      reason: '"bunx" exited 1 during _emit-workflow-meta',
+      source: "~/.atomic/settings.json",
+      fix: "check @me/atomic-deep-spec is installed",
+    });
+    const index = makeBrokenIndex([["claude/deep-spec", broken]]);
+    const setup = await renderPickerWithBroken({
+      workflows: [],
+      brokenIndex: index,
+    });
+
+    const frame = setup.captureSpans();
+    const BOLD = TextAttributes.BOLD;
+    const textMutedRgba = hexToRgb(TEST_THEME.textMuted);
+    const allSpans = frame.lines.flatMap((l) => l.spans);
+
+    // Spans that contain the preview-specific text (not present elsewhere in UI).
+    const aliasSpans = allSpans.filter((s) => s.text.includes("deep-spec"));
+    const sourceSpans = allSpans.filter((s) => s.text.includes("settings.json"));
+    const fixSpans = allSpans.filter((s) => s.text.includes("atomic-deep-spec"));
+
+    expect(aliasSpans.length).toBeGreaterThan(0);
+    expect(sourceSpans.length).toBeGreaterThan(0);
+    expect(fixSpans.length).toBeGreaterThan(0);
+
+    // Alias span: no bold.
+    const aliasBoldSpans = aliasSpans.filter((s) => (s.attributes & BOLD) !== 0);
+    expect(aliasBoldSpans.map((s) => s.text)).toEqual([]);
+
+    // Source and fix spans must all use textMuted (subtext0) foreground.
+    for (const span of [...sourceSpans, ...fixSpans]) {
+      expect(span.fg.equals(textMutedRgba)).toBe(true);
+    }
+  });
+
+  test("picker-row-broken focused: no bold on alias or glyph", async () => {
+    const index = makeBrokenIndex([
+      ["claude/bold-check", makeBroken({ alias: "bold-check" })],
+    ]);
+    const setup = await renderPickerWithBroken({
+      workflows: [],
+      brokenIndex: index,
+    });
+    // With no healthy rows, broken row at index 0 is already focused.
+    const frame = setup.captureSpans();
+    const BOLD = TextAttributes.BOLD;
+    const allSpans = frame.lines.flatMap((l) => l.spans);
+
+    // Spans that carry the alias text — scoped to the broken row / preview content.
+    const aliasSpans = allSpans.filter((s) => s.text.includes("bold-check"));
+    expect(aliasSpans.length).toBeGreaterThan(0);
+
+    // No alias span should have BOLD attribute.
+    const boldAliasSpans = aliasSpans.filter((s) => (s.attributes & BOLD) !== 0);
+    expect(boldAliasSpans.map((s) => s.text)).toEqual([]);
+
+    // Glyph span "✗ " must not be bold.
+    const glyphSpans = allSpans.filter((s) => s.text.includes("✗"));
+    expect(glyphSpans.length).toBeGreaterThan(0);
+    const boldGlyphSpans = glyphSpans.filter((s) => (s.attributes & BOLD) !== 0);
+    expect(boldGlyphSpans.map((s) => s.text)).toEqual([]);
+  });
+});
+
+// ─── RFC §8.3 three-row state lock ───────────────────────────────────────────
+//
+// "Picker snapshot: healthy + broken + healthy-selected three-row state lock."
+//
+// Uses a minimal three-entry catalog: two healthy workflows ("aaa-first",
+// "zzz-last") and one broken entry ("mmm-broken") for the same agent.
+// With an empty query, buildPickerRows orders: healthy-first-then-broken
+// within the same agent group, so the rendered list is:
+//
+//   [0] aaa-first   (healthy)
+//   [1] zzz-last    (healthy)
+//   [2] mmm-broken  (broken)
+//
+// Tests cover:
+//  (a) broken row rendered with ✗ glyph while healthy rows also present
+//  (b) snapshot: focus navigated to row 2 (the broken row, third position)
+//  (c) Enter on focused broken row: no phase transition, statusline flash
+//  (d) BrokenPreview pane shows reason / source / fix from BrokenWorkflow
+
+describe("RFC §8.3 three-row snapshot: healthy + broken + healthy-selected", () => {
+  // Shared three-row fixture for this describe block.
+  const THREE_ROW_WORKFLOWS: WorkflowDefinition[] = [
+    makeWorkflow({ name: "aaa-first", agent: "claude", description: "first healthy workflow" }),
+    makeWorkflow({ name: "zzz-last", agent: "claude", description: "last healthy workflow" }),
+  ];
+
+  const THREE_ROW_BROKEN: BrokenWorkflow = {
+    alias: "mmm-broken",
+    origin: "local",
+    agents: ["claude"],
+    reason: "bunx exit 1 during _emit-workflow-meta",
+    source: "~/.atomic/settings.json",
+    fix: "ensure @acme/mmm-broken is installed and on PATH",
+  };
+
+  const THREE_ROW_INDEX: ReadonlyMap<string, BrokenWorkflow> = new Map([
+    ["claude/mmm-broken", THREE_ROW_BROKEN],
+  ]);
+
+  async function renderThreeRow(
+    opts: {
+      onSubmit?: (r: WorkflowPickerResult) => void;
+      onCancel?: () => void;
+    } = {},
+  ) {
+    return renderPickerWithBroken({
+      workflows: THREE_ROW_WORKFLOWS,
+      brokenIndex: THREE_ROW_INDEX,
+      onSubmit: opts.onSubmit,
+      onCancel: opts.onCancel,
+      width: 120,
+      height: 40,
+    });
+  }
+
+  // ─── (a) Broken row has ✗ glyph; healthy rows also present ───────────────
+
+  test("(a) all three rows rendered: two healthy names + broken ✗ glyph visible", async () => {
+    const setup = await renderThreeRow();
+    const frame = setup.captureCharFrame();
+
+    // Both healthy workflows visible.
+    expect(frame).toContain("aaa-first");
+    expect(frame).toContain("zzz-last");
+
+    // Broken row rendered with ✗ glyph.
+    expect(frame).toContain("mmm-broken");
+    expect(frame).toContain("✗");
+  });
+
+  // ─── (b) Snapshot: focus on row index 2 (broken = third row) ─────────────
+
+  test("(b) snapshot: three-row state with broken row focused (third position)", async () => {
+    const setup = await renderThreeRow();
+
+    // Navigate to the third row (index 2 = the broken entry).
+    await press(setup, (i) => i.pressArrow("down")); // 0 → 1
+    await press(setup, (i) => i.pressArrow("down")); // 1 → 2
+
+    const frame = setup.captureCharFrame();
+
+    // Broken row is focused — preview pane shows broken content.
+    expect(frame).toContain("✗ Failed to load");
+
+    // Healthy rows still visible in the list.
+    expect(frame).toContain("aaa-first");
+    expect(frame).toContain("zzz-last");
+
+    // Broken alias visible (in list and preview).
+    expect(frame).toContain("mmm-broken");
+
+    // Lock the render state with a snapshot.
+    expect(frame).toMatchSnapshot();
+  });
+
+  // ─── (c) Enter on broken: no phase transition, statusline flash ───────────
+
+  test("(c) enter on focused broken row: no transition to PROMPT, flash shown", async () => {
+    let submitCalled = false;
+    const setup = await renderThreeRow({
+      onSubmit: () => { submitCalled = true; },
+    });
+
+    // Navigate to the broken row (index 2).
+    await press(setup, (i) => i.pressArrow("down")); // 0 → 1
+    await press(setup, (i) => i.pressArrow("down")); // 1 → 2
+
+    // Press Enter on the broken row.
+    await press(setup, (i) => i.pressEnter());
+
+    const frame = setup.captureCharFrame();
+
+    // No submission callback fired.
+    expect(submitCalled).toBe(false);
+
+    // Still in PICK phase (not PROMPT or CONFIRM).
+    expect(frame).toContain("PICK");
+    expect(frame).not.toContain("PROMPT");
+    expect(frame).not.toContain("CONFIRM");
+
+    // Statusline flash shows "cannot run" message with alias.
+    expect(frame).toContain("cannot run");
+    expect(frame).toContain("mmm-broken");
+    expect(frame).toContain("failed to load");
+  });
+
+  // ─── (d) BrokenPreview: reason / source / fix rendered in right pane ──────
+
+  test("(d) focused broken row: BrokenPreview shows reason, source, fix", async () => {
+    const setup = await renderThreeRow();
+
+    // Navigate to the broken row.
+    await press(setup, (i) => i.pressArrow("down")); // 0 → 1
+    await press(setup, (i) => i.pressArrow("down")); // 1 → 2
+
+    const frame = setup.captureCharFrame();
+
+    // Preview pane shows the broken workflow metadata.
+    expect(frame).toContain("✗ Failed to load");
+
+    // reason
+    expect(frame).toContain("bunx exit 1 during _emit-workflow-meta");
+
+    // source
+    expect(frame).toContain("~/.atomic/settings.json");
+
+    // fix
+    expect(frame).toContain("@acme/mmm-broken is installed");
+  });
+});
+

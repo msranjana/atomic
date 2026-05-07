@@ -17,9 +17,13 @@ export {
 } from "./errors.ts";
 
 // ─── Authoring ──────────────────────────────────────────────────────────────
-export { defineWorkflow, WorkflowBuilder } from "./define-workflow.ts";
+export { defineWorkflow, WorkflowBuilder, getCompiledWorkflows } from "./define-workflow.ts";
 export { createRegistry } from "./registry.ts";
 export type { Registry } from "./registry.ts";
+
+// ─── Host dispatch ───────────────────────────────────────────────────────────
+export { hostLocalWorkflows } from "./lib/host-local-workflows.ts";
+export type { HostLocalWorkflowsOptions } from "./lib/host-local-workflows.ts";
 
 // ─── Shared types ───────────────────────────────────────────────────────────
 export type {
@@ -34,6 +38,9 @@ export type {
   WorkflowContext,
   WorkflowOptions,
   WorkflowDefinition,
+  ExternalWorkflow,
+  BrokenWorkflow,
+  RegistrableWorkflow,
   WorkflowInput,
   WorkflowInputType,
   StageClientOptions,
@@ -53,10 +60,10 @@ export {
 } from "./primitives/metadata.ts";
 
 // ─── Registry iteration helpers ─────────────────────────────────────────────
-import type { AgentType, Registry, WorkflowDefinition } from "./types.ts";
+import type { AgentType, ExternalWorkflow, Registry, WorkflowDefinition } from "./types.ts";
 
-/** Snapshot every workflow registered in `registry`. */
-export function listWorkflows(registry: Registry): readonly WorkflowDefinition[] {
+/** Snapshot every workflow registered in `registry` (builtins + externals). */
+export function listWorkflows(registry: Registry): readonly (WorkflowDefinition | ExternalWorkflow)[] {
   return registry.list();
 }
 
@@ -65,7 +72,7 @@ export function getWorkflow(
   registry: Registry,
   agent: AgentType,
   name: string,
-): WorkflowDefinition | undefined {
+): WorkflowDefinition | ExternalWorkflow | undefined {
   return registry.resolve(name, agent);
 }
 

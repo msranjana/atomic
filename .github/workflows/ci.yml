@@ -236,6 +236,28 @@ jobs:
                   echo "Smoke-testing: $ATOMIC"
                   "$ATOMIC" _runtime-assets-smoke
 
+            # Warm `autoSyncIfStale` (installs psmux/tmux deps, copies global
+            # agents/skills, runs `bun install -g` for tooling packages) so
+            # the chat-launch smoke's 8s PTY timeout doesn't have to absorb
+            # first-run sync latency. `_runtime-assets-smoke` is in the
+            # info-command skip set and no longer runs autoSync as a side
+            # effect, so we trigger it explicitly here via a non-skipped
+            # command. `workflow list` is the cheapest such command — it
+            # runs autoSync, prints the registry, and exits. Without this,
+            # the first `chat` invocation runs autoSync on a cold runner
+            # and the chat command's TUI initialisation never completes
+            # before `chat-smoke.ts` kills the PTY.
+            - name: Warm autoSync cache
+              shell: bash
+              run: |
+                  set -e
+                  ATOMIC=$(find packages/atomic/dist -type f \( -name 'atomic' -o -name 'atomic.exe' \) | head -n 1)
+                  if [ -z "$ATOMIC" ]; then
+                      echo "Could not locate built binary under packages/atomic/dist"
+                      exit 1
+                  fi
+                  "$ATOMIC" workflow list >/dev/null
+
             # End-to-end chat-launch smoke: invokes the *full* chat command
             # (`atomic chat -a opencode --no-login`) against a stub agent on
             # PATH and asserts the agent ended up running INSIDE tmux/psmux
@@ -310,3 +332,33 @@ jobs:
               env:
                   RUN_CI_E2E: "1"
               run: bun test tests/ci/onboarding.test.ts
+
+    # `defineWorkflow` auto-captures `WorkflowOptions.source` from the
+    # caller's stack frame so consumers don't have to pass
+    # `source: import.meta.path` on every call. The parser handles V8/Bun
+    # stack formats across POSIX and Windows (paren'd vs bare frames,
+    # `file://` URLs, drive letters). The injected-stack cases run on
+    # every OS but the real-runtime smoke test inside the same suite
+    # exercises the actual `new Error().stack` shape — which is exactly
+    # where cross-platform drift shows up.
+    define-workflow-matrix:
+        name: defineWorkflow stack capture (${{ matrix.os }})
+        strategy:
+            fail-fast: false
+            matrix:
+                os: [ubuntu-latest, macos-latest, windows-latest]
+        runs-on: ${{ matrix.os }}
+
+        steps:
+            - uses: actions/checkout@v6
+
+            - uses: oven-sh/setup-bun@v2
+              with:
+                  bun-version: latest
+
+            - name: Install dependencies
+              run: bun install
+
+            - name: Run defineWorkflow tests
+              shell: bash
+              run: bun test packages/atomic-sdk/src/define-workflow.test.ts

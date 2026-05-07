@@ -11,7 +11,7 @@
  *
  * Behavior:
  *   `_orchestrator-entry`
- *     - Try `runOrchestratorEntry(source, agent, inputsB64)`.
+ *     - Try `runOrchestratorEntry(source, workflowName, agent, inputsB64)`.
  *     - On `InvalidWorkflowError`, fall through silently. Atomic's
  *       compiled binary collapses every bundled module's
  *       `import.meta.path` to the binary entry, so the SDK's
@@ -23,27 +23,162 @@
  *   `_cc-debounce`
  *     - Run `runCcDebounce(paneId)` and exit with its return code.
  *
+ * The token-gated `_emit-workflow-meta` and `_atomic-run` sub-commands
+ * are handled by `hostLocalWorkflows()` in `./host-local-workflows.ts`, which the
+ * user calls explicitly AFTER their `compile()` calls so the workflow
+ * registry is populated at dispatch time.
+ *
  * Non-matching argv is a single string compare with no async cost. The
  * matching cases top-level-await the dispatch and exit.
  *
- * This module has no runtime exports — its only purpose is the
- * side-effect. Coverage is exempted in `bunfig.toml` because, like the
- * SDK's `cli.ts` entry, the side-effect runs at import time and can't
- * be unit-tested without spawning a sub-process; subprocess dispatch is
- * exercised end-to-end by the `tests/fixtures/sdk-compiled-consumer/`
- * smoke matrix.
+ * `validateDispatchToken`, `findSub`, `parseAtomicRunArgv`, and
+ * `AtomicRunArgs` are exported for use by `host-local-workflows.ts` and for
+ * unit testing.
  */
 
-const sub = process.argv[2];
-if (sub === "_orchestrator-entry") {
-  const agent = process.argv[4] ?? "";
-  const inputsB64 = process.argv[5] ?? "";
-  const source = process.argv[6] ?? "";
+// ─── Token-gating helper ─────────────────────────────────────────────────────
+
+/** Minimum length of a valid dispatch token (32 hex chars = 16 bytes). */
+const MIN_TOKEN_HEX_LEN = 32;
+
+/** Pattern matching a valid hex token (0-9 a-f only, case-insensitive). */
+const HEX_RE = /^[0-9a-f]+$/i;
+
+/**
+ * Validate that the dispatch token is present and consistent between
+ * `process.env` and `process.argv`.
+ *
+ * Rules (all must pass):
+ *   1. `env.ATOMIC_HOST === "1"`
+ *   2. `env.ATOMIC_DISPATCH_TOKEN` is a hex string >= 32 chars.
+ *   3. `argv` contains `--dispatch-token=<hex>` where `<hex>` matches
+ *      the env token (case-insensitive) and is >= 32 chars.
+ *
+ * Exported so it can be unit-tested without spawning a subprocess.
+ */
+export function validateDispatchToken(
+  env: Record<string, string | undefined>,
+  argv: readonly string[],
+): boolean {
+  if (env["ATOMIC_HOST"] !== "1") return false;
+
+  const envToken = env["ATOMIC_DISPATCH_TOKEN"] ?? "";
+  if (envToken.length < MIN_TOKEN_HEX_LEN || !HEX_RE.test(envToken)) {
+    return false;
+  }
+
+  const prefix = "--dispatch-token=";
+  const tokenArg = argv.find((a) => a.startsWith(prefix));
+  if (!tokenArg) return false;
+
+  const argToken = tokenArg.slice(prefix.length);
+  if (argToken.length < MIN_TOKEN_HEX_LEN || !HEX_RE.test(argToken)) {
+    return false;
+  }
+
+  return argToken.toLowerCase() === envToken.toLowerCase();
+}
+
+// ─── Subcommand scanning ─────────────────────────────────────────────────────
+
+/**
+ * Known internal sub-commands that auto-dispatch.ts handles.
+ * A Set lookup is O(1) and avoids false matches on positional arguments that
+ * happen to share a name with a sub-command token.
+ */
+const SUBS = new Set([
+  "_orchestrator-entry",
+  "_cc-debounce",
+]);
+
+/**
+ * Scan `argv` starting at index 2 (the position after the runtime and script
+ * tokens) for the first token that matches a known sub-command.
+ *
+ * Returns the sub-command string and its index, or `null` when none is found.
+ *
+ * Exported so tests can verify the scan logic directly without spawning a
+ * subprocess.
+ */
+export function findSub(argv: readonly string[]): { sub: string; index: number } | null {
+  for (let i = 2; i < argv.length; i++) {
+    const tok = argv[i]!;
+    if (SUBS.has(tok)) return { sub: tok, index: i };
+  }
+  return null;
+}
+
+// ─── Argv parser for _atomic-run ─────────────────────────────────────────────
+
+/** Parsed result from `parseAtomicRunArgv`. */
+export interface AtomicRunArgs {
+  name: string | undefined;
+  agent: string | undefined;
+  detach: boolean;
+  inputs: Record<string, string>;
+}
+
+/**
+ * Parse the flags that follow the `_atomic-run` subcommand token.
+ *
+ * `argv` should be the slice of `process.argv` starting immediately after the
+ * `_atomic-run` token (i.e. `process.argv.slice(subIndex + 1)`).
+ *
+ * Contract (mirrors atomic-side dispatcher):
+ *   - `--name <value>` — workflow name (required by caller)
+ *   - `--agent <value>` — agent name (required by caller)
+ *   - `--detach` — boolean flag
+ *   - `--dispatch-token=<hex>` — consumed by validateDispatchToken; skipped here
+ *   - `--<key> <value>` — workflow input; value consumed unconditionally so that
+ *     values starting with `--` (e.g. `--rev origin/main`) are preserved correctly.
+ *
+ * Reserved flags (`--name`, `--agent`, `--detach`, `--dispatch-token=`) are
+ * matched in earlier branches, so the generic input branch only fires for
+ * user-defined input names.
+ *
+ * Exported for unit testing.
+ */
+export function parseAtomicRunArgv(argv: readonly string[]): AtomicRunArgs {
+  let name: string | undefined;
+  let agent: string | undefined;
+  let detach = false;
+  const inputs: Record<string, string> = {};
+
+  for (let i = 0; i < argv.length; i++) {
+    const tok = argv[i]!;
+    if (tok === "--name" && i + 1 < argv.length) {
+      name = argv[++i];
+    } else if (tok === "--agent" && i + 1 < argv.length) {
+      agent = argv[++i];
+    } else if (tok === "--detach") {
+      detach = true;
+    } else if (tok.startsWith("--dispatch-token=")) {
+      // Already consumed by validateDispatchToken — skip.
+    } else if (tok.startsWith("--") && i + 1 < argv.length) {
+      // Atomic-side dispatcher always emits --<key> <value>; consume unconditionally.
+      inputs[tok.slice(2)] = argv[++i]!;
+    }
+  }
+
+  return { name, agent, detach, inputs };
+}
+
+// ─── Argv dispatch ────────────────────────────────────────────────────────────
+
+const found = findSub(process.argv);
+
+if (found?.sub === "_orchestrator-entry") {
+  // Arguments follow immediately after the sub-command token, in the same
+  // order the executor emits them: [workflowName, agent, inputsB64, source].
+  const workflowName = process.argv[found.index + 1] ?? "";
+  const agent = process.argv[found.index + 2] ?? "";
+  const inputsB64 = process.argv[found.index + 3] ?? "";
+  const source = process.argv[found.index + 4] ?? "";
   try {
     const { runOrchestratorEntry } = await import(
       "../runtime/orchestrator-entry.ts"
     );
-    await runOrchestratorEntry(source, agent, inputsB64);
+    await runOrchestratorEntry(source, workflowName, agent, inputsB64);
     process.exit(0);
   } catch (err) {
     const { InvalidWorkflowError } = await import("../errors.ts");
@@ -58,16 +193,13 @@ if (sub === "_orchestrator-entry") {
         );
       }
     } else {
-      process.stderr.write(
-        `[atomic-sdk:_orchestrator-entry] ${
-          err instanceof Error ? err.stack ?? err.message : String(err)
-        }\n`,
-      );
+      const msg = err instanceof Error ? err.stack ?? err.message : String(err);
+      process.stderr.write(`[atomic-sdk:_orchestrator-entry] ${msg}\n`);
       process.exit(1);
     }
   }
-} else if (sub === "_cc-debounce") {
-  const paneId = process.argv[3] ?? "";
+} else if (found?.sub === "_cc-debounce") {
+  const paneId = process.argv[found.index + 1] ?? "";
   const { runCcDebounce } = await import("../runtime/cc-debounce.ts");
   process.exit(runCcDebounce(paneId));
 }
