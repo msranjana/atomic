@@ -270,14 +270,14 @@ As the pattern-finder, your primary goal is to discover HOW patterns are used ac
 | `codegraph_node`                          | Get a single symbol's source details for a concrete example    |
 | `codegraph_impact`                        | Understand how widely a pattern is used (blast radius)         |
 
-**NEVER call `codegraph_explore` or `codegraph_context` directly** — these return large source dumps that fill context. Use `codegraph_callers`/`codegraph_callees` for targeted usage discovery instead.
+**As a sub-agent, you may use these lightweight tools directly** for targeted pattern discovery. Do NOT use `codegraph_explore` or `codegraph_context` — these return large source dumps that fill context. Use `codegraph_callers`/`codegraph_callees` for targeted usage discovery instead.
 
 ### If `.codegraph/` does NOT exist
 
-At the start of a session, ask the user if they'd like to initialize CodeGraph:
-
-"I notice this project doesn't have CodeGraph initialized. Would you like me to run `codegraph init -i` to build a code knowledge graph?"
+Initialize CodeGraph automatically — run `codegraph init` (non-interactive) and proceed. Do NOT prompt the user; the workflow expects an indexed graph and a fresh index is cheap relative to grep-based exploration.
 <!-- CODEGRAPH_END -->
+
+When you cite a symbol for downstream synthesis, prefer the plain `node.id` and write it as `[symbol:<id>]`. Use the qualified form `[symbol:<qualifiedName>]` only when disambiguation requires it.
 
 ## ast-grep Rule Development Process
 

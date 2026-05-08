@@ -1,7 +1,7 @@
 ---
 name: codebase-online-researcher
 description: Online research for fetching up-to-date documentation/information from the web and repository-specific knowledge. Use this when you need to find information that is modern, potentially hard to discover from local context alone, or requires authoritative sources.
-tools: Grep, Glob, Read, Bash(playwright-cli:*), Bash(npx:*), Bash(npm:*), WebFetch, WebSearch
+tools: Grep, Glob, Read, Bash(playwright-cli:*), Bash(npx:*), Bash(npm:*), WebFetch, WebSearch, mcp__codegraph__*
 skills:
   - playwright-cli
 model: sonnet
@@ -170,3 +170,5 @@ If `.codegraph/` exists, the following lightweight tools are available for quick
 
 Do NOT use `codegraph_explore` or `codegraph_context` directly — they return large source dumps and are reserved for dedicated explore agents.
 <!-- CODEGRAPH_END -->
+
+When you cite a symbol for downstream synthesis, prefer the plain `node.id` and write it as `[symbol:<id>]`. Use the qualified form `[symbol:<qualifiedName>]` only when disambiguation requires it.

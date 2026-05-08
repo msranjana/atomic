@@ -268,26 +268,26 @@ CodeGraph builds a semantic knowledge graph of codebases for faster, smarter cod
 
 ### If `.codegraph/` exists in the project
 
-As the pattern-finder, your primary goal is to discover HOW patterns are used across the codebase — not just where they live. Use `codegraph_search` to find symbols by name, then `codegraph_callers` and `codegraph_callees` to trace every call site and dependency, revealing all usage examples of a pattern in one pass.
+As the pattern-finder, primary goal is discovering HOW patterns are used across the codebase — not just where they live.
 
-**Primary tools for pattern discovery:**
+**As a sub-agent, you may use these lightweight tools directly** for targeted pattern discovery:
 
 | Tool                                      | Use For                                                        |
 | ----------------------------------------- | -------------------------------------------------------------- |
 | `codegraph_search`                        | Find symbols matching a pattern name or concept                |
-| `codegraph_callers`                       | Find all callers of a symbol — exhaustive usage examples       |
-| `codegraph_callees`                       | Find what a symbol calls — discover implementation patterns    |
+| `codegraph_callers` **(PRIMARY)**         | Find all callers of a symbol — exhaustive usage examples       |
+| `codegraph_callees` **(PRIMARY)**         | Find what a symbol calls — discover implementation patterns    |
 | `codegraph_node`                          | Get a single symbol's source details for a concrete example    |
 | `codegraph_impact`                        | Understand how widely a pattern is used (blast radius)         |
 
-**NEVER call `codegraph_explore` or `codegraph_context` directly** — these return large source dumps that fill context. Use `codegraph_callers`/`codegraph_callees` for targeted usage discovery instead.
+Use `codegraph_callers`/`codegraph_callees` as the primary path for usage discovery — they surface every call site without loading large source dumps.
 
 ### If `.codegraph/` does NOT exist
 
-At the start of a session, ask the user if they'd like to initialize CodeGraph:
-
-"I notice this project doesn't have CodeGraph initialized. Would you like me to run `codegraph init -i` to build a code knowledge graph?"
+Initialize CodeGraph automatically — run `codegraph init` (non-interactive) and proceed. Do NOT prompt the user; the workflow expects an indexed graph and a fresh index is cheap relative to grep-based exploration.
 <!-- CODEGRAPH_END -->
+
+When you cite a symbol for downstream synthesis, prefer the plain `node.id` and write it as `[symbol:<id>]`. Use the qualified form `[symbol:<qualifiedName>]` only when disambiguation requires it.
 
 ## ast-grep Rule Development Process
 

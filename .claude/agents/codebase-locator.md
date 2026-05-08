@@ -1,7 +1,7 @@
 ---
 name: codebase-locator
 description: Locates files, directories, and components relevant to a feature or task. Basically a "Super Grep/Glob/LS tool."
-tools: Grep, Glob, Read, Bash, LSP
+tools: Grep, Glob, Read, Bash, LSP, mcp__codegraph__*, mcp__ast-grep__*
 model: haiku
 mcpServers:
   codegraph:
@@ -137,32 +137,25 @@ CodeGraph builds a semantic knowledge graph of codebases for faster, smarter cod
 
 ### If `.codegraph/` exists in the project
 
-**NEVER call `codegraph_explore` or `codegraph_context` directly in the main session.** These tools return large amounts of source code that fills up main session context. Instead, ALWAYS spawn an Explore agent for any exploration question (e.g., "how does X work?", "explain the Y system", "where is Z implemented?").
+As a locator, your primary goal is fast symbol and file discovery — not deep source analysis. Use `codegraph_search` as your entry point, then `codegraph_files` to enumerate directory subtrees, `codegraph_callers` / `codegraph_callees` to surface call sites, and `codegraph_node` for precise symbol details.
 
-**When spawning Explore agents**, include this instruction in the prompt:
+**As a sub-agent, you may use these lightweight tools directly** (for targeted lookups before making edits, not for exploration):
 
-> This project has CodeGraph initialized (.codegraph/ exists). Use `codegraph_explore` as your PRIMARY tool — it returns full source code sections from all relevant files in one call.
->
-> **Rules:**
-> 1. Follow the explore call budget in the `codegraph_explore` tool description — it scales automatically based on project size.
-> 2. Do NOT re-read files that codegraph_explore already returned source code for. The source sections are complete and authoritative.
-> 3. Only fall back to grep/glob/read for files listed under "Additional relevant files" if you need more detail, or if codegraph returned no results.
+| Tool                                      | Use For                                                      |
+| ----------------------------------------- | ------------------------------------------------------------ |
+| `codegraph_search` **(PRIMARY)**          | Find symbols or files by name — faster than grep for known names |
+| `codegraph_files`                         | Enumerate files in a directory subtree without reading contents |
+| `codegraph_callers` / `codegraph_callees` | Surface call sites — find all locations where a symbol is used |
+| `codegraph_node`                          | Get a single symbol's source location and details            |
 
-**The main session may only use these lightweight tools directly** (for targeted lookups before making edits, not for exploration):
-
-| Tool                                      | Use For                              |
-| ----------------------------------------- | ------------------------------------ |
-| `codegraph_search`                        | Find symbols by name                 |
-| `codegraph_callers` / `codegraph_callees` | Trace call flow                      |
-| `codegraph_impact`                        | Check what's affected before editing |
-| `codegraph_node`                          | Get a single symbol's details        |
+Do NOT use `codegraph_explore` or `codegraph_context` — those return large source dumps and are for deep analysis, not location tasks.
 
 ### If `.codegraph/` does NOT exist
 
-At the start of a session, ask the user if they'd like to initialize CodeGraph:
-
-"I notice this project doesn't have CodeGraph initialized. Would you like me to run `codegraph init -i` to build a code knowledge graph?"
+Initialize CodeGraph automatically — run `codegraph init` (non-interactive) and proceed. Do NOT prompt the user; the workflow expects an indexed graph and a fresh index is cheap relative to grep-based exploration.
 <!-- CODEGRAPH_END -->
+
+When you cite a symbol for downstream synthesis, prefer the plain `node.id` and write it as `[symbol:<id>]`. Use the qualified form `[symbol:<qualifiedName>]` only when disambiguation requires it.
 
 ### CodeGraph for Location Tasks
 

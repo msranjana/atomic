@@ -194,39 +194,21 @@ CodeGraph builds a semantic knowledge graph of codebases for faster, smarter cod
 
 ### If `.codegraph/` exists in the project
 
-**NEVER call `codegraph_explore` or `codegraph_context` directly in the main session.** These tools return large amounts of source code that fills up main session context. Instead, ALWAYS spawn an Explore agent for any exploration question (e.g., "how does X work?", "explain the Y system", "where is Z implemented?").
+**As a research-document analyzer**, use CodeGraph to verify and enrich research insights by cross-referencing prose claims against live code. `codegraph_explore` is your PRIMARY tool for prose-to-code verification — pull full source context to confirm that implementations match what research documents describe.
 
-**When spawning Explore agents**, include this instruction in the prompt:
+**As a sub-agent, you may use these lightweight tools directly** for targeted lookups and deep verification:
 
-> This project has CodeGraph initialized (.codegraph/ exists). Use `codegraph_explore` as your PRIMARY tool — it returns full source code sections from all relevant files in one call.
->
-> **Rules:**
-> 1. Follow the explore call budget in the `codegraph_explore` tool description — it scales automatically based on project size.
-> 2. Do NOT re-read files that codegraph_explore already returned source code for. The source sections are complete and authoritative.
-> 3. Only fall back to grep/glob/read for files listed under "Additional relevant files" if you need more detail, or if codegraph returned no results.
-
-**As a research-document analyzer**, use CodeGraph to verify and enrich research insights:
-
-- **`codegraph_explore`**: When research mentions a system or subsystem, use this (via Explore agent) to pull full source context for verification — confirm the implementation actually matches what the research document describes.
-- **`codegraph_node`**: When research cites a specific symbol, function, class, or interface, use this to pull that symbol's current definition and confirm it still exists and matches the research claim.
-- **`codegraph_impact`**: When research discusses change-radius implications or "what will break if we change X" — use this to verify the actual impact surface in current code matches what the research predicted.
-- **`codegraph_search`**: When research references a named symbol but doesn't specify a file — use this to locate where it lives today.
-- **`codegraph_callers` / `codegraph_callees`**: When research discusses data flow or call chains — use these to verify the actual call graph matches the research description.
-
-**The main session may only use these lightweight tools directly** (for targeted lookups, not exploration):
-
-| Tool                                      | Use For                              |
-| ----------------------------------------- | ------------------------------------ |
-| `codegraph_search`                        | Find symbols by name                 |
-| `codegraph_callers` / `codegraph_callees` | Trace call flow                      |
-| `codegraph_impact`                        | Check what's affected before editing |
-| `codegraph_node`                          | Get a single symbol's details        |
+| Tool                                      | Use For                                                                              |
+| ----------------------------------------- | ------------------------------------------------------------------------------------ |
+| `codegraph_explore` **(PRIMARY)**         | Pull full source context when research mentions a system — verify implementation matches research claims |
+| `codegraph_node`                          | Pull a specific symbol's current definition when research cites it by name           |
+| `codegraph_search`                        | Locate a named symbol referenced in research when no file is specified               |
+| `codegraph_impact`                        | Verify actual blast radius when research discusses change implications               |
+| `codegraph_callers` / `codegraph_callees` | Verify actual call graph when research describes data flow or call chains            |
 
 ### If `.codegraph/` does NOT exist
 
-At the start of a session, ask the user if they'd like to initialize CodeGraph:
-
-"I notice this project doesn't have CodeGraph initialized. Would you like me to run `codegraph init -i` to build a code knowledge graph?"
+Initialize CodeGraph automatically — run `codegraph init` (non-interactive) and proceed. Do NOT prompt the user; the workflow expects an indexed graph and a fresh index is cheap relative to grep-based exploration.
 <!-- CODEGRAPH_END -->
 
 When you cite a symbol for downstream synthesis, prefer the plain `node.id` and write it as `[symbol:<id>]`. Use the qualified form `[symbol:<qualifiedName>]` only when disambiguation requires it.

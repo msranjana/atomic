@@ -168,3 +168,5 @@ If `.codegraph/` exists, the following lightweight tools are available for quick
 
 Do NOT use `codegraph_explore` or `codegraph_context` directly — they return large source dumps and are reserved for dedicated explore agents.
 <!-- CODEGRAPH_END -->
+
+When you cite a symbol for downstream synthesis, prefer the plain `node.id` and write it as `[symbol:<id>]`. Use the qualified form `[symbol:<qualifiedName>]` only when disambiguation requires it.
