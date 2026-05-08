@@ -37,6 +37,15 @@ Load references on demand. **Only `getting-started.md` is always-load.** Everyth
 | `user-input.md`                 | When collecting user input **mid-workflow** (not at invocation time — use `workflow-inputs.md` for that)                                                                                                              |
 | `registry-and-validation.md`    | When setting up `createRegistry()` and iterating it via `listWorkflows`, understanding key scheme, validate-on-register rules, and same-name collision detection (only relevant for the multi-workflow cli)           |
 
+## Before you scaffold anything
+
+Two non-negotiable preflight steps gate the rest of the playbook. Both are detailed in §"Authoring Process"; this banner exists so they are not skipped:
+
+1. **Detect the target agent from `ATOMIC_AGENT`.** The Atomic chat launcher bakes the user's current agent into `process.env.ATOMIC_AGENT` (`claude` | `copilot` | `opencode`). Default to that value for `.for(<agent>)` unless the user explicitly overrides. Picking the wrong agent silently produces a workflow the user cannot run. Full decision rules in §"Authoring Process" step 1.
+2. **Spec the workflow with the `create-spec` skill.** A workflow is code, not a prompt — it deserves a Technical Design Document before scaffolding. `create-spec` produces `specs/YYYY-MM-DD-<workflow-name>.md` and runs an Open-Questions interview that resolves design decisions on paper instead of in broken runs. Full required-content checklist in §"Authoring Process" step 2.
+
+Skip step 2 only if the user explicitly says "skip the spec" or the request is a trivial single-stage edit to an existing file. Step 1 has no skip path — there is always one correct target agent.
+
 ## Custom workflow modes — pick before you scaffold
 
 Every new workflow lands in one of two layouts. The choice is not stylistic — it determines *where files live*, *how the workflow is invoked*, and *which entry-point pattern you use*. Pick before you write any code; mixing layouts mid-stream means rewriting the scaffold.
@@ -540,7 +549,46 @@ transcript compression), and `references/computation-and-validation.md`
 
 ## Authoring Process
 
-### 1. Understand the User's Goal
+### 1. Detect the target agent from `ATOMIC_AGENT`
+
+**Authoring a workflow is writing code, and the code is agent-specific** — `.for("claude")` vs `.for("copilot")` vs `.for("opencode")` selects different SDKs and session APIs. Picking the wrong agent here means the user runs the workflow and gets type errors, missing methods, or — worse — a workflow that scaffolds cleanly but targets an agent the user does not actually use.
+
+The Atomic chat launcher bakes the user's current agent into `process.env.ATOMIC_AGENT` (`packages/atomic/src/commands/cli/chat/index.ts:310`). **When the skill activates inside a chat session, treat `ATOMIC_AGENT` as the default target agent**:
+
+```bash
+echo "$ATOMIC_AGENT"   # → "claude" | "copilot" | "opencode"
+```
+
+Decision rules (in order):
+
+1. **User explicitly named an agent in the request** ("write a copilot workflow that…", "for opencode, …") → use the named agent. Do not second-guess; the user's words win.
+2. **`ATOMIC_AGENT` is set** → use that agent. Mention it once in your first response so the user can redirect (e.g. *"Scaffolding for `claude` (your current `ATOMIC_AGENT`). Say so if you want a different agent or cross-agent variants."*). Do not re-confirm on every turn.
+3. **`ATOMIC_AGENT` is unset and the user did not name an agent** → ask once via `AskUserQuestion` with the three options.
+4. **User asks for cross-agent support** (multiple agents, "all three", "claude and copilot") → scaffold one workflow file per agent following §"Choose the Target Agent" and the cross-agent layout below.
+
+This rule overrides any default-to-Claude assumption that might otherwise creep in. The whole point of `ATOMIC_AGENT` is that the launcher already knows which agent the user is using — re-asking or guessing is friction, and silently defaulting to Claude when the user is in a Copilot session produces a workflow they cannot run.
+
+### 2. Spec the workflow before writing code
+
+**Authoring a workflow is writing code, not writing a prompt.** A workflow file is a TypeScript program that orchestrates multiple agent sessions, manages information flow between them, declares a typed input schema, and ships as a self-contained Bun package — exactly the kind of artifact that benefits from an upfront spec.
+
+**Before scaffolding, invoke the `create-spec` skill** to produce a Technical Design Document for the workflow. Pass the user's stated goal as the spec topic. The spec should capture, at minimum:
+
+- **Goals / non-goals** — what LLM interactions the workflow performs, what it deliberately does not do.
+- **Inputs** — the `WorkflowInput[]` schema (names, types, defaults, descriptions, required-vs-optional).
+- **Stage decomposition** — every distinct LLM conversation as one `ctx.stage()` call (Rule 9), with the stage name, target agent, parents/children in the execution graph, and a one-line description of its prompt.
+- **Information flow** — what each stage needs as input, how it gets there (prompt arg, `s.transcript(handle)`, file on disk, `s.save()` payload), and what it emits. Cross-reference §"Information Flow Is a First-Class Design Concern" and `references/state-and-data-flow.md`.
+- **Control flow** — sequential vs `Promise.all` vs loops vs review/fix; visible vs `headless` stages; conditional branches.
+- **Per-session config** — model overrides, permission posture, custom tools, hooks (cross-reference `references/session-config.md`).
+- **Failure modes considered** — walk `references/failure-modes.md` and call out which failures apply and how the design mitigates them.
+- **Mode selection** — Mode 1 (atomic-managed `.atomic/workflows/<name>/`) vs Mode 2 (dev-owned CLI) vs Mode 1 + 2 combined (§"Custom workflow modes — pick before you scaffold").
+- **Target agent(s)** — locked from §1 above; if cross-agent, list each `.for("<agent>")` variant.
+
+The spec lands in `specs/YYYY-MM-DD-<workflow-name>.md`. Walk the user through `create-spec`'s "Open Questions" interview before scaffolding — design decisions resolved on paper are an order of magnitude cheaper than design decisions resolved by re-running broken workflows. Skip this step only when the user explicitly says "skip the spec" or the request is a trivial single-stage edit to an existing workflow file.
+
+After the spec is approved, proceed to step 3.
+
+### 3. Understand the User's Goal
 
 Map the user's intent to sessions and patterns:
 
@@ -562,11 +610,9 @@ skill in *before* writing code. Catching architectural and prompt-quality
 issues at design time is far cheaper than catching them in the first failed
 end-to-end run.
 
-### 2. Choose the Target Agent
+### 4. Choose the Target Agent
 
-Pass the agent as a runtime argument to `.for()` on the builder — this
-narrows all context types and gives correct `s.client`/`s.session` types.
-Call `.for()` **before** `.run()`:
+The agent was already detected in step 1 from `ATOMIC_AGENT` (or the user's explicit override). Pass it as a runtime argument to `.for()` on the builder — this narrows all context types and gives correct `s.client`/`s.session` types. Call `.for()` **before** `.run()`:
 
 | Agent    | Builder Chain                           | Primary Session API                                                                                                                                                               |
 | -------- | --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -603,7 +649,7 @@ const registry = createRegistry()
   .register(copilotWorkflow);
 ```
 
-### 3. Write the Workflow File
+### 5. Write the Workflow File
 
 Write the workflow file using the SDK-specific patterns. See
 `references/getting-started.md` for full quick-start examples for all 3
@@ -637,7 +683,7 @@ caveats.
 Both sets demonstrate shared helpers, context-aware prompt building,
 deterministic heuristics, and cross-SDK adaptation.
 
-### 4. Wire, typecheck, run
+### 6. Wire, typecheck, run
 
 The composition root is always three lines (see §"Scaffold a new workflow from scratch" above for the exact template and multi-workflow variant). After writing it:
 
