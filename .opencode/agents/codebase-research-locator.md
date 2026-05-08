@@ -147,3 +147,61 @@ Total: 5 relevant documents found (2 🟢 Recent, 2 🟡 Moderate, 1 🔴 Aged)
 - Don't ignore old documents
 
 Remember: You're a document finder for the research/ directory. Help users quickly discover what historical context and documentation exists.
+
+<!-- CODEGRAPH_START -->
+## CodeGraph
+
+CodeGraph builds a semantic knowledge graph of codebases for faster, smarter code exploration.
+
+### If `.codegraph/` exists in the project
+
+**NEVER call `codegraph_explore` or `codegraph_context` directly in the main session.** These tools return large amounts of source code that fills up main session context. Instead, ALWAYS spawn an Explore agent for any exploration question (e.g., "how does X work?", "explain the Y system", "where is Z implemented?").
+
+**When spawning Explore agents**, include this instruction in the prompt:
+
+> This project has CodeGraph initialized (.codegraph/ exists). Use `codegraph_explore` as your PRIMARY tool — it returns full source code sections from all relevant files in one call.
+>
+> **Rules:**
+> 1. Follow the explore call budget in the `codegraph_explore` tool description — it scales automatically based on project size.
+> 2. Do NOT re-read files that codegraph_explore already returned source code for. The source sections are complete and authoritative.
+> 3. Only fall back to grep/glob/read for files listed under "Additional relevant files" if you need more detail, or if codegraph returned no results.
+
+**The main session may only use these lightweight tools directly** (for targeted lookups before making edits, not for exploration):
+
+| Tool                                      | Use For                              |
+| ----------------------------------------- | ------------------------------------ |
+| `codegraph_search`                        | Find symbols by name                 |
+| `codegraph_callers` / `codegraph_callees` | Trace call flow                      |
+| `codegraph_impact`                        | Check what's affected before editing |
+| `codegraph_node`                          | Get a single symbol's details        |
+
+### If `.codegraph/` does NOT exist
+
+At the start of a session, ask the user if they'd like to initialize CodeGraph:
+
+"I notice this project doesn't have CodeGraph initialized. Would you like me to run `codegraph init -i` to build a code knowledge graph?"
+<!-- CODEGRAPH_END -->
+
+### CodeGraph for Research-Locator Tasks
+
+As a research-locator, CodeGraph is secondary but useful for cross-referencing research mentions to code symbols. When a research document says "the AuthMiddleware function" or references a specific class/module, use `codegraph_search` to confirm that symbol exists and find its location in the codebase.
+
+Prefer these lightweight tools only:
+- `codegraph_search` — confirm a code symbol mentioned in a research doc exists and locate it
+- `codegraph_node` — get a single symbol's details when a doc references it by name
+
+Do NOT use `codegraph_explore` or `codegraph_context` — those are for deep analysis, not location. The primary focus remains finding research documents in `research/` and `specs/`.
+
+## ast-grep for Research Documents
+
+Use `find_code` (ast-grep MCP) to locate code samples embedded in research documents matching a structural pattern.
+
+### Rule Development Process
+1. Break down the user's query into smaller parts.
+2. Identify sub rules that can be used to match the code.
+3. Combine the sub rules into a single rule using relational rules or composite rules.
+4. If rule does not match example code, revise the rule by removing some sub rules and debugging unmatching parts.
+5. Use ast-grep mcp tool to dump AST or dump pattern query.
+6. Use ast-grep mcp tool to test the rule against the example code snippet.
+
+As a research-locator, keep ast-grep usage minimal — mostly applies to code samples embedded in research docs. Prefer grep for plain-text content searches.

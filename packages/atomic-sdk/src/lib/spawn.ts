@@ -414,12 +414,13 @@ export async function upgradeGlobalPackages(pkgs: string[]): Promise<void> {
   }
 }
 
-/** Upgrade @playwright/cli, @llamaindex/liteparse, and @ast-grep/cli globally in one pass. */
+/** Upgrade @playwright/cli, @llamaindex/liteparse, @ast-grep/cli, and @colbymchenry/codegraph globally in one pass. */
 export async function upgradeGlobalToolPackages(): Promise<void> {
   return upgradeGlobalPackages([
     "@playwright/cli",
     "@llamaindex/liteparse",
     "@ast-grep/cli",
+    "@colbymchenry/codegraph",
   ]);
 }
 
@@ -546,6 +547,35 @@ export async function ensureTmuxInstalled(options: EnsureOptions = {}): Promise<
 
   throw new Error(
     capturedDetails || "Could not install tmux — no supported package manager succeeded.",
+  );
+}
+
+/**
+ * Ensure uv (and uvx) is installed and available on PATH.
+ * No-op when already present.
+ *
+ * When `quiet: true`, subprocess output is captured instead of inherited
+ * so an outer spinner UI owns the display. On failure the captured tail
+ * is re-thrown as the error message.
+ */
+export async function ensureUvInstalled(options: EnsureOptions = {}): Promise<void> {
+  if (Bun.which("uv") || Bun.which("uvx")) return;
+
+  const inherit = !(options.quiet ?? false);
+  const installCmd = process.platform === "win32"
+    ? ["powershell", "-ExecutionPolicy", "ByPass", "-c", "irm https://astral.sh/uv/install.ps1 | iex"]
+    : ["sh", "-c", "curl -LsSf https://astral.sh/uv/install.sh | sh"];
+
+  const result = await runCommand(installCmd, { inherit });
+  if (result.success) {
+    const home = getHomeDir();
+    if (home) prependPath(join(home, ".local", "bin"));
+  }
+
+  if (Bun.which("uv") || Bun.which("uvx")) return;
+
+  throw new Error(
+    result.details || "uv install completed but binary not found on PATH",
   );
 }
 
