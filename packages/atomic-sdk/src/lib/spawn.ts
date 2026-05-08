@@ -122,9 +122,18 @@ export function hasRequiredMuxBinary(): boolean {
 /**
  * Whether `uv` (or `uvx`) is on PATH. Either is sufficient — `uvx` ships in
  * the same uv install and is what the ast-grep MCP server is launched with.
+ *
+ * Uses `resolveCommandFromCurrentPath` (not bare `Bun.which`) because the
+ * 1-arg form of `Bun.which` caches PATH at process startup and does not
+ * pick up our runtime `prependPath` mutations after `ensureUvInstalled`
+ * has just installed uv into a new directory. Same caching gotcha is
+ * documented at the call sites in `runtime/tmux.ts` and `providers/claude.ts`.
  */
 export function hasUv(): boolean {
-  return Boolean(Bun.which("uv") || Bun.which("uvx"));
+  return Boolean(
+    resolveCommandFromCurrentPath("uv") ||
+      resolveCommandFromCurrentPath("uvx"),
+  );
 }
 
 function prependPathIfDirectory(directory: string | undefined): void {
