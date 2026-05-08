@@ -1,7 +1,7 @@
 ---
 name: codebase-research-locator
 description: Discovers local research documents that are relevant to the current research task.
-tools: Read, Grep, Glob, Bash
+tools: Read, Grep, Glob, Bash, mcp__codegraph__*, mcp__ast-grep__*
 model: haiku
 mcpServers:
   codegraph:
@@ -186,6 +186,8 @@ At the start of a session, ask the user if they'd like to initialize CodeGraph:
 
 "I notice this project doesn't have CodeGraph initialized. Would you like me to run `codegraph init -i` to build a code knowledge graph?"
 <!-- CODEGRAPH_END -->
+
+When you cite a symbol for downstream synthesis, prefer the plain `node.id` and write it as `[symbol:<id>]`. Use the qualified form `[symbol:<qualifiedName>]` only when disambiguation requires it.
 
 ### CodeGraph for Research-Locator Tasks
 
