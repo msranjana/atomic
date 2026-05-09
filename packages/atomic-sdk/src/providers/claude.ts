@@ -25,8 +25,9 @@ import {
   type Options as SDKOptions,
 } from "@anthropic-ai/claude-agent-sdk";
 import { respawnPane } from "../runtime/tmux.ts";
+import type { OffloadResumeMetadata } from "../runtime/offload-types.ts";
 import { escBash } from "../runtime/executor.ts";
-import { watch, unlink, mkdir, writeFile } from "node:fs/promises";
+import { watch, unlink, mkdir, rm, writeFile } from "node:fs/promises";
 import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { getDevCliPkgRoot } from "../lib/workspace-paths.ts";
@@ -250,7 +251,11 @@ const WORKFLOW_HOOK_SETTINGS = JSON.stringify({
   hooks: {
     SessionStart: [
       {
-        matcher: "startup",
+        // Match both fresh starts AND `--resume` so `claude-ready/<id>` is
+        // written for both spawn paths. Without `resume`, offload→resume
+        // hangs `waitForClaudeReady` until its timeout because the hook
+        // never fires after `claude --resume <id>`.
+        matcher: "startup|resume",
         hooks: [
           {
             type: "command",
@@ -429,7 +434,7 @@ async function spawnClaudeWithPrompt(
   chatFlags: string[],
   sessionId: string,
 ): Promise<void> {
-  const settingsPath = workflowHookSettingsPath();
+  const settingsPath = ensureWorkflowHookSettings();
   const argvPrompt = `"${escBash(readPromptInstruction(promptFile))}"`;
   const cmd = [
     "claude",
@@ -459,16 +464,18 @@ async function spawnClaudeWithPrompt(
   await waitForReadyMarker(sessionId);
 }
 
-function workflowHookSettingsPath(): string {
+/**
+ * Write the workflow hook-settings JSON to a content-addressed temp file
+ * and return its absolute path. Idempotent: the path is hash-stable and the
+ * file is rewritten with mode 0o600 each call.
+ */
+export function ensureWorkflowHookSettings(): string {
   const path = atomicContentTempPath(
     "claude-settings-atomic",
     ".json",
     WORKFLOW_HOOK_SETTINGS,
   );
-  writeFileSync(path, WORKFLOW_HOOK_SETTINGS, {
-    encoding: "utf-8",
-    mode: 0o600,
-  });
+  writeFileSync(path, WORKFLOW_HOOK_SETTINGS, { encoding: "utf-8", mode: 0o600 });
   return path;
 }
 
@@ -477,7 +484,7 @@ function workflowHookSettingsPath(): string {
  * `~/.atomic/claude-ready/<session_id>`.
  *
  * `atomic _claude-session-start-hook` is registered in
- * {@link WORKFLOW_HOOK_SETTINGS} with matcher `startup`; the Claude CLI
+ * {@link WORKFLOW_HOOK_SETTINGS} with matcher `startup|resume`; the Claude CLI
  * dispatches it during spawn, before the first API call and before the JSONL
  * transcript is created. Waiting on the resulting marker file gives us a
  * positive "Claude is alive" signal instead of racing the transcript writer.
@@ -1420,6 +1427,143 @@ export class HeadlessClaudeSessionWrapper {
   }
 
   async disconnect(): Promise<void> {}
+}
+
+// ---------------------------------------------------------------------------
+// Resume adapter
+// ---------------------------------------------------------------------------
+
+/**
+ * Pure: produce the `claude --resume <UUID>` argv. Caller threads the
+ * settings path from `ensureWorkflowHookSettings()`. No I/O, no throws on
+ * filesystem state.
+ *
+ * `meta.chatFlags` is the effective merged spawn-time flag set captured by
+ * `OffloadManager.registerSession` (RFC §5.4). It is required by the schema
+ * — there is no legacy fallback.
+ *
+ * Produces:
+ *   ["--resume", "<UUID>", ...meta.chatFlags, "--settings", "<hooksPath>"]
+ *
+ * Placement: `--resume` before the chat flags so Claude Code's last-wins
+ * flag semantics leave our `--settings` authoritative.
+ */
+export function buildClaudeResumeArgs(
+  meta: Pick<OffloadResumeMetadata, "agentSessionId" | "chatFlags">,
+  hookSettingsPath: string,
+): string[] {
+  if (meta.agentSessionId === "" || meta.agentSessionId == null) {
+    throw new Error("empty agentSessionId on resume");
+  }
+  return [
+    "--resume",
+    meta.agentSessionId,
+    ...meta.chatFlags,
+    "--settings",
+    hookSettingsPath,
+  ];
+}
+
+// ---------------------------------------------------------------------------
+// Offload cleanup
+// ---------------------------------------------------------------------------
+
+/**
+ * Result of a best-effort cleanup of all per-session marker files/dirs
+ * created during a Claude session's lifetime.
+ */
+export interface ClaudeMarkerCleanupResult {
+  /** `~/.atomic/claude-ready/<id>` unlinked (or was already absent). */
+  readyCleared: boolean;
+  /** `~/.atomic/claude-stop/<id>` unlinked (or was already absent). */
+  stopCleared: boolean;
+  /** `~/.atomic/claude-pid/<id>` unlinked (or was already absent). */
+  pidCleared: boolean;
+  /** `~/.atomic/claude-inflight/<id>/` removed recursively (or was already absent). */
+  inflightCleared: boolean;
+  /** Number of non-ENOENT errors encountered. */
+  failures: number;
+}
+
+/**
+ * Best-effort cleanup of all per-session marker files/dirs for a Claude
+ * session. Safe to call multiple times — ENOENT is treated as "already
+ * cleared" (post-condition holds). Non-ENOENT errors are logged and counted
+ * in `result.failures` but never rethrown.
+ *
+ * Returns immediately with all `cleared: false` when `agentSessionId` is
+ * empty (RFC §Q12 guard).
+ *
+ * @param agentSessionId - Claude session UUID to clean up.
+ * @param _dirs - Override hook dirs (used by tests to isolate to a tmpdir).
+ * @internal The `_dirs` parameter is unstable; tests only.
+ */
+export async function claudeOffloadCleanup(
+  agentSessionId: string,
+  _dirs?: ReturnType<typeof claudeHookDirs>,
+): Promise<ClaudeMarkerCleanupResult> {
+  // RFC §Q12: early-return on empty id
+  if (!agentSessionId) {
+    return {
+      readyCleared: false,
+      stopCleared: false,
+      pidCleared: false,
+      inflightCleared: false,
+      failures: 0,
+    };
+  }
+
+  const dirs = _dirs ?? claudeHookDirs();
+
+  const tryUnlink = async (filePath: string): Promise<boolean> => {
+    try {
+      await unlink(filePath);
+      return true;
+    } catch (e: unknown) {
+      if (e instanceof Error && "code" in e && (e as NodeJS.ErrnoException).code === "ENOENT") {
+        return true; // Post-condition holds: file is absent
+      }
+      console.error(`[claudeOffloadCleanup] Failed to unlink ${filePath}:`, e);
+      return false;
+    }
+  };
+
+  const tryRmRecursive = async (dirPath: string): Promise<boolean> => {
+    try {
+      await rm(dirPath, { recursive: true, force: true });
+      return true;
+    } catch (e: unknown) {
+      if (e instanceof Error && "code" in e && (e as NodeJS.ErrnoException).code === "ENOENT") {
+        return true; // Already absent
+      }
+      console.error(`[claudeOffloadCleanup] Failed to remove ${dirPath}:`, e);
+      return false;
+    }
+  };
+
+  const results = await Promise.allSettled([
+    tryUnlink(join(dirs.ready, agentSessionId)),
+    tryUnlink(join(dirs.marker, agentSessionId)),
+    tryUnlink(join(dirs.pid, agentSessionId)),
+    tryRmRecursive(join(dirs.inflight, agentSessionId)),
+  ]);
+
+  const [readyResult, stopResult, pidResult, inflightResult] = results;
+
+  const readyCleared = readyResult.status === "fulfilled" && readyResult.value;
+  const stopCleared = stopResult.status === "fulfilled" && stopResult.value;
+  const pidCleared = pidResult.status === "fulfilled" && pidResult.value;
+  const inflightCleared = inflightResult.status === "fulfilled" && inflightResult.value;
+
+  // Count unexpected rejections (tryUnlink/tryRmRecursive never throw, so
+  // allSettled rejections would only come from truly unexpected errors in the
+  // async wrapper itself).
+  const failures =
+    [readyResult, stopResult, pidResult, inflightResult].filter(
+      (r) => r.status === "rejected" || (r.status === "fulfilled" && !r.value),
+    ).length;
+
+  return { readyCleared, stopCleared, pidCleared, inflightCleared, failures };
 }
 
 // ---------------------------------------------------------------------------

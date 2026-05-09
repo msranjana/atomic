@@ -12,6 +12,7 @@ import type {
   SessionConfig as CopilotSessionConfig,
 } from "@github/copilot-sdk";
 import { normalizedTerminalEnv } from "../lib/terminal-env.ts";
+import type { OffloadResumeMetadata } from "../runtime/offload-types.ts";
 import { getCommandPath } from "../services/system/detect.ts";
 import { createProviderValidator } from "../types.ts";
 
@@ -162,6 +163,34 @@ export function mergeCopilotSystemMessage(
   const prev = existing.content ?? "";
   const merged = prev ? `${prev}\n\n${extra}` : extra;
   return { ...existing, content: merged };
+}
+
+// ---------------------------------------------------------------------------
+// Resume adapter
+// ---------------------------------------------------------------------------
+
+/**
+ * Build the `copilot` CLI argv fragment needed to resume an offloaded session.
+ *
+ * `meta.chatFlags` is the effective merged spawn-time flag set captured by
+ * `OffloadManager.registerSession` (RFC §5.4). It is required by the schema —
+ * there is no legacy fallback.
+ *
+ * Produces: ["--ui-server", "--port", "0", "--resume=<sessionId>", ...meta.chatFlags]
+ *
+ * `--ui-server --port 0` mirrors the original spawn (executor.ts buildSpawnArgs
+ * for `copilot`) — without it the resumed CLI starts in interactive mode and
+ * never binds a TCP port, so `waitForServer` would time out at 15s.
+ *
+ * Note: Copilot CLI requires `=` syntax (not space-separated) per spec §5.4.
+ */
+export function buildCopilotResumeArgs(
+  meta: Pick<OffloadResumeMetadata, "agentSessionId" | "chatFlags">,
+): string[] {
+  if (meta.agentSessionId === "" || meta.agentSessionId == null) {
+    throw new Error("empty agentSessionId on resume");
+  }
+  return ["--ui-server", "--port", "0", `--resume=${meta.agentSessionId}`, ...meta.chatFlags];
 }
 
 /**

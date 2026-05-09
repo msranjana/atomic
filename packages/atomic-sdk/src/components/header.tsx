@@ -35,7 +35,7 @@ export function Header() {
   const storeVersion = useStoreVersion(store);
 
   const counts = useMemo(() => {
-    const c: Record<SessionStatus, number> = { complete: 0, running: 0, pending: 0, error: 0, awaiting_input: 0 };
+    const c: Record<SessionStatus, number> = { complete: 0, running: 0, pending: 0, error: 0, awaiting_input: 0, offloaded: 0, resuming: 0 };
     for (const s of store.sessions) c[s.status]++;
     return c;
   }, [storeVersion]);
@@ -79,6 +79,8 @@ export function Header() {
         <CountBadge color={theme.info} backgroundColor={theme.backgroundElement} icon={"?"} count={counts.awaiting_input} />
         <CountBadge color={theme.textDim} backgroundColor={theme.backgroundElement} icon={"\u25CB"} count={counts.pending} />
         <CountBadge color={theme.error} backgroundColor={theme.backgroundElement} icon={"\u2717"} count={counts.error} />
+        <CountBadge color={theme.textDim} backgroundColor={theme.backgroundElement} icon={"\u25cc"} count={counts.offloaded} />
+        <CountBadge color={theme.warning} backgroundColor={theme.backgroundElement} icon={"\u25d0"} count={counts.resuming} />
       </box>
     </box>
   );

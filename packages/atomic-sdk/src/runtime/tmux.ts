@@ -450,12 +450,33 @@ export function killSession(sessionName: string): void {
   }
 }
 
-/** Kill a specific tmux window within a session. Silences errors if already dead. */
-export function killWindow(sessionName: string, windowName: string): void {
+/**
+ * Window names that `killWindow` must never accept. Mirror this set when
+ * `executor.ts` introduces new top-level windows (e.g., a future "logs"
+ * window). The set is the single source of truth — the guard message
+ * derives from it.
+ */
+export const RESERVED_WINDOW_NAMES: ReadonlySet<string> = new Set([
+  "0",            // tmux default index — defensive against legacy/test fixtures
+  "orchestrator", // matches executor.ts:619 createSession(..., "orchestrator", ...)
+]);
+
+/**
+ * Kill a specific tmux window within a session.
+ *
+ * Throws if `windowName` is empty or is in `RESERVED_WINDOW_NAMES`.
+ * Resolves when the window is gone; silences errors if already dead.
+ */
+export async function killWindow(sessionName: string, windowName: string): Promise<void> {
+  if (!windowName || RESERVED_WINDOW_NAMES.has(windowName)) {
+    throw new Error(
+      `refuses to kill reserved window: ${windowName || "<empty>"}`,
+    );
+  }
   try {
     tmuxExec(["kill-window", "-t", `${sessionName}:${windowName}`]);
   } catch {
-    // Window may already be dead
+    // Window may already be dead.
   }
 }
 
