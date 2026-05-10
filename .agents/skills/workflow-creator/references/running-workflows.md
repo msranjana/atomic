@@ -15,7 +15,7 @@ tool to invoke the workflow yourself.
 Follow this contract whenever the user asks to run a workflow:
 
 1. **Run, don't recite.** If you have shell/tool access, execute the workflow command. Do not answer "I can't run it" or only print `atomic workflow -n ...`.
-2. **Use the current agent by default.** Resolve the agent in this order: user explicitly named an agent → `ATOMIC_AGENT` (`claude`, `copilot`, `opencode`) → ask once. Never silently default to Claude.
+2. **Use the current agent by default.** Resolve the agent in this order: user explicitly named an agent → `ATOMIC_AGENT` (`claude`, `copilot`, `opencode`) → ask once. Never silently default to a specific agent — every supported agent (Claude, Copilot, OpenCode) is a first-class target.
 3. **Prefer the atomic registry first.** Run `atomic workflow list -a <agent>` before probing examples or app-specific CLIs. This list includes builtins and registered custom workflows from `.atomic/settings.json` and `~/.atomic/settings.json`.
 4. **Inspect inputs before running.** Run `atomic workflow inputs <name> -a <agent>` for registered atomic workflows; parse the schema and ask only for required values the user did not provide.
 5. **Run detached from agent chats.** Add `-d` when starting via `atomic workflow` from a coding-agent chat unless the user explicitly wants to attach immediately.
@@ -27,7 +27,8 @@ Agent resolution details:
 printenv ATOMIC_AGENT   # "claude" | "copilot" | "opencode" when launched by atomic chat
 ```
 
-If `ATOMIC_AGENT=copilot`, run the Copilot variant (`-a copilot`). If
+If `ATOMIC_AGENT=claude`, run the Claude variant (`-a claude`). If
+`ATOMIC_AGENT=copilot`, run the Copilot variant (`-a copilot`). If
 `ATOMIC_AGENT=opencode`, run the OpenCode variant (`-a opencode`). Only use a
 different agent when the user explicitly requests it or confirms a switch.
 
@@ -512,24 +513,24 @@ in-scope session — only do that when the user has asked to stop everything.
 
 *(Note: `gen-spec` is a hypothetical builtin used here for pedagogical purposes. Real atomic builtins are `ralph`, `deep-research-codebase`, and `open-claude-design`.)*
 
-1. Resolve the agent from the user request or `ATOMIC_AGENT` (example: `copilot`).
-2. Path C (atomic registry). Run `atomic workflow list -a copilot`. Output includes `gen-spec`. Good.
+1. Resolve the agent from the user request or `ATOMIC_AGENT` (example: `claude`).
+2. Path C (atomic registry). Run `atomic workflow list -a claude`. Output includes `gen-spec`. Good.
 3. Target resolved exactly: `gen-spec`.
-4. Run `atomic workflow inputs gen-spec -a copilot`. Parse the JSON:
+4. Run `atomic workflow inputs gen-spec -a claude`. Parse the JSON:
    `research_doc` (required string — already given), `focus` (required enum
    of `minimal|standard|exhaustive`, default `standard`), `notes`
    (optional text).
 5. Ask via AskUserQuestion once: "What focus level for the spec?" with
    choices `minimal`, `standard`, `exhaustive`. User picks `standard`. Skip
    `notes` since it's optional.
-6. Run: `atomic workflow -n gen-spec -a copilot -d --research_doc=research/docs/2026-04-11-auth.md --focus=standard`
-7. The CLI prints a session name like `atomic-wf-copilot-gen-spec-a1b2c3d4`.
+6. Run: `atomic workflow -n gen-spec -a claude -d --research_doc=research/docs/2026-04-11-auth.md --focus=standard`
+7. The CLI prints a session name like `atomic-wf-claude-gen-spec-a1b2c3d4`.
    Tell the user, using the §"After starting" template:
-   "Started workflow `gen-spec` (session id: `atomic-wf-copilot-gen-spec-a1b2c3d4`).
+   "Started workflow `gen-spec` (session id: `atomic-wf-claude-gen-spec-a1b2c3d4`).
    To watch it run interactively, **open a new terminal** and run:
-   `atomic workflow session connect atomic-wf-copilot-gen-spec-a1b2c3d4`.
-   Status: `atomic workflow status atomic-wf-copilot-gen-spec-a1b2c3d4`.
-   Stop: `atomic session kill atomic-wf-copilot-gen-spec-a1b2c3d4 -y`."
+   `atomic workflow session connect atomic-wf-claude-gen-spec-a1b2c3d4`.
+   Status: `atomic workflow status atomic-wf-claude-gen-spec-a1b2c3d4`.
+   Stop: `atomic session kill atomic-wf-claude-gen-spec-a1b2c3d4 -y`."
 
 **Example B — user app, free-form prompt**
 
