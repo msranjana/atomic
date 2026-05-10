@@ -29,10 +29,11 @@ export function spawnAttachedFooter(
   _paneId: string,
   agentType?: AgentType,
   sessionName?: string,
+  name?: string,
 ): void {
   const theme = deriveGraphTheme(resolveTheme(null));
   renderFooter(
-    attachedStatusline({ theme, agentType }),
+    attachedStatusline({ theme, agentType, name }),
     { sessionName },
   );
 }

@@ -201,4 +201,21 @@ describe("attachedStatusline (chat variant)", () => {
     expect(compiled).toContain("ctrl+b d");
     expect(compiled).toContain("detach");
   });
+
+  test("Footer.Right surfaces the session id between the /atomic hint and detach hint", () => {
+    const tree = attachedStatusline({
+      theme: THEME,
+      agentType: "opencode",
+      name: "atomic-chat-opencode-foo",
+    });
+    const { right } = slots(tree);
+    const compiled = compile(right);
+    expect(compiled).toContain("atomic-chat-opencode-foo");
+    const atomicIdx = compiled.indexOf("/atomic <question>");
+    const nameIdx = compiled.indexOf("atomic-chat-opencode-foo");
+    const detachIdx = compiled.indexOf("ctrl+b d");
+    expect(atomicIdx).toBeGreaterThanOrEqual(0);
+    expect(nameIdx).toBeGreaterThan(atomicIdx);
+    expect(detachIdx).toBeGreaterThan(nameIdx);
+  });
 });
