@@ -147,11 +147,11 @@ Use the `bump-version.ts` script to update the version across all tracked files 
 
 ```sh
 # Explicit version
-bun run src/scripts/bump-version.ts 0.4.47
-bun run src/scripts/bump-version.ts 0.4.47-0
+bun run packages/atomic/script/bump-version.ts 0.4.47
+bun run packages/atomic/script/bump-version.ts 0.4.47-0
 
 # Auto-detect version from current branch name
-bun run src/scripts/bump-version.ts --from-branch
+bun run packages/atomic/script/bump-version.ts --from-branch
 ```
 
 The `--from-branch` flag extracts the version from the current branch name, so check out the release or prerelease branch first.
