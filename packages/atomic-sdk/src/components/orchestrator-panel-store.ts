@@ -5,6 +5,18 @@ import type { SessionData, SessionStatus, PanelSession, ViewMode } from "./orche
 
 type Listener = () => void;
 
+export type ToastKind = "info" | "warning" | "error";
+
+export interface ToastEntry {
+  id: number;
+  message: string;
+  kind: ToastKind;
+  createdAt: number;
+}
+
+/** Default time-to-live for auto-dismissed toasts (ms). */
+export const TOAST_DEFAULT_TTL_MS = 5000;
+
 export class PanelStore {
   version = 0;
   workflowName = "";
@@ -22,8 +34,13 @@ export class PanelStore {
 
   /** Current view mode — graph overview or attached to a specific agent. */
   viewMode: ViewMode = "graph";
-  /** ID of the agent currently attached to (only meaningful when viewMode === "attached"). */
+  /** ID of the agent currently attached to (only meaningful when viewMode === "attached" or "resuming"). */
   activeAgentId = "";
+
+  /** Active toast notifications. */
+  toasts: ToastEntry[] = [];
+  private nextToastId = 1;
+  private toastTimers = new Map<number, ReturnType<typeof setTimeout>>();
 
   private listeners = new Set<Listener>();
 
@@ -106,6 +123,13 @@ export class PanelStore {
     }
   }
 
+  setSessionStatus(name: string, status: SessionData["status"]): void {
+    const session = this.sessions.find((s) => s.name === name);
+    if (!session) return;
+    session.status = status;
+    this.emit();
+  }
+
   addSession(session: SessionData): void {
     this.sessions.push(session);
     this.emit();
@@ -143,13 +167,44 @@ export class PanelStore {
   }
 
   /**
-   * Switch between graph and attached view modes.
-   * When switching to "attached", provide the agent ID to attach to.
+   * Switch between graph, attached, and resuming view modes.
+   * When switching to "attached" or "resuming", provide the agent ID.
    * Switching to "graph" clears the active agent.
    */
   setViewMode(mode: ViewMode, agentId?: string): void {
     this.viewMode = mode;
-    this.activeAgentId = mode === "attached" && agentId ? agentId : "";
+    this.activeAgentId = (mode === "attached" || mode === "resuming") && agentId ? agentId : "";
+    this.emit();
+  }
+
+  /**
+   * Show a toast notification that auto-dismisses after `ttlMs`.
+   *
+   * Pass `ttlMs: 0` to disable auto-dismiss (caller owns the lifetime).
+   * The internal timer is `unref()`'d so it never blocks process exit.
+   */
+  showToast(message: string, kind: ToastKind = "error", ttlMs = TOAST_DEFAULT_TTL_MS): void {
+    const id = this.nextToastId++;
+    this.toasts.push({ id, message, kind, createdAt: Date.now() });
+    if (ttlMs > 0) {
+      const timer = setTimeout(() => this.dismissToast(id), ttlMs);
+      // Don't keep the event loop alive solely for a toast timeout.
+      const unref = (timer as { unref?: () => void }).unref;
+      if (typeof unref === "function") unref.call(timer);
+      this.toastTimers.set(id, timer);
+    }
+    this.emit();
+  }
+
+  dismissToast(id: number): void {
+    const idx = this.toasts.findIndex((t) => t.id === id);
+    if (idx < 0) return;
+    this.toasts.splice(idx, 1);
+    const timer = this.toastTimers.get(id);
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      this.toastTimers.delete(id);
+    }
     this.emit();
   }
 

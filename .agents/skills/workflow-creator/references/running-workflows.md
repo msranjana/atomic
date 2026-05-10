@@ -207,14 +207,53 @@ Skip AskUserQuestion entirely when:
    - Structured: `atomic workflow -n <name> -a <agent> --<field1>=<value1>`
    - Detached: add `-d`
 
-7. **Report the session name** the CLI printed and tell the user: "attach any
-   time with `atomic workflow session connect <session>` — or
-   `atomic workflow session list` to see what's running."
+7. **Tell the user how to attach interactively** — the runtime printed a
+   session name like `atomic-wf-claude-<workflow>-a1b2c3d4`. Immediately
+   echo it back with the **new-terminal attach instruction** described in
+   §"After starting: tell the user how to view it interactively" below.
+   This is non-negotiable on every successful spawn. Also surface
+   `atomic workflow status <sessionId>` (poll) and
+   `atomic session kill <sessionId> -y` (stop).
 8. **If you started the workflow detached (`-d` or `detach: true`), poll
    status until it terminates or pauses for input** — see "Polling rhythm
    after spawning" below. Surfacing a HIL pause to the user immediately is
    non-negotiable; an unattended `awaiting_input` / `needs_review` state
    means the workflow is wedged and the user doesn't know.
+
+## After starting: tell the user how to view it interactively
+
+**Rule:** Every time you successfully start a workflow on the user's behalf, your *very next message* must tell them how to attach to it interactively **from a new terminal**. Do not bury this in a status report or a summary — it is the headline of the post-spawn message.
+
+The runtime prints a session name when the workflow starts (e.g. `atomic-wf-claude-ralph-a1b2c3d4`). Capture that exact string and use it verbatim — do not paraphrase, abbreviate, or invent placeholder ids. The user must be able to copy-paste the command.
+
+**Phrasing template** — substitute `<name>` with the workflow name and `<sessionId>` with the literal session id printed by the CLI:
+
+> Started workflow `<name>` (session id: `<sessionId>`). To watch it run interactively, **open a new terminal** and run:
+>
+> ```
+> atomic workflow session connect <sessionId>
+> ```
+
+**Why "open a new terminal" is part of the rule, not optional flavor:**
+
+`atomic workflow session connect` attaches stdin/stdout to the workflow's tmux pane and takes over the terminal it runs in. If the user runs it in the same shell that's currently hosting their chat with you, they lose the chat session for the duration of the attach. A *second* terminal lets the workflow run visibly while the user keeps talking to you. Always say "open a new terminal" — never just "run this command."
+
+**Use `atomic workflow session connect`, not `atomic session connect`.** Both reach the same tmux socket, but the `workflow` form is the canonical surface for workflow-spawned sessions and is what users will see in docs, examples, and other agent output. Stay consistent.
+
+**This rule applies to all three invocation paths.** Builtins, repo-shipped examples, and user-app workers all land on the same `atomic` tmux socket, so `atomic workflow session connect <sessionId>` works regardless of how the workflow was spawned. Never use a path-specific attach command instead.
+
+**Worked phrasing — copy this shape verbatim, swapping the ids:**
+
+> Started workflow `gen-spec` (session id: `atomic-wf-claude-gen-spec-a1b2c3d4`). To watch it run interactively, open a new terminal and run:
+>
+> ```
+> atomic workflow session connect atomic-wf-claude-gen-spec-a1b2c3d4
+> ```
+>
+> Status: `atomic workflow status atomic-wf-claude-gen-spec-a1b2c3d4`
+> Stop: `atomic session kill atomic-wf-claude-gen-spec-a1b2c3d4 -y`
+
+If the runtime did *not* print a session name (rare — usually a startup error), do not fabricate one. Tell the user the workflow failed to start and surface the actual error output instead.
 
 ## Polling rhythm after spawning
 
@@ -344,11 +383,14 @@ All three invocation paths (Path A, B, C) spawn sessions on the same `atomic`
 tmux socket. Two surfaces expose monitoring commands:
 
 1. **The global `atomic` binary (recommended for all paths).** Session
-   management lives under `atomic session …` and `atomic workflow status`:
+   management lives under `atomic session …` and `atomic workflow status`.
+   Use `atomic workflow session connect` (not `atomic session connect`) when
+   attaching to workflow-spawned sessions — it is the canonical surface and
+   the form you should always quote back to the user:
    ```bash
    atomic session list
    atomic workflow status <session-id>
-   atomic session connect <session-id>
+   atomic workflow session connect <session-id>      # new terminal recommended — takes over stdin/stdout
    atomic session kill <session-id> -y
    ```
 2. **No-global-install fallback — `bunx atomic`.** The `atomic` CLI ships as a
@@ -454,10 +496,12 @@ in-scope session — only do that when the user has asked to stop everything.
    `notes` since it's optional.
 5. Run: `atomic workflow -n gen-spec -a claude --research_doc=research/docs/2026-04-11-auth.md --focus=standard`
 6. The CLI prints a session name like `atomic-wf-claude-gen-spec-a1b2c3d4`.
-   Tell the user: "Started in the background. Attach with
-   `atomic workflow session connect atomic-wf-claude-gen-spec-a1b2c3d4`,
-   check progress with `atomic workflow status atomic-wf-claude-gen-spec-a1b2c3d4`,
-   or stop it with `atomic session kill atomic-wf-claude-gen-spec-a1b2c3d4 -y`."
+   Tell the user, using the §"After starting" template:
+   "Started workflow `gen-spec` (session id: `atomic-wf-claude-gen-spec-a1b2c3d4`).
+   To watch it run interactively, **open a new terminal** and run:
+   `atomic workflow session connect atomic-wf-claude-gen-spec-a1b2c3d4`.
+   Status: `atomic workflow status atomic-wf-claude-gen-spec-a1b2c3d4`.
+   Stop: `atomic session kill atomic-wf-claude-gen-spec-a1b2c3d4 -y`."
 
 **Example B — user app, free-form prompt**
 
@@ -476,11 +520,12 @@ in-scope session — only do that when the user has asked to stop everything.
    For a detached run, the worker must wire `detach: true` to `runWorkflow` or
    expose its own `--detach` Commander option — there is no built-in `-d` on
    user-app workers.
-5. Report monitoring commands using the global `atomic` CLI (recommended — no
-   extra setup, works for all three paths):
-   - "Attach: `atomic session connect atomic-wf-claude-summarize-pr-a1b2c3d4`"
-   - "Status: `atomic workflow status atomic-wf-claude-summarize-pr-a1b2c3d4`"
-   - "Stop: `atomic session kill atomic-wf-claude-summarize-pr-a1b2c3d4 -y`"
+5. Apply the §"After starting" rule. Tell the user:
+   "Started workflow `summarize-pr` (session id: `atomic-wf-claude-summarize-pr-a1b2c3d4`).
+   To watch it run interactively, **open a new terminal** and run:
+   `atomic workflow session connect atomic-wf-claude-summarize-pr-a1b2c3d4`.
+   Status: `atomic workflow status atomic-wf-claude-summarize-pr-a1b2c3d4`.
+   Stop: `atomic session kill atomic-wf-claude-summarize-pr-a1b2c3d4 -y`."
 6. `bunx atomic …` is equivalent if the global binary is not installed. Both
    talk to the same atomic tmux socket regardless of which path spawned the
    workflow.
@@ -498,7 +543,10 @@ in-scope session — only do that when the user has asked to stop everything.
 4. Ask via AskUserQuestion: "What should the greeting text be?" User
    supplies `"Hello there"`. `style=formal` is implied by the message.
 5. Run: `bun run examples/hello-world/claude-worker.ts --greeting="Hello there" --style=formal`
-6. Report the session name.
+6. Apply the §"After starting" rule. Tell the user:
+   "Started workflow `hello-world` (session id: `<sessionId from CLI>`).
+   To watch it run interactively, **open a new terminal** and run:
+   `atomic workflow session connect <sessionId>`."
 
 **Example B2 — atomic builtin, free-form prompt**
 
@@ -509,7 +557,10 @@ in-scope session — only do that when the user has asked to stop everything.
 2. Target resolved exactly: `ralph`, agent `claude`.
 3. Prompt already given in user's message. No AskUserQuestion needed.
 4. Run: `atomic workflow -n ralph -a claude "add OAuth to the API"`.
-5. Report the session name.
+5. Apply the §"After starting" rule. Tell the user:
+   "Started workflow `ralph` (session id: `<sessionId from CLI>`).
+   To watch it run interactively, **open a new terminal** and run:
+   `atomic workflow session connect <sessionId>`."
 
 **Example C — workflow does not exist**
 
@@ -548,6 +599,19 @@ in-scope session — only do that when the user has asked to stop everything.
 - **Re-asking what the user already said** — read their message first.
 - **Forgetting to report the session name** — the user needs it to reattach
   and to query status later.
+- **Reporting the session name without the new-terminal attach instruction** —
+  every successful spawn must tell the user, in the *same message*, to
+  **open a new terminal** and run `atomic workflow session connect <sessionId>`.
+  See §"After starting: tell the user how to view it interactively" for the
+  exact phrasing template. Omitting it leaves the user with a session id and
+  no idea how to watch the workflow run.
+- **Telling the user to attach in their current terminal** —
+  `atomic workflow session connect` takes over stdin/stdout, so attaching in
+  the chat shell kicks the user out of the chat. Always say "open a new
+  terminal."
+- **Substituting `atomic session connect` for `atomic workflow session connect`** —
+  both reach the same socket, but the `workflow` form is the canonical surface
+  for workflow-spawned sessions. Use it consistently.
 - **Leaving `needs_review` unreported** — when `atomic workflow status`
   returns `needs_review`, surface it to the user right away. The workflow is
   blocked on human input and will sit forever otherwise.

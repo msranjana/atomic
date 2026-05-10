@@ -797,5 +797,10 @@ to invoke it correctly. That's a different playbook from authoring.
 - The six-step invocation recipe.
 - Monitoring with `atomic workflow status` — and why `needs_review` must be
   surfaced immediately.
+- The **post-spawn attach rule** — every successful workflow start must be
+  followed by a message telling the user to **open a new terminal** and run
+  `atomic workflow session connect <sessionId>` to watch the run
+  interactively. Phrasing template and rationale are in the
+  §"After starting: tell the user how to view it interactively" section.
 - Tearing down with `atomic session kill -y` (the `-y` is mandatory).
 - Worked examples for "workflow exists" and "workflow doesn't exist".

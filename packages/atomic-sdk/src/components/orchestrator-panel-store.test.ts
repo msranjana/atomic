@@ -803,6 +803,111 @@ describe("PanelStore", () => {
     });
   });
 
+  // ── setSessionStatus ───────────────────────────────────────────────────────
+
+  describe("setSessionStatus", () => {
+    beforeEach(() => {
+      store.setWorkflowInfo("wf", "claude", [{ name: "worker", parents: [] }], "prompt");
+      store.startSession("worker");
+      store.completeSession("worker");
+    });
+
+    test("complete → offloaded sets status to offloaded", () => {
+      store.setSessionStatus("worker", "offloaded");
+      const s = store.sessions.find((s) => s.name === "worker")!;
+      expect(s.status).toBe("offloaded");
+    });
+
+    test("offloaded → resuming sets status to resuming", () => {
+      store.setSessionStatus("worker", "offloaded");
+      store.setSessionStatus("worker", "resuming");
+      const s = store.sessions.find((s) => s.name === "worker")!;
+      expect(s.status).toBe("resuming");
+    });
+
+    test("resuming → complete sets status to complete", () => {
+      store.setSessionStatus("worker", "offloaded");
+      store.setSessionStatus("worker", "resuming");
+      store.setSessionStatus("worker", "complete");
+      const s = store.sessions.find((s) => s.name === "worker")!;
+      expect(s.status).toBe("complete");
+    });
+
+    test("resuming → offloaded (recoverable error path) sets status to offloaded", () => {
+      store.setSessionStatus("worker", "offloaded");
+      store.setSessionStatus("worker", "resuming");
+      store.setSessionStatus("worker", "offloaded");
+      const s = store.sessions.find((s) => s.name === "worker")!;
+      expect(s.status).toBe("offloaded");
+    });
+
+    test("bumps version by exactly 1 per call", () => {
+      const before = store.version;
+      store.setSessionStatus("worker", "offloaded");
+      expect(store.version).toBe(before + 1);
+    });
+
+    test("notifies subscribed listeners", () => {
+      const listener = mock(() => {});
+      store.subscribe(listener);
+      store.setSessionStatus("worker", "offloaded");
+      expect(listener).toHaveBeenCalledTimes(1);
+    });
+
+    test("does not emit when session not found", () => {
+      const before = store.version;
+      store.setSessionStatus("nonexistent", "offloaded");
+      expect(store.version).toBe(before);
+    });
+
+    test("does not notify listeners when session not found", () => {
+      const listener = mock(() => {});
+      store.subscribe(listener);
+      store.setSessionStatus("nonexistent", "offloaded");
+      expect(listener).toHaveBeenCalledTimes(0);
+    });
+
+    test("resumeSession (HIL) still only transitions awaiting_input → running", () => {
+      // set to awaiting_input first via awaitingInput helper
+      store.startSession("worker"); // re-start since it was completed in beforeEach
+      store.awaitingInput("worker");
+      store.resumeSession("worker");
+      const s = store.sessions.find((s) => s.name === "worker")!;
+      expect(s.status).toBe("running");
+    });
+
+    test("resumeSession does not transition offloaded → running", () => {
+      store.setSessionStatus("worker", "offloaded");
+      const before = store.version;
+      store.resumeSession("worker");
+      const s = store.sessions.find((s) => s.name === "worker")!;
+      expect(s.status).toBe("offloaded");
+      expect(store.version).toBe(before);
+    });
+
+    test("setSessionStatus does not interfere with resumeSession HIL path", () => {
+      // Both methods co-exist without collision
+      // Use a fresh store with two named sessions
+      const s2 = new PanelStore();
+      s2.setWorkflowInfo("wf2", "claude", [
+        { name: "hil-worker", parents: [] },
+        { name: "bg-worker", parents: [] },
+      ], "p");
+      s2.startSession("hil-worker");
+      s2.awaitingInput("hil-worker");
+      s2.startSession("bg-worker");
+      s2.completeSession("bg-worker");
+      // setSessionStatus on bg-worker
+      s2.setSessionStatus("bg-worker", "offloaded");
+      // HIL resume still works on hil-worker
+      s2.resumeSession("hil-worker");
+      const hil = s2.sessions.find((s) => s.name === "hil-worker")!;
+      expect(hil.status).toBe("running");
+      const offloaded = s2.sessions.find((s) => s.name === "bg-worker")!;
+      expect(offloaded.status).toBe("offloaded");
+    });
+  });
+
   // ── setViewMode ────────────────────────────────────────────────────────────
 
   describe("setViewMode", () => {
@@ -841,6 +946,118 @@ describe("PanelStore", () => {
       store.setViewMode("attached");
       expect(store.viewMode).toBe("attached");
       expect(store.activeAgentId).toBe("");
+    });
+
+    test('setViewMode("resuming", "stage-a") sets viewMode and activeAgentId', () => {
+      store.setViewMode("resuming", "stage-a");
+      expect(store.viewMode).toBe("resuming");
+      expect(store.activeAgentId).toBe("stage-a");
+    });
+
+    test('setViewMode("resuming") without agentId clears activeAgentId', () => {
+      store.setViewMode("attached", "old-agent");
+      store.setViewMode("resuming");
+      expect(store.viewMode).toBe("resuming");
+      expect(store.activeAgentId).toBe("");
+    });
+
+    test('setViewMode("resuming", "stage-a") bumps version', () => {
+      const before = store.version;
+      store.setViewMode("resuming", "stage-a");
+      expect(store.version).toBe(before + 1);
+    });
+  });
+
+  // ── showToast ──────────────────────────────────────────────────────────────
+
+  describe("showToast", () => {
+    test("appends toast to toasts array", () => {
+      store.showToast("hello world");
+      expect(store.toasts).toHaveLength(1);
+      expect(store.toasts[0]!.message).toBe("hello world");
+    });
+
+    test("assigns monotonically increasing id", () => {
+      store.showToast("first");
+      store.showToast("second");
+      expect(store.toasts[0]!.id).toBeLessThan(store.toasts[1]!.id);
+    });
+
+    test("sets createdAt to a positive epoch timestamp", () => {
+      store.showToast("ts test");
+      expect(store.toasts[0]!.createdAt).toBeGreaterThan(0);
+    });
+
+    test("bumps version by exactly 1", () => {
+      const before = store.version;
+      store.showToast("bump");
+      expect(store.version).toBe(before + 1);
+    });
+
+    test("notifies subscribed listener", () => {
+      const listener = mock(() => {});
+      store.subscribe(listener);
+      store.showToast("notify");
+      expect(listener).toHaveBeenCalledTimes(1);
+    });
+
+    test("multiple showToast calls accumulate", () => {
+      store.showToast("a");
+      store.showToast("b");
+      store.showToast("c");
+      expect(store.toasts).toHaveLength(3);
+    });
+  });
+
+  // ── dismissToast ───────────────────────────────────────────────────────────
+
+  describe("dismissToast", () => {
+    test("removes toast by id", () => {
+      store.showToast("to remove");
+      const id = store.toasts[0]!.id;
+      store.dismissToast(id);
+      expect(store.toasts).toHaveLength(0);
+    });
+
+    test("removes only the targeted toast", () => {
+      store.showToast("keep");
+      store.showToast("remove");
+      const removeId = store.toasts[1]!.id;
+      store.dismissToast(removeId);
+      expect(store.toasts).toHaveLength(1);
+      expect(store.toasts[0]!.message).toBe("keep");
+    });
+
+    test("bumps version when toast removed", () => {
+      store.showToast("bump");
+      const id = store.toasts[0]!.id;
+      const before = store.version;
+      store.dismissToast(id);
+      expect(store.version).toBe(before + 1);
+    });
+
+    test("notifies listener when toast removed", () => {
+      store.showToast("notify");
+      const id = store.toasts[0]!.id;
+      const listener = mock(() => {});
+      store.subscribe(listener);
+      store.dismissToast(id);
+      expect(listener).toHaveBeenCalledTimes(1);
+    });
+
+    test("is no-op for unknown id (no emit)", () => {
+      store.showToast("existing");
+      const before = store.version;
+      store.dismissToast(99999);
+      expect(store.version).toBe(before);
+      expect(store.toasts).toHaveLength(1);
+    });
+
+    test("does not notify listener for unknown id", () => {
+      const listener = mock(() => {});
+      store.subscribe(listener);
+      store.dismissToast(99999);
+      expect(listener).toHaveBeenCalledTimes(0);
     });
   });
 
