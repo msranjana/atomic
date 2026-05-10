@@ -42,7 +42,7 @@ detected one.
 |---|---|---|---|---|
 | Claude Code | `CLAUDECODE=1` | `-a claude` | Claude Code | `.claude/agents/` |
 | GitHub Copilot CLI | `COPILOT_AGENT_ID` or `COPILOT_ALLOW_ALL` | `-a copilot` | GitHub Copilot CLI | `.github/agents/` |
-| OpenCode | `OPENCODE_CLIENT` or `OPENCODE_CONFIG*` | `-a opencode` | OpenCode | `.opencode/agent/` |
+| OpenCode | `OPENCODE_CLIENT` or `OPENCODE_CONFIG*` | `-a opencode` | OpenCode | `.opencode/agents/` |
 
 Probe with: `printenv | grep -E '^(CLAUDECODE|COPILOT_|OPENCODE_)' | head -20`. If
 none match, default to `-a claude` and `Claude Code` as the display name.
@@ -291,7 +291,7 @@ An example that works today:
 
 Once `/workflow-creator` generates the code-review workflow, run it via the picker (`atomic workflow -a <agent>`) or from chat:
 
-  `> run our code-review workflow for all the PRs in our backlog
+  `> run our code-review workflow for all the PRs in our backlog`
 
 Then render the cross-nudge close as plain paragraph text (not inside a fence):
 
@@ -475,8 +475,9 @@ An example that works today:
 
 Once the file is generated, register and run it:
 
-- `atomic workflow refresh` — picks up the new workflow
-- `atomic workflow -n <name> -a <agent>` — run it
+  `atomic workflow refresh` — picks up the new workflow
+
+  `atomic workflow -n <name> -a <agent>` — run it
 
 Then render the cross-nudge close as plain paragraph text (not inside a fence):
 
@@ -500,7 +501,7 @@ from training data. Your goal is a focused, verifiable answer — not a doc dump
 1. Try to match against the canonical Q&A blocks above first.
 2. If no match, identify the topic from the user's question and read the
    relevant files using the topic→path routing table below.
-3. Cite file paths in your answer (e.g., `packages/atomic/src/workflow/runner.ts:42`)
+3. Cite file paths in your answer (e.g., `packages/atomic-sdk/src/runtime/runner.ts:42`)
    so users can verify what you said.
 4. Keep the answer focused on the user's question. Don't paste large file
    sections — summarize and cite.
@@ -510,15 +511,16 @@ from training data. Your goal is a focused, verifiable answer — not a doc dump
 
 | Topic the user asked about | Where to look |
 |---|---|
-| Workflow runner / dispatch / stages | `packages/atomic/src/workflow/` |
-| Agent SDK adapters (Claude / Copilot / OpenCode) | `packages/atomic/src/agents/` |
-| Skill loading & discovery | `.agents/skills/`, `packages/atomic/src/skills/` |
-| CLI commands and flags | `packages/atomic/src/cli/` — also run `atomic --help` and `atomic <subcommand> --help` |
-| Built-in workflow definitions | `.atomic/workflows/`, `~/.atomic/workflows/` |
-| Subagent definitions | `.claude/agents/` (Claude Code), `.github/agents/` (Copilot), `.opencode/agent/` (OpenCode) — match the detected agent |
+| Workflow runtime / dispatch / stages | `packages/atomic-sdk/src/runtime/`, `packages/atomic-sdk/src/workflows/` |
+| Agent SDK adapters (Claude / Copilot / OpenCode) | `packages/atomic-sdk/src/providers/` |
+| Skill loading & discovery | `.agents/skills/` |
+| CLI entry and commands | `packages/atomic/src/cli.ts`, `packages/atomic/src/commands/` — also run `atomic --help` and `atomic <subcommand> --help` |
+| Built-in workflow definitions | `packages/atomic-sdk/src/workflows/builtin/` |
+| User-custom workflow definitions | `.atomic/workflows/` (project-local), `~/.atomic/workflows/` (user-global) |
+| Subagent definitions | `.claude/agents/` (Claude Code), `.github/agents/` (Copilot), `.opencode/agents/` (OpenCode) — match the detected agent |
 | Releases, versions, what's new | `CHANGELOG.md` (or the **What's New** flow below) |
 | Architecture, conceptual docs | `docs/` |
-| Tests / behavior contracts | `packages/atomic/**/*.test.ts` |
+| Tests / behavior contracts | `packages/atomic-sdk/**/*.test.ts`, `packages/atomic/**/*.test.ts` |
 | Settings / config | `settings.json` in the project root, `~/.atomic/settings.json` for user-global |
 
 ### Cross-nudge close for fallback answers
