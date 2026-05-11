@@ -78,7 +78,7 @@ export function Header() {
   }, [orchestrator?.startedAt, orchestrator?.endedAt, tickNow]);
   const durationColor = isFailed
     ? theme.error
-    : isDone
+    : isRunning
       ? theme.success
       : theme.textMuted;
 
