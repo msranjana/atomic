@@ -54,16 +54,26 @@ export const BACKGROUND_TASKS_OPTION = "bg-tasks";
  * count is zero so the status line collapses cleanly. Style attributes
  * are space-separated to keep psmux 3.3.3's render parser happy
  * (commas inside `#[…]` inside `#{?…}` leak fragments across branches).
+ *
+ * `pulseDim` repaints just the ◆ glyph in the muted colour for the
+ * "off" half of the breathing pulse the orchestrator panel drives
+ * while headless background tasks are still running; the count label
+ * keeps its own muted colour either way so only the diamond animates.
  */
-export function backgroundTasksValue(count: number, theme: GraphTheme): string {
+export function backgroundTasksValue(
+  count: number,
+  theme: GraphTheme,
+  opts?: { pulseDim?: boolean },
+): string {
   if (count <= 0) return "";
   const bg = theme.backgroundElement;
+  const diamondFg = opts?.pulseDim ? theme.textDim : theme.warning;
   // Lead with an explicit `bg` reset *before* the spacer columns so the
   // gap renders in the footer colour rather than inheriting the GRAPH
   // pill's background (which made the pill look wider and left the
   // diamond visually flush against it). Two spacer columns then keep the
   // indicator clear of the pill's own padding-right=1.
-  return `#[bg=${bg}]  #[fg=${theme.warning} bg=${bg}]◆ #[fg=${theme.textMuted} bg=${bg}]${count} background`;
+  return `#[bg=${bg}]  #[fg=${diamondFg} bg=${bg}]◆ #[fg=${theme.textMuted} bg=${bg}]${count} background`;
 }
 
 /**

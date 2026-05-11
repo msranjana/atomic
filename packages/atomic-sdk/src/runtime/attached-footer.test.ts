@@ -156,6 +156,26 @@ describe("backgroundTasksValue", () => {
     expect(value).toContain(`bg=${THEME.backgroundElement}`);
     expect(value).toContain(`fg=${THEME.warning}`);
   });
+
+  test("bright frame paints the diamond in the warning colour", () => {
+    expect(backgroundTasksValue(2, THEME, { pulseDim: false })).toContain(
+      `fg=${THEME.warning}`,
+    );
+  });
+
+  test("dim frame fades only the diamond, label stays muted", () => {
+    const value = backgroundTasksValue(2, THEME, { pulseDim: true });
+    expect(value).toContain("2 background");
+    // The diamond glyph is repainted with the dim colour…
+    expect(value).toContain(`fg=${THEME.textDim}`);
+    expect(value).toContain("◆");
+    // …and the warning colour no longer appears anywhere.
+    expect(value).not.toContain(`fg=${THEME.warning}`);
+    // The label keeps its own muted colour regardless of the frame.
+    expect(value).toContain(`fg=${THEME.textMuted}`);
+    // Still comma-free so the conditional expansion stays psmux-safe.
+    expect(value).not.toMatch(/#\[[^\]]*,[^\]]*\]/);
+  });
 });
 
 describe("attachedStatusline (chat variant)", () => {

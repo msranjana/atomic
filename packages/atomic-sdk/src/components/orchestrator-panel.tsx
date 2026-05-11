@@ -25,7 +25,10 @@ import {
   BACKGROUND_TASKS_OPTION,
   backgroundTasksValue,
 } from "../tui/attached-statusline.tsx";
-import { setStatuslineState } from "../tui/mux.ts";
+import { refreshStatusline, setStatuslineState } from "../tui/mux.ts";
+
+/** Frame period (ms) of the background-tasks "breathing" pulse. */
+const BG_PULSE_INTERVAL_MS = 850;
 
 export class OrchestratorPanel {
   private store: PanelStore;
@@ -38,6 +41,12 @@ export class OrchestratorPanel {
   private tmuxSession: string;
   private offloadManager: OffloadManager | null = null;
   private rerender: () => void = () => {};
+  // Drives the bottom-left bg-tasks indicator pulse: alternates the ◆
+  // between its warning colour and a muted one while at least one
+  // headless background task is in flight, so a settled-looking graph
+  // still reads as "work in progress". Null when nothing is running.
+  private bgPulseTimer: ReturnType<typeof setInterval> | null = null;
+  private bgPulseDim = false;
 
   private constructor(
     renderer: CliRenderer,
@@ -175,13 +184,39 @@ export class OrchestratorPanel {
   /** Increment the background task counter (shown in the statusline footer). */
   backgroundTaskStarted(): void {
     this.store.incrementBackgroundTasks();
+    this.startBackgroundPulse();
     this.pushBackgroundTasksIndicator();
   }
 
   /** Decrement the background task counter (shown in the statusline footer). */
   backgroundTaskFinished(): void {
     this.store.decrementBackgroundTasks();
+    if (this.store.backgroundTaskCount <= 0) this.stopBackgroundPulse();
     this.pushBackgroundTasksIndicator();
+  }
+
+  /**
+   * Start the bg-tasks pulse if it isn't already running. The timer is
+   * `unref`'d so a stray frame can never keep the process alive — when
+   * tasks are genuinely in flight the workflow is still running anyway,
+   * and `stopBackgroundPulse` clears it the moment the count hits zero.
+   */
+  private startBackgroundPulse(): void {
+    if (this.bgPulseTimer) return;
+    const timer = setInterval(() => {
+      this.bgPulseDim = !this.bgPulseDim;
+      this.pushBackgroundTasksIndicator();
+    }, BG_PULSE_INTERVAL_MS);
+    timer.unref?.();
+    this.bgPulseTimer = timer;
+  }
+
+  private stopBackgroundPulse(): void {
+    if (this.bgPulseTimer) {
+      clearInterval(this.bgPulseTimer);
+      this.bgPulseTimer = null;
+    }
+    this.bgPulseDim = false;
   }
 
   /**
@@ -189,13 +224,19 @@ export class OrchestratorPanel {
    * orchestrator branch of the status-line references inline. Pushing
    * scopes to this workflow's tmux session so concurrent atomic
    * sessions on the shared socket don't clobber each other's count.
+   * Forces a status redraw afterwards so each pulse frame (and the
+   * count itself) surfaces immediately instead of on the next
+   * `status-interval` tick.
    */
   private pushBackgroundTasksIndicator(): void {
     setStatuslineState(
       BACKGROUND_TASKS_OPTION,
-      backgroundTasksValue(this.store.backgroundTaskCount, this.graphTheme),
+      backgroundTasksValue(this.store.backgroundTaskCount, this.graphTheme, {
+        pulseDim: this.bgPulseDim,
+      }),
       this.tmuxSession,
     );
+    refreshStatusline();
   }
 
   /** Show the workflow-complete banner with a link to saved transcripts. */
@@ -233,6 +274,7 @@ export class OrchestratorPanel {
   destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
+    this.stopBackgroundPulse();
     this.unsubscribeDiagnostics?.();
     this.unsubscribeDiagnostics = null;
     this.diagnostics?.capture("destroy");
