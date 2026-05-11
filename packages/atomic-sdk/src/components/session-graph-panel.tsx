@@ -35,6 +35,7 @@ import { Edge } from "./edge.tsx";
 import { Header } from "./header.tsx";
 import { CompactSwitcher } from "./compact-switcher.tsx";
 import { ToastStack } from "./toast.tsx";
+import { SYNTHETIC_ORCHESTRATOR_NAME } from "./orchestrator-panel-types.ts";
 import type { ViewMode } from "./orchestrator-panel-types.ts";
 
 /** Interval (ms) between pulse animation frames — ~60fps feel. */
@@ -51,22 +52,16 @@ const GG_DOUBLE_TAP_MS = 300;
  * Pure function — no side effects, fully testable in isolation.
  *
  * Returns:
- *   { kind: "skip" }              — node not found or session pending
- *   { kind: "graphView" }         — id === "orchestrator"
  *   { kind: "resume" }            — session is offloaded or resuming
  *   { kind: "switchClient" }      — session is alive; issue switch-client
  */
 export type AttachDecision =
-  | { kind: "skip" }
-  | { kind: "graphView" }
   | { kind: "resume" }
   | { kind: "switchClient" };
 
 export function decideAttachAction(
-  id: string,
   offloadStatus: "alive" | "offloaded" | "resuming",
 ): AttachDecision {
-  if (id === "orchestrator") return { kind: "graphView" };
   if (offloadStatus === "offloaded" || offloadStatus === "resuming") return { kind: "resume" };
   return { kind: "switchClient" };
 }
@@ -84,6 +79,13 @@ export function SessionGraphPanel() {
   // Compute layout from current session data
   const layout = useMemo(() => computeLayout(store.sessions), [storeVersion]);
   const nodeList = useMemo(() => Object.values(layout.map), [layout]);
+
+  // Sessions visible in the switcher — same filter the switcher itself applies.
+  // The synthetic orchestrator has no graph node and isn't attachable.
+  const visibleSessions = useMemo(
+    () => store.getStageSessions(),
+    [storeVersion],
+  );
 
   const connectors = useMemo(() => {
     const result: ConnectorResult[] = [];
@@ -109,11 +111,13 @@ export function SessionGraphPanel() {
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const [switcherSel, setSwitcherSel] = useState(0);
 
-  // Update focus when sessions first appear
+  // Update focus when sessions first appear. The orchestrator is filtered
+  // from the layout, so prefer the first session that actually has a node
+  // in the graph rather than blindly picking sessions[0].
   useEffect(() => {
-    if (store.sessions.length > 0 && !layout.map[focusedId]) {
-      setFocusedId(store.sessions[0]!.name);
-    }
+    if (layout.map[focusedId]) return;
+    const firstVisible = visibleSessions.find((s) => layout.map[s.name]);
+    if (firstVisible) setFocusedId(firstVisible.name);
   }, [storeVersion]);
 
   // Pulse animation for running nodes — paused when nothing is running
@@ -122,9 +126,10 @@ export function SessionGraphPanel() {
     [storeVersion],
   );
   const [pulsePhase, setPulsePhase] = useState(0);
-  // Pulse animation doubles as a live timer refresh — 60ms updates keep
-  // both the pulse animation and duration displays current, so a separate
-  // 1s tick interval is unnecessary.
+  // Pulse animation is paused while no stage is running. The header runs
+  // its own independent 1s ticker for the workflow duration so the timer
+  // keeps advancing between stages and after the graph panel unmounts —
+  // do not collapse the two intervals into one.
   useEffect(() => {
     if (!hasRunning) return;
     const pulseId = setInterval(
@@ -142,17 +147,13 @@ export function SessionGraphPanel() {
       const session = store.sessions.find((s) => s.name === id);
       if (!session || session.status === "pending") return;
 
-      // Orchestrator = the graph view itself
-      if (id === "orchestrator") {
-        store.setViewMode("graph");
-        return;
-      }
-
       setFocusedId(id);
 
       // RFC §5.5 — gate switch-client on resume completion when offloaded.
-      const status = offloadManager.getStatus(id);
-      if (status === "offloaded" || status === "resuming") {
+      // The branching is delegated to `decideAttachAction` so the production
+      // code path is the one covered by the helper's unit tests.
+      const decision = decideAttachAction(offloadManager.getStatus(id));
+      if (decision.kind === "resume") {
         store.setViewMode("resuming", id);
         try {
           await offloadManager.requestResume(id);
@@ -180,10 +181,10 @@ export function SessionGraphPanel() {
   const openSwitcher = useCallback(() => {
     // Pre-select the current agent or focused node
     const currentId = store.viewMode === "attached" ? store.activeAgentId : focusedIdRef.current;
-    const idx = store.sessions.findIndex((s) => s.name === currentId);
+    const idx = visibleSessions.findIndex((s) => s.name === currentId);
     setSwitcherSel(Math.max(0, idx));
     setSwitcherOpen(true);
-  }, []);
+  }, [visibleSessions]);
 
   const closeSwitcher = useCallback(() => {
     setSwitcherOpen(false);
@@ -246,11 +247,11 @@ export function SessionGraphPanel() {
         return;
       }
       if (key.name === "down" || key.name === "j") {
-        setSwitcherSel((s) => Math.min(store.sessions.length - 1, s + 1));
+        setSwitcherSel((s) => Math.min(visibleSessions.length - 1, s + 1));
         return;
       }
       if (key.name === "return") {
-        const agent = store.sessions[switcherSel];
+        const agent = visibleSessions[switcherSel];
         closeSwitcher();
         if (agent) void doAttach(agent.name);
         return;
@@ -320,7 +321,10 @@ export function SessionGraphPanel() {
     if (key.name === "g" && !key.shift) {
       const now = Date.now();
       if (lastKeyRef.current.key === "g" && now - lastKeyRef.current.time < GG_DOUBLE_TAP_MS) {
-        setFocusedId(store.sessions[0]?.name ?? "");
+        // sessions[0] is the synthetic orchestrator, which is filtered out
+        // of layout.map. Pick the first session that actually has a node.
+        const firstVisible = visibleSessions.find((s) => layout.map[s.name]);
+        setFocusedId(firstVisible?.name ?? "");
         lastKeyRef.current.key = "";
       } else {
         lastKeyRef.current.key = "g";
@@ -385,7 +389,7 @@ export function SessionGraphPanel() {
   // never receives them.  Poll the active window to sync viewMode
   // with tmux-level navigation in both directions.
   const hasStartedAgent = useMemo(
-    () => store.sessions.some((s) => s.name !== "orchestrator" && s.status !== "pending"),
+    () => store.getStageSessions().some((s) => s.status !== "pending"),
     [storeVersion],
   );
 
@@ -410,7 +414,7 @@ export function SessionGraphPanel() {
 
       // Logical name: window index 0 is always the orchestrator regardless
       // of its tmux window name.
-      const currentName = idx === "0" ? "orchestrator" : windowName;
+      const currentName = idx === "0" ? SYNTHETIC_ORCHESTRATOR_NAME : windowName;
 
       // Update viewMode FIRST so offloadSession (called below) reads the
       // already-updated activeAgentId. Without this ordering, the focus
@@ -443,7 +447,7 @@ export function SessionGraphPanel() {
       // eligibility check filters out running/headless/already-offloaded
       // sessions, so we can fire unconditionally.
       const prevName = prevActiveRef.current;
-      if (prevName !== "" && prevName !== currentName && prevName !== "orchestrator") {
+      if (prevName !== "" && prevName !== currentName && prevName !== SYNTHETIC_ORCHESTRATOR_NAME) {
         void offloadManager.offloadSession(prevName).catch(() => {});
       }
 
