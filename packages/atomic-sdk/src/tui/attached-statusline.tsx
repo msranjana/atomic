@@ -58,11 +58,12 @@ export const BACKGROUND_TASKS_OPTION = "bg-tasks";
 export function backgroundTasksValue(count: number, theme: GraphTheme): string {
   if (count <= 0) return "";
   const bg = theme.backgroundElement;
-  // Two leading spaces: separates the indicator from the GRAPH pill that
-  // precedes it on the orchestrator window. One space looked cramped
-  // because the pill's own padding-right=1 only puts a single column
-  // outside the colored background.
-  return `  #[fg=${theme.warning} bg=${bg}]◆ #[fg=${theme.textMuted} bg=${bg}]${count} background`;
+  // Lead with an explicit `bg` reset *before* the spacer columns so the
+  // gap renders in the footer colour rather than inheriting the GRAPH
+  // pill's background (which made the pill look wider and left the
+  // diamond visually flush against it). Two spacer columns then keep the
+  // indicator clear of the pill's own padding-right=1.
+  return `#[bg=${bg}]  #[fg=${theme.warning} bg=${bg}]◆ #[fg=${theme.textMuted} bg=${bg}]${count} background`;
 }
 
 /**
