@@ -205,7 +205,10 @@ export class OrchestratorPanel {
     if (this.bgPulseTimer) return;
     const timer = setInterval(() => {
       this.bgPulseDim = !this.bgPulseDim;
-      this.pushBackgroundTasksIndicator();
+      // Pulse frames ride the 1s `status-interval` redraw rather than
+      // forcing one — a sub-second jitter on a "breathing" glyph is
+      // invisible, and it keeps a tmux process-spawn off the timer path.
+      this.pushBackgroundTasksIndicator({ refresh: false });
     }, BG_PULSE_INTERVAL_MS);
     timer.unref?.();
     this.bgPulseTimer = timer;
@@ -224,11 +227,11 @@ export class OrchestratorPanel {
    * orchestrator branch of the status-line references inline. Pushing
    * scopes to this workflow's tmux session so concurrent atomic
    * sessions on the shared socket don't clobber each other's count.
-   * Forces a status redraw afterwards so each pulse frame (and the
-   * count itself) surfaces immediately instead of on the next
-   * `status-interval` tick.
+   * Pass `refresh: false` to skip the forced redraw and let the next
+   * `status-interval` tick surface the value — used by the pulse timer
+   * so only genuine count changes pay for an extra tmux spawn.
    */
-  private pushBackgroundTasksIndicator(): void {
+  private pushBackgroundTasksIndicator({ refresh = true }: { refresh?: boolean } = {}): void {
     setStatuslineState(
       BACKGROUND_TASKS_OPTION,
       backgroundTasksValue(this.store.backgroundTaskCount, this.graphTheme, {
@@ -236,7 +239,7 @@ export class OrchestratorPanel {
       }),
       this.tmuxSession,
     );
-    refreshStatusline();
+    if (refresh) refreshStatusline();
   }
 
   /** Show the workflow-complete banner with a link to saved transcripts. */

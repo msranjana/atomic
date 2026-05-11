@@ -88,9 +88,9 @@ export function setStatuslineState(
  * Force psmux to redraw the status line for every attached client on
  * Atomic's dedicated socket *now*, rather than waiting for the next
  * `status-interval` tick. Needed when a freshly pushed
- * `setStatuslineState` value must surface immediately — e.g. the
- * background-tasks pulse, which re-pushes a new frame several times a
- * second. A no-op (and harmless) when no client is attached.
+ * `setStatuslineState` value must surface immediately — e.g. a change
+ * to the background-tasks count. A no-op (and harmless) when no client
+ * is attached.
  */
 export function refreshStatusline(): TmuxResult {
   return tmuxRun(["refresh-client", "-S"]);
