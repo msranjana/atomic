@@ -85,8 +85,10 @@ import {
   calculateExplorerCount,
   explainHeuristic,
 } from "../helpers/heuristic.ts";
+import { aggregatorOutputComplete } from "../helpers/aggregator-output.ts";
 import {
   buildAggregatorPrompt,
+  buildAggregatorRetryPrompt,
   buildAnalyzerPrompt,
   buildBatchOrchestratorPrompt,
   buildHistoryAnalyzerPrompt,
@@ -561,6 +563,14 @@ export default defineWorkflow({
             historyOverview,
           }),
         );
+        if (!aggregatorOutputComplete(finalPath)) {
+          await s.session.query(buildAggregatorRetryPrompt(finalPath));
+        }
+        if (!aggregatorOutputComplete(finalPath)) {
+          throw new Error(
+            `aggregator did not produce a usable ${finalPath} after 2 attempts`,
+          );
+        }
         s.save(s.sessionId);
       },
     );

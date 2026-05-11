@@ -41,8 +41,10 @@ import {
   calculateExplorerCount,
   explainHeuristic,
 } from "../helpers/heuristic.ts";
+import { aggregatorOutputComplete } from "../helpers/aggregator-output.ts";
 import {
   buildAggregatorPrompt,
+  buildAggregatorRetryPrompt,
   buildAnalyzerPrompt,
   buildBatchOrchestratorPrompt,
   buildHistoryAnalyzerPrompt,
@@ -522,7 +524,23 @@ export default defineWorkflow({
             },
           ],
         });
-        s.save(result.data!);
+        let lastResult = result;
+        if (!aggregatorOutputComplete(finalPath)) {
+          lastResult = await s.client.session.prompt({
+            sessionID: s.session.id,
+            parts: [
+              { type: "text", text: buildAggregatorRetryPrompt(finalPath) },
+            ],
+          });
+        }
+        if (!aggregatorOutputComplete(finalPath)) {
+          throw new Error(
+            `aggregator did not produce a usable ${finalPath} after 2 attempts`,
+          );
+        }
+        // Retry's response may carry no data even when it wrote the file —
+        // fall back to the first response so we never persist `undefined`.
+        s.save(lastResult.data ?? result.data!);
       },
     );
   })

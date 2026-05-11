@@ -761,6 +761,15 @@ export function buildAggregatorPrompt(opts: {
     `5. Write the final research document to: \`${opts.finalPath}\``,
     `6. After writing the file, output a ≤200-word executive summary as your`,
     `   final prose response so this transcript has content.`,
+    ``,
+    `If you fan out the reading work to sub-agents — via whatever task or`,
+    `sub-agent dispatch tool your runtime exposes — those calls are`,
+    `SYNCHRONOUS: their results come back to you within the SAME turn,`,
+    `before you next speak. They do NOT run in the background. Do not end`,
+    `your turn after dispatching them expecting to be re-invoked when they`,
+    `finish; you already have their output by the time you compose your`,
+    `next message. Your turn is not complete until you have written the`,
+    `file at \`${opts.finalPath}\`.`,
     `</METHOD>`,
     ``,
     `<OUTPUT_FORMAT>`,
@@ -830,6 +839,28 @@ export function buildAggregatorPrompt(opts: {
     `<RESEARCH_QUESTION_REMINDER>`,
     opts.question,
     `</RESEARCH_QUESTION_REMINDER>`,
+  ].join("\n");
+}
+
+/**
+ * Re-prompt sent when the aggregator's first turn ended without writing the
+ * final research document. Same-session follow-up: preserves the agent's
+ * accumulated context (explorer summaries, sub-agent results) and just asks
+ * it to finish the job.
+ */
+export function buildAggregatorRetryPrompt(finalPath: string): string {
+  return [
+    `Your previous turn ended without writing the final research document.`,
+    `The file \`${finalPath}\` does not exist on disk, or what is there is`,
+    `not a complete document.`,
+    ``,
+    `If you dispatched sub-agents and said you would "synthesize when they`,
+    `return" — they already returned; their output was delivered to you`,
+    `before your last turn ended. There is nothing further to wait for.`,
+    ``,
+    `Synthesize now and write the file at \`${finalPath}\` following the`,
+    `OUTPUT_FORMAT structure from the original prompt. After writing, output`,
+    `the ≤200-word executive summary.`,
   ].join("\n");
 }
 
