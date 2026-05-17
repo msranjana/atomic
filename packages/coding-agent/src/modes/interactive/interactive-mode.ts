@@ -2226,7 +2226,7 @@ export class InteractiveMode {
     this.setWorkingIndicator();
     if (this.loadingAnimation) {
       this.loadingAnimation.setMessage(
-        `${this.defaultWorkingMessage} (${keyText("app.interrupt")} to interrupt)`,
+        `${this.defaultWorkingMessage} (${keyText("app.interrupt")} Interrupt)`,
       );
     }
     this.setHiddenThinkingLabel();
@@ -3101,7 +3101,7 @@ export class InteractiveMode {
         if (command) {
           if (this.session.isBashRunning) {
             this.showWarning(
-              "A bash command is already running. Press Esc to cancel it first.",
+              "A bash command is already running. Escape Cancel first.",
             );
             this.editor.setText(text);
             return;
@@ -3398,7 +3398,7 @@ export class InteractiveMode {
           this.session.abortCompaction();
         };
         this.statusContainer.clear();
-        const cancelHint = `(${keyText("app.interrupt")} to cancel)`;
+        const cancelHint = `(${keyText("app.interrupt")} Cancel)`;
         const label =
           event.reason === "manual"
             ? `Compacting context... ${cancelHint}`
@@ -3469,7 +3469,7 @@ export class InteractiveMode {
         this.statusContainer.clear();
         this.retryCountdown?.dispose();
         const retryMessage = (seconds: number) =>
-          `Retrying (${event.attempt}/${event.maxAttempts}) in ${seconds}s... (${keyText("app.interrupt")} to cancel)`;
+          `Retrying (${event.attempt}/${event.maxAttempts}) in ${seconds}s... (${keyText("app.interrupt")} Cancel)`;
         this.retryLoader = new Loader(
           this.ui,
           (spinner) => theme.fg("warning", spinner),
@@ -4956,7 +4956,7 @@ export class InteractiveMode {
               this.ui,
               (spinner) => theme.fg("accent", spinner),
               (text) => theme.fg("muted", text),
-              `Summarizing branch... (${keyText("app.interrupt")} to cancel)`,
+              `Summarizing branch... (${keyText("app.interrupt")} Cancel)`,
             );
             this.statusContainer.addChild(summaryLoader);
             this.ui.requestRender();
@@ -6085,7 +6085,7 @@ export class InteractiveMode {
 | Key | Action |
 |-----|--------|
 | \`${submit}\` | Send message |
-| \`${newLine}\` | New line${process.platform === "win32" ? " (Ctrl+Enter on Windows Terminal)" : ""} |
+| \`${newLine}\` | New line${process.platform === "win32" ? " (CTRL+Enter On Windows Terminal)" : ""} |
 | \`${deleteWordBackward}\` | Delete word backwards |
 | \`${deleteWordForward}\` | Delete word forwards |
 | \`${deleteToLineStart}\` | Delete to start of line |

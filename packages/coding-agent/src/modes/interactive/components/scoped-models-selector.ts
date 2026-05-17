@@ -128,7 +128,7 @@ export class ScopedModelsSelectorComponent extends Container implements Focusabl
 		this.addChild(new Spacer(1));
 		this.addChild(new Text(theme.fg("accent", theme.bold("Model Configuration")), 0, 0));
 		this.addChild(
-			new Text(theme.fg("muted", `Session-only. ${keyText("app.models.save")} to save to settings.`), 0, 0),
+			new Text(theme.fg("muted", `Session-only. ${keyText("app.models.save")} Save Settings.`), 0, 0),
 		);
 		this.addChild(new Spacer(1));
 
@@ -166,12 +166,12 @@ export class ScopedModelsSelectorComponent extends Container implements Focusabl
 		const allEnabled = this.enabledIds === null;
 		const countText = allEnabled ? "all enabled" : `${enabledCount}/${this.allIds.length} enabled`;
 		const parts = [
-			`${keyText("tui.select.confirm")} toggle`,
-			`${keyText("app.models.enableAll")} all`,
-			`${keyText("app.models.clearAll")} clear`,
-			`${keyText("app.models.toggleProvider")} provider`,
-			`${keyText("app.models.reorderUp")}/${keyText("app.models.reorderDown")} reorder`,
-			`${keyText("app.models.save")} save`,
+			`${keyText("tui.select.confirm")} Toggle`,
+			`${keyText("app.models.enableAll")} All`,
+			`${keyText("app.models.clearAll")} Clear`,
+			`${keyText("app.models.toggleProvider")} Provider`,
+			`${keyText("app.models.reorderUp")}/${keyText("app.models.reorderDown")} Reorder`,
+			`${keyText("app.models.save")} Save`,
 			countText,
 		];
 		return this.isDirty
