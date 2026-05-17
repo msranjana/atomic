@@ -960,6 +960,7 @@ export class AgentSession {
 
 		this._baseSystemPromptOptions = {
 			cwd: this._cwd,
+			selectedModel: this.model,
 			skills: loadedSkills,
 			contextFiles: loadedContextFiles,
 			customPrompt: loaderSystemPrompt,
@@ -969,6 +970,11 @@ export class AgentSession {
 			promptGuidelines,
 		};
 		return buildSystemPrompt(this._baseSystemPromptOptions);
+	}
+
+	private _refreshBaseSystemPromptFromActiveTools(): void {
+		this._baseSystemPrompt = this._rebuildSystemPrompt(this.getActiveToolNames());
+		this.agent.state.systemPrompt = this._baseSystemPrompt;
 	}
 
 	// =========================================================================
@@ -1446,6 +1452,7 @@ export class AgentSession {
 
 		// Re-clamp thinking level for new model's capabilities
 		this.setThinkingLevel(thinkingLevel);
+		this._refreshBaseSystemPromptFromActiveTools();
 
 		await this._emitModelSelect(model, previousModel, "set");
 	}
@@ -1486,6 +1493,7 @@ export class AgentSession {
 		// - Undefined scoped model thinking level inherits the current session preference
 		// setThinkingLevel clamps to model capabilities.
 		this.setThinkingLevel(thinkingLevel);
+		this._refreshBaseSystemPromptFromActiveTools();
 
 		await this._emitModelSelect(next.model, currentModel, "cycle");
 
@@ -1511,6 +1519,7 @@ export class AgentSession {
 
 		// Re-clamp thinking level for new model's capabilities
 		this.setThinkingLevel(thinkingLevel);
+		this._refreshBaseSystemPromptFromActiveTools();
 
 		await this._emitModelSelect(nextModel, currentModel, "cycle");
 
@@ -2146,6 +2155,7 @@ export class AgentSession {
 		}
 
 		this.agent.state.model = refreshedModel;
+		this._refreshBaseSystemPromptFromActiveTools();
 	}
 
 	private _bindExtensionCore(runner: ExtensionRunner): void {

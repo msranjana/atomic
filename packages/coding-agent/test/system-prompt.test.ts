@@ -78,6 +78,43 @@ describe("buildSystemPrompt", () => {
 		});
 	});
 
+	describe("model attribution", () => {
+		test("includes selected model name before date and working directory", () => {
+			const prompt = buildSystemPrompt({
+				selectedTools: [],
+				contextFiles: [],
+				skills: [],
+				cwd: process.cwd(),
+				selectedModel: {
+					provider: "anthropic",
+					id: "claude-sonnet-4-5",
+					name: "Claude Sonnet 4.5",
+				},
+			});
+
+			const modelLine = "Model name (used for commit attribution): Claude Sonnet 4.5";
+			expect(prompt).toContain(modelLine);
+			expect(prompt.indexOf(modelLine)).toBeLessThan(prompt.indexOf("Current date:"));
+			expect(prompt.indexOf("Current date:")).toBeLessThan(prompt.indexOf("Current working directory:"));
+		});
+
+		test("falls back to selected model id when no display name is available", () => {
+			const prompt = buildSystemPrompt({
+				customPrompt: "Custom prompt",
+				selectedTools: [],
+				contextFiles: [],
+				skills: [],
+				cwd: process.cwd(),
+				selectedModel: {
+					provider: "openai",
+					id: "gpt-5.1-codex",
+				},
+			});
+
+			expect(prompt).toContain("Model name (used for commit attribution): gpt-5.1-codex");
+		});
+	});
+
 	describe("prompt guidelines", () => {
 		test("appends promptGuidelines to default guidelines", () => {
 			const prompt = buildSystemPrompt({
