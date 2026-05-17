@@ -20,14 +20,14 @@ If required inputs are missing and cannot be inferred, ask the user with `ask_us
 workflow({
   action: "run",
   workflow: "deep-research-codebase",
-  inputs: { prompt: "map workflow dispatch" },
+  inputs: { prompt: "map workflow dispatch", max_concurrency: 4 },
 })
 ```
 
 Slash equivalent:
 
 ```text
-/workflow deep-research-codebase prompt="map workflow dispatch"
+/workflow deep-research-codebase prompt="map workflow dispatch" max_concurrency=4
 ```
 
 Input overrides are bare `key=value` tokens. Values are JSON-parsed when possible, so `count=3`, `flag=true`, and `prompt="multi word value"` preserve useful types. A whole input object can also be passed as one JSON token.
@@ -95,7 +95,7 @@ workflow({
 })
 ```
 
-Direct mode supports top-level/default options and per-task options such as `context`, `model`, `fallbackModels`, `thinkingLevel`, `mcp`, `output`, `reads`, `progress`, `worktree`, `maxOutput`, `artifacts`, `sessionDir`, and `cwd`. For large fan-outs, prefer `outputMode: "file-only"`.
+Direct mode supports top-level/default options and per-task options such as `context`, `model`, `fallbackModels`, `thinkingLevel`, `mcp`, `output`, `reads`, `worktree`, `maxOutput`, `artifacts`, `sessionDir`, and `cwd`. For large fan-outs, prefer `outputMode: "file-only"`.
 
 ## Monitor/control with the workflow tool
 

@@ -69,7 +69,7 @@ export default defineWorkflow("parallel-research")
       { name: "auth-specialist", task: `Research authentication patterns for: ${topic}` },
       { name: "db-specialist", task: `Research database layer for: ${topic}` },
       { name: "api-specialist", task: `Research API surface for: ${topic}` },
-    ]);
+    ], { concurrency: 2, failFast: false });
 
     const summary = await ctx.task("aggregator", {
       prompt: "Synthesize these specialist reports:\n\n{previous}",
@@ -234,13 +234,34 @@ const definition = {
   inputs: {
     prompt: "Investigate the auth module",
     max_partitions: 6,
+    max_concurrency: 4,
   },
 } as const;
 
 const options: WorkflowOptions = {};
 
 await runWorkflow(definition, options);
+
+await runWorkflow({
+  mode: "parallel",
+  task: "Audit auth changes",
+  tasks: [
+    { name: "security", task: "Review security risks" },
+    { name: "runtime", task: "Review runtime risks" },
+  ],
+  concurrency: 2,
+  reads: ["research/context.md"],
+  output: "research/auth-audit.md",
+  outputMode: "inline",
+  worktree: false,
+  maxOutput: { lines: 2000 },
+  artifacts: true,
+});
 ```
+
+The programmatic definition object mirrors the workflow tool: named workflow runs, single-task runs, parallel `tasks`, and mixed `chain` runs accept the same direct options (`reads`, `output`, `outputMode`, `worktree`, `maxOutput`, `artifacts`, `concurrency`, `failFast`, and stage/session options such as `cwd`, `agentDir`, `model`, `tools`, `context`, and `sessionDir`). `chainDir` is chain-only: it provides the shared artifact directory for chain reads, outputs, and worktree diffs.
+
+Workflow stage sessions follow Atomic SDK directory defaults: `DefaultResourceLoader` is initialized with the project `cwd` and the Atomic default `~/.atomic/agent` directory, while legacy `.pi` paths remain readable where the SDK supports multiple config directories. A stage-supplied `agentDir` is treated as an explicit user override; a stage-supplied `resourceLoader` owns discovery, with `cwd`/`agentDir` left for session naming and tool path resolution.
 
 To inspect a workflow's input schema inside pi, use `/workflow inputs <name>` or `/workflow <name> --help`.
 
@@ -256,10 +277,11 @@ Scout + research-history chain → two parallel specialist waves → aggregator.
 /workflow deep-research-codebase prompt="How does session persistence work?"
 ```
 
-| Input            | Type     | Required | Default | Description                                       |
-| ---------------- | -------- | -------- | ------- | ------------------------------------------------- |
-| `prompt`         | `text`   | ✓        | —       | Research question or topic to investigate.        |
-| `max_partitions` | `number` | —        | `100`   | Maximum number of codebase partitions to explore. |
+| Input             | Type     | Required | Default | Description                                               |
+| ----------------- | -------- | -------- | ------- | --------------------------------------------------------- |
+| `prompt`          | `text`   | ✓        | —       | Research question or topic to investigate.                |
+| `max_partitions`  | `number` | —        | `100`   | Maximum number of codebase partitions to explore.         |
+| `max_concurrency` | `number` | —        | `4`     | Maximum number of workflow stages to run concurrently.    |
 
 ### `ralph`
 

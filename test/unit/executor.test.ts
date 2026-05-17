@@ -263,6 +263,92 @@ describe("executor.run", () => {
     assert.match(String(wfResult.result?.["text"]), /^first li\n\n\[workflow output truncated/);
   });
 
+  test("ctx.chain prepends reads as resolved instructions from chainDir", async () => {
+    const seenPrompts: string[] = [];
+    const dir = mkdtempSync(join(tmpdir(), "workflow-task-reads-"));
+    const def = defineWorkflow("task-reads-wf")
+      .run(async (ctx) => {
+        await ctx.chain([
+          { name: "reader", task: "summarize docs" },
+        ], {
+          reads: ["notes.md", join(dir, "absolute.md")],
+          chainDir: dir,
+        });
+        return { done: true };
+      })
+      .compile();
+
+    const wfResult = await run(def, {}, {
+      adapters: {
+        prompt: {
+          prompt: async (text) => {
+            seenPrompts.push(text);
+            return "ok";
+          },
+        },
+      },
+      store: createStore(),
+    });
+
+    assert.equal(wfResult.status, "completed");
+    assert.match(seenPrompts[0] ?? "", new RegExp(`^\\[Read from: ${join(dir, "notes.md").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}, ${join(dir, "absolute.md").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\]`));
+    assert.match(seenPrompts[0] ?? "", /summarize docs/);
+  });
+
+  test("ctx.task forwards output options to the stage prompt", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "workflow-task-output-"));
+    const output = join(dir, "summary.md");
+    const def = defineWorkflow("task-output-wf")
+      .run(async (ctx) => {
+        const result = await ctx.task("writer", {
+          task: "write",
+          output,
+          outputMode: "file-only",
+        });
+        return { text: result.text };
+      })
+      .compile();
+
+    const wfResult = await run(def, {}, {
+      adapters: {
+        prompt: {
+          prompt: async () => "full task output",
+        },
+      },
+      store: createStore(),
+    });
+
+    assert.equal(wfResult.status, "completed");
+    assert.equal(readFileSync(output, "utf8"), "full task output");
+    assert.match(String(wfResult.result?.["text"]), /Output saved to:/);
+  });
+
+  test("ctx.parallel forwards step output options", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "workflow-parallel-output-"));
+    const output = join(dir, "parallel.md");
+    const def = defineWorkflow("parallel-output-wf")
+      .run(async (ctx) => {
+        const [result] = await ctx.parallel([
+          { name: "writer", task: "write", output, outputMode: "file-only" },
+        ]);
+        return { text: result?.text };
+      })
+      .compile();
+
+    const wfResult = await run(def, {}, {
+      adapters: {
+        prompt: {
+          prompt: async () => "parallel task output",
+        },
+      },
+      store: createStore(),
+    });
+
+    assert.equal(wfResult.status, "completed");
+    assert.equal(readFileSync(output, "utf8"), "parallel task output");
+    assert.match(String(wfResult.result?.["text"]), /Output saved to:/);
+  });
+
   test("runs parallel stages", async () => {
     const def = defineWorkflow("parallel-wf")
       .run(async (ctx) => {

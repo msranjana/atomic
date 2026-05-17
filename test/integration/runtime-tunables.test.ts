@@ -263,6 +263,111 @@ describe("runtime tunables — defaultConcurrency", () => {
     assert.ok(maxActive >= 1);
   });
 
+  test("max_concurrency input overrides the default stage concurrency", async () => {
+    let active = 0;
+    let maxActive = 0;
+
+    const wf = defineWorkflow("rt-input-max-concurrency")
+      .input("max_concurrency", {
+        type: "number",
+        default: 4,
+        description: "Maximum number of stages to run concurrently.",
+      })
+      .run(async (ctx) => {
+        await Promise.all(
+          ["s1", "s2", "s3", "s4", "s5"].map((n) => ctx.stage(n).prompt(n)),
+        );
+        return {};
+      })
+      .compile();
+
+    const result = await run(wf, { max_concurrency: 2 }, {
+      store: createStore(),
+      config: baseConfig({ defaultConcurrency: 4 }),
+      adapters: {
+        prompt: {
+          prompt: async () => {
+            active++;
+            maxActive = Math.max(maxActive, active);
+            await sleep(5);
+            active--;
+            return "done";
+          },
+        },
+      },
+    });
+
+    assert.equal(result.status, "completed");
+    assert.equal(maxActive, 2);
+  });
+
+  test("ctx.parallel concurrency option limits scheduled task fan-out", async () => {
+    let active = 0;
+    let maxActive = 0;
+
+    const wf = defineWorkflow("rt-parallel-option-concurrency")
+      .run(async (ctx) => {
+        await ctx.parallel(
+          ["s1", "s2", "s3", "s4", "s5"].map((name) => ({ name, task: name })),
+          { concurrency: 2 },
+        );
+        return {};
+      })
+      .compile();
+
+    const result = await run(wf, {}, {
+      store: createStore(),
+      config: baseConfig({ defaultConcurrency: 4 }),
+      adapters: {
+        prompt: {
+          prompt: async () => {
+            active++;
+            maxActive = Math.max(maxActive, active);
+            await sleep(5);
+            active--;
+            return "done";
+          },
+        },
+      },
+    });
+
+    assert.equal(result.status, "completed");
+    assert.equal(maxActive, 2);
+  });
+
+  test("ctx.parallel failFast:false waits for all scheduled task fan-out", async () => {
+    const prompts: string[] = [];
+
+    const wf = defineWorkflow("rt-parallel-fail-fast-false")
+      .run(async (ctx) => {
+        await ctx.parallel(
+          ["s1", "s2", "s3"].map((name) => ({ name, task: name })),
+          { concurrency: 2, failFast: false },
+        );
+        return {};
+      })
+      .compile();
+
+    const result = await run(wf, {}, {
+      store: createStore(),
+      config: baseConfig({ defaultConcurrency: 4 }),
+      adapters: {
+        prompt: {
+          prompt: async (text) => {
+            prompts.push(text);
+            if (text === "s1") throw new Error("s1 failed");
+            await sleep(5);
+            return "done";
+          },
+        },
+      },
+    });
+
+    assert.equal(result.status, "failed");
+    assert.deepEqual(prompts.sort(), ["s1", "s2", "s3"]);
+    assert.match(result.error ?? "", /parallel step failed/);
+  });
+
   test("pausing a concurrency-queued stage prevents it from starting when the slot frees until resume", async () => {
     const store = createStore();
     const registry = createStageControlRegistry();

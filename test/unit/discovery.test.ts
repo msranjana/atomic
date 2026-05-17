@@ -393,6 +393,33 @@ describe("discoverWorkflows — project-local", () => {
 });
 
 // ---------------------------------------------------------------------------
+// package workflows: package-provided workflow files
+// ---------------------------------------------------------------------------
+
+describe("discoverWorkflows — package workflows", () => {
+  test("loads workflow files supplied by package resources", async () => {
+    const root = makeTempDir("package-workflows");
+    const packageDir = join(root, "package-workflows");
+    mkdirSync(packageDir, { recursive: true });
+    const fp = writeWorkflowJs(packageDir, "packaged.js", "Packaged Workflow", "packaged-workflow");
+
+    const result = await discoverWorkflows({
+      cwd: join(root, "cwd"),
+      homeDir: join(root, "home"),
+      includeBundled: false,
+      packageWorkflowPaths: [fp],
+    });
+
+    assert.equal(result.registry.has("packaged-workflow"), true);
+    assert.equal(result.errors.length, 0);
+    const src = result.sources.find((s) => s.id === "packaged-workflow");
+    assert.notEqual(src, undefined);
+    assert.equal(src!.kind, "package");
+    assert.equal(src!.filePath, fp);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // user-global: {homeDir}/.atomic/workflows/
 // ---------------------------------------------------------------------------
 

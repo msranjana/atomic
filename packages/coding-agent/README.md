@@ -410,22 +410,23 @@ pi config                               # enable/disable extensions, skills, pro
 
 Packages install to `~/.pi/agent/git/` (git) or global npm. Use `-l` for project-local installs (`.pi/git/`, `.pi/npm/`). Git packages install dependencies with `npm install --omit=dev` by default, so runtime deps must be listed under `dependencies`; when `npmCommand` is configured, git packages use plain `install` for compatibility with wrappers. If you use a Node version manager and want package installs to reuse a stable npm context, set `npmCommand` in `settings.json`, for example `["mise", "exec", "node@20", "--", "npm"]`.
 
-Create a package by adding a `pi` key to `package.json`:
+Create a package by adding an app-name manifest key to `package.json` (`atomic` for this package). The legacy `pi` key is still accepted as a backwards-compatible shim:
 
 ```json
 {
   "name": "my-pi-package",
   "keywords": ["pi-package"],
-  "pi": {
+  "atomic": {
     "extensions": ["./extensions"],
     "skills": ["./skills"],
     "prompts": ["./prompts"],
-    "themes": ["./themes"]
+    "themes": ["./themes"],
+    "workflows": ["./workflows"]
   }
 }
 ```
 
-Without a `pi` manifest, pi auto-discovers from conventional directories (`extensions/`, `skills/`, `prompts/`, `themes/`).
+Without a manifest, Atomic auto-discovers from conventional directories (`extensions/`, `skills/`, `prompts/`, `themes/`, `workflows/`). Workflow packages may also use a singular `workflow/` directory.
 
 See [docs/packages.md](docs/packages.md).
 

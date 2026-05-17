@@ -12,7 +12,8 @@
  *   2. project-local    — {cwd}/.atomic/workflows/*.{ts,js,mjs,cjs}
  *   3. settings-global  — paths listed in config.globalWorkflows
  *   4. user-global      — {homeDir}/.atomic/agent/workflows/*.{ts,js,mjs,cjs}
- *   5. bundled          — shipped workflows (skipped when includeBundled=false)
+ *   5. package          — workflow files supplied by Atomic/pi packages
+ *   6. bundled          — shipped workflows (skipped when includeBundled=false)
  *
  * Usage:
  *   // Full discovery (all sources):
@@ -39,13 +40,15 @@ import * as bundledManifest from "../../builtin/index.js";
  *   user-global      — found in {homeDir}/.atomic/agent/workflows/
  *   settings-project — listed in DiscoveryConfig.projectWorkflows
  *   settings-global  — listed in DiscoveryConfig.globalWorkflows
+ *   package          — supplied by Atomic/pi package workflow resources
  */
 export type DiscoveryKind =
   | "bundled"
   | "project-local"
   | "user-global"
   | "settings-project"
-  | "settings-global";
+  | "settings-global"
+  | "package";
 
 /** Identifies the origin of a discovered workflow definition. */
 export interface DiscoverySource {
@@ -121,6 +124,8 @@ export interface DiscoveryOptions {
   homeDir: string;
   /** Optional extra paths from project/global config. */
   config?: DiscoveryConfig;
+  /** Workflow files supplied by installed Atomic/pi packages. */
+  packageWorkflowPaths?: string[] | Record<string, string>;
   /** When false, bundled workflows are excluded. Default: true */
   includeBundled?: boolean;
 }
@@ -367,7 +372,8 @@ async function loadFromPaths(
  *   2. project-local    — {cwd}/.atomic/workflows/*.{ts,js,mjs,cjs}
  *   3. settings-global  — config.globalWorkflows paths
  *   4. user-global      — {homeDir}/.atomic/agent/workflows/*.{ts,js,mjs,cjs}
- *   5. bundled          — shipped workflows (omitted when includeBundled=false)
+ *   5. package          — package-supplied workflow files
+ *   6. bundled          — shipped workflows (omitted when includeBundled=false)
  */
 export async function discoverWorkflows(
   options?: Partial<DiscoveryOptions>,
@@ -375,6 +381,7 @@ export async function discoverWorkflows(
   const cwd = options?.cwd ?? process.cwd();
   const homeDir = options?.homeDir ?? (await defaultHomeDir());
   const config = options?.config;
+  const packageWorkflowPaths = options?.packageWorkflowPaths;
   const includeBundled = options?.includeBundled !== false;
 
   const diagnostics: DiscoveryDiagnostic[] = [];
@@ -429,7 +436,16 @@ export async function discoverWorkflows(
     registry = applyBatch(candidates, registry, sources, diagnostics);
   }
 
-  // 5. bundled
+  // 5. package workflows
+  if (packageWorkflowPaths !== undefined) {
+    const hasEntries = Array.isArray(packageWorkflowPaths) ? packageWorkflowPaths.length > 0 : Object.keys(packageWorkflowPaths).length > 0;
+    if (hasEntries) {
+      const candidates = await loadFromPaths(packageWorkflowPaths, "package", cwd, diagnostics);
+      registry = applyBatch(candidates, registry, sources, diagnostics);
+    }
+  }
+
+  // 6. bundled
   if (includeBundled) {
     const bundledResult = discoverBundledManifest();
     // Merge bundled: only register names not already present (lower precedence)

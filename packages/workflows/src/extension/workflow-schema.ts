@@ -1,4 +1,14 @@
+import type { CreateAgentSessionOptions } from "@bastani/atomic";
 import { Type, type Static } from "typebox";
+import type { WorkflowModelValue } from "../shared/types.js";
+
+type ArrayElement<T> = T extends readonly (infer Element)[] ? Element : never;
+
+const SdkSessionOptionSchema = <Key extends keyof CreateAgentSessionOptions>(_key: Key) =>
+  Type.Unsafe<NonNullable<CreateAgentSessionOptions[Key]>>({});
+
+const SdkSessionOptionArrayElementSchema = <Key extends keyof CreateAgentSessionOptions>(_key: Key) =>
+  Type.Unsafe<ArrayElement<NonNullable<CreateAgentSessionOptions[Key]>>>({});
 
 const IntercomOptionsSchema = Type.Object({
   enabled: Type.Optional(Type.Boolean()),
@@ -30,18 +40,20 @@ const McpOptionsSchema = Type.Object({
 const StageSessionOptionProperties = {
   cwd: Type.Optional(Type.String()),
   agentDir: Type.Optional(Type.String()),
-  authStorage: Type.Optional(Type.Any()),
-  modelRegistry: Type.Optional(Type.Any()),
-  model: Type.Optional(Type.Any()),
-  thinkingLevel: Type.Optional(Type.String()),
-  scopedModels: Type.Optional(Type.Array(Type.Any())),
-  noTools: Type.Optional(Type.Union([Type.Literal("all"), Type.Literal("builtin")])),
+  authStorage: Type.Optional(SdkSessionOptionSchema("authStorage")),
+  modelRegistry: Type.Optional(SdkSessionOptionSchema("modelRegistry")),
+  model: Type.Optional(Type.Unsafe<WorkflowModelValue>({})),
+  thinkingLevel: Type.Optional(SdkSessionOptionSchema("thinkingLevel")),
+  scopedModels: Type.Optional(Type.Array(SdkSessionOptionArrayElementSchema("scopedModels"))),
+  noTools: Type.Optional(Type.Unsafe<NonNullable<CreateAgentSessionOptions["noTools"]>>({
+    enum: ["all", "builtin"],
+  })),
   tools: Type.Optional(Type.Array(Type.String())),
-  customTools: Type.Optional(Type.Array(Type.Any())),
-  resourceLoader: Type.Optional(Type.Any()),
-  sessionManager: Type.Optional(Type.Any()),
-  settingsManager: Type.Optional(Type.Any()),
-  sessionStartEvent: Type.Optional(Type.Any()),
+  customTools: Type.Optional(Type.Array(SdkSessionOptionArrayElementSchema("customTools"))),
+  resourceLoader: Type.Optional(SdkSessionOptionSchema("resourceLoader")),
+  sessionManager: Type.Optional(SdkSessionOptionSchema("sessionManager")),
+  settingsManager: Type.Optional(SdkSessionOptionSchema("settingsManager")),
+  sessionStartEvent: Type.Optional(SdkSessionOptionSchema("sessionStartEvent")),
   fallbackModels: Type.Optional(Type.Array(Type.String())),
   mcp: Type.Optional(McpOptionsSchema),
   sessionDir: Type.Optional(Type.String()),
@@ -53,7 +65,6 @@ const WorkflowTaskOptionProperties = {
   output: Type.Optional(Type.Union([Type.String(), Type.Literal(false)])),
   outputMode: Type.Optional(Type.Union([Type.Literal("inline"), Type.Literal("file-only")])),
   reads: Type.Optional(Type.Union([Type.Array(Type.String()), Type.Literal(false)])),
-  progress: Type.Optional(Type.Boolean()),
   worktree: Type.Optional(Type.Boolean()),
   maxOutput: Type.Optional(MaxOutputSchema),
   artifacts: Type.Optional(Type.Boolean()),
@@ -78,7 +89,7 @@ export const WorkflowParametersSchema = Type.Object({
   workflow: Type.Optional(Type.String({
     description: "Named workflow ID for named-workflow execution.",
   })),
-  inputs: Type.Optional(Type.Record(Type.String(), Type.Any(), {
+  inputs: Type.Optional(Type.Record(Type.String(), Type.Unknown(), {
     default: {},
     description: "Key/value inputs passed to a named workflow run.",
   })),
@@ -102,6 +113,7 @@ export const WorkflowParametersSchema = Type.Object({
   tasks: Type.Optional(Type.Array(DirectTaskSchema)),
   chain: Type.Optional(Type.Array(Type.Union([DirectTaskSchema, ParallelChainStepSchema]))),
   concurrency: Type.Optional(Type.Number()),
+  failFast: Type.Optional(Type.Boolean()),
   async: Type.Optional(Type.Boolean()),
   intercom: Type.Optional(IntercomOptionsSchema),
   ...StageSessionOptionProperties,

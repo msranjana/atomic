@@ -242,6 +242,17 @@ export interface PiExecuteContext extends PiModelContext {
  * mocks can stub a minimal surface; production runtime supplies all of
  * them.
  */
+export interface WorkflowResourceInfo {
+  readonly path: string;
+  readonly enabled: boolean;
+  readonly metadata?: {
+    readonly source?: string;
+    readonly scope?: string;
+    readonly origin?: string;
+    readonly baseDir?: string;
+  };
+}
+
 export interface ExtensionAPI {
   registerTool?: <TArgs, TResult>(opts: PiToolOpts<TArgs, TResult>) => void;
   /**
@@ -272,6 +283,8 @@ export interface ExtensionAPI {
     },
   ) => void | Promise<void>;
   registerFlag?: (name: string, opts: PiFlagNamedOpts) => void;
+  /** Return package-provided workflow files discovered by Atomic's package loader. */
+  getWorkflowResources?: () => readonly WorkflowResourceInfo[];
   /**
    * Register a keyboard shortcut.
    * Present on pi >= 1.x; absent on older runtimes.
@@ -393,6 +406,7 @@ export interface WorkflowToolArgs extends StageOptions {
   /** Internal host-derived parent session file for context:"fork". */
   forkFromSessionFile?: string;
   concurrency?: number;
+  failFast?: boolean;
   async?: boolean;
   intercom?: {
     enabled?: boolean;
@@ -404,10 +418,10 @@ export interface WorkflowToolArgs extends StageOptions {
   };
   output?: string | false;
   outputMode?: "inline" | "file-only";
+  reads?: readonly string[] | false;
   chainDir?: string;
   maxOutput?: WorkflowMaxOutput;
   artifacts?: boolean;
-  progress?: boolean;
   worktree?: boolean;
 }
 
@@ -669,7 +683,7 @@ export function makeExecuteWorkflowTool(
  * `registerWorkflowCommand` alongside the host registration so the
  * `on("input", …)` interceptor below can dispatch our commands directly
  * — bypassing pi's optimistic `startPendingSubmission` flow which
- * fires the `Working… (Esc to interrupt)` loader before the host knows
+ * fires the `Working… (esc to interrupt)` loader before the host knows
  * the input is a synchronous picker/connect UI, not a streaming turn.
  *
  * See `installInputInterceptor()` for the dispatch path and rationale.
@@ -710,7 +724,7 @@ function registerWorkflowCommand(
  * pi's editor `onSubmit` handler unconditionally calls
  * `startPendingSubmission` for any text that isn't a built-in slash /
  * skill / bash / python command — this echoes the message into chat
- * scrollback AND starts the `Working… (Esc to interrupt)` loader in
+ * scrollback AND starts the `Working… (esc to interrupt)` loader in
  * `statusContainer` before `session.prompt` even runs. The loader is
  * an optimistic affordance for the agent-streaming case; for our
  * synchronous picker/connect UIs (`/workflow connect`, `/workflow run`,
@@ -1158,7 +1172,10 @@ function factory(pi: ExtensionAPI): void {
               )
             : undefined;
 
-        const result = await discoverWorkflows({ config: discoveryConfig });
+        const packageWorkflowPaths = (pi.getWorkflowResources?.() ?? [])
+          .filter((resource) => resource.enabled !== false)
+          .map((resource) => resource.path);
+        const result = await discoverWorkflows({ config: discoveryConfig, packageWorkflowPaths });
         discoveryRef.current = result;
 
         // Resolve effective config (fills in all defaults) and build WorkflowRuntimeConfig.
@@ -1301,7 +1318,7 @@ function factory(pi: ExtensionAPI): void {
       }
       overlay.open(resolved.runId, overlaySurfaceFromContext(ctx));
       print(
-        `Attached to ${resolved.runId.slice(0, 8)}. H/CTRL+D Hide · Q Interrupt · Escape Close.`,
+        `Attached to ${resolved.runId.slice(0, 8)}. h/ctrl+d hide · q interrupt · esc close.`,
       );
       return true;
     }
@@ -1443,8 +1460,8 @@ function factory(pi: ExtensionAPI): void {
       overlay.open(runId, overlaySurfaceFromContext(ctx), stageId);
       print(
         stageId
-          ? `Attached to ${runId.slice(0, 8)} stage ${stageId.slice(0, 8)}. CTRL+D Return To Graph · Escape Close.`
-          : `Attached to ${runId.slice(0, 8)}. ↵ Chat · CTRL+D Detach.`,
+          ? `Attached to ${runId.slice(0, 8)} stage ${stageId.slice(0, 8)}. ctrl+d return to graph · esc close.`
+          : `Attached to ${runId.slice(0, 8)}. ↵ chat · ctrl+d detach.`,
       );
       return true;
     }
@@ -1513,7 +1530,7 @@ function factory(pi: ExtensionAPI): void {
       }
       // Open the orchestrator overlay (graph for run-level pause, stage
       // chat when a stage was named). This mirrors connect/attach/resume:
-      // the full-screen overlay hides Pi's "Working… (Esc to interrupt)"
+      // the full-screen overlay hides Pi's "Working… (esc to interrupt)"
       // spinner, which otherwise stays visible because the host session
       // is still streaming whatever was happening before the pause hit.
       if (typeof ctx.ui?.custom === "function") {
@@ -1814,7 +1831,7 @@ function factory(pi: ExtensionAPI): void {
         // Track whether the inputs picker actually showed a UI to the user.
         // We use this below to mount the orchestrator overlay on dispatch
         // success — same UX as `/workflow connect|attach|pause|resume`,
-        // which all cover Pi's `⠴ Working… (Esc to interrupt)` spinner
+        // which all cover Pi's `⠴ Working… (esc to interrupt)` spinner
         // with the full-screen overlay instead of leaving it visible in
         // the chat while the workflow runs in the background.
         let pickerWasShown = false;
@@ -2279,7 +2296,7 @@ function factory(pi: ExtensionAPI): void {
   );
 
   // -------------------------------------------------------------------------
-  // 7. Suppress pi's optimistic "Working… (Esc to interrupt)" loader
+  // 7. Suppress pi's optimistic "Working… (esc to interrupt)" loader
   //    for our slash commands. Workflow commands are synchronous picker /
   //    connect / inspect UIs, not streaming turns — the loader is noise
   //    that pads chrome above the picker. The `on("input")` hook fires

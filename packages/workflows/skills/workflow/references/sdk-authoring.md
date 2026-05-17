@@ -4,12 +4,32 @@ Use this when creating or editing user-facing workflow definition files for `@ba
 
 ## Where workflow files live
 
-Pi/Atomic discovers workflows from these user-facing locations:
+Atomic/pi discovers workflows from these user-facing locations, in this override order:
 
-- Project-local: `.atomic/workflows/*.{ts,js,mjs,cjs}` inside a project. Legacy `.pi/workflows/` is also checked for compatibility.
-- User-global: `~/.atomic/agent/workflows/*.{ts,js,mjs,cjs}` for workflows shared across projects. Legacy `~/.pi/agent/workflows/` is also checked.
-- Configured directories: `.atomic/extensions/workflow/config.json` or `~/.atomic/agent/extensions/workflow/config.json` can add `workflows.<name>.path` entries; legacy `.pi/...` config paths are also considered.
-- Package-provided: a pi package can expose bundled workflow directories through `package.json` under `pi.builtin`.
+1. Configured project files from `.atomic/extensions/workflow/config.json` (`workflows.<name>.path`). Legacy `.pi/...` config paths are also considered.
+2. Project-local files in `.atomic/workflows/*.{ts,js,mjs,cjs}`. Legacy `.pi/workflows/` is also checked.
+3. Configured global files from `~/.atomic/agent/extensions/workflow/config.json`. Legacy `~/.pi/...` config paths are also considered.
+4. User-global files in `~/.atomic/agent/workflows/*.{ts,js,mjs,cjs}`. Legacy `~/.pi/agent/workflows/` is also checked.
+5. Package-provided files from installed Atomic/pi packages.
+6. Bundled workflows shipped with `@bastani/workflows`.
+
+Package-provided workflows can be exposed either explicitly through the app-name manifest key in `package.json` or implicitly through a conventional directory:
+
+```json
+{
+  "name": "my-atomic-workflows",
+  "keywords": ["pi-package"],
+  "atomic": {
+    "extensions": ["./src/index.ts"],
+    "workflows": ["./workflows"]
+  }
+}
+```
+
+- For Atomic, prefer `atomic.workflows` and `atomic.extensions` in new examples.
+- `pi.workflows` and `pi.extensions` remain backwards-compatible shims for existing pi packages.
+- If no manifest declares workflows, conventional `workflows/` is auto-discovered. Singular `workflow/` is also accepted.
+- App-level config similarly prefers `<appName>Config` (for example `atomicConfig`); legacy `piConfig` is still read as a shim.
 
 In a normal consumer project, import from the package:
 
@@ -42,7 +62,7 @@ export default defineWorkflow("my-workflow")
     const reviews = await ctx.parallel([
       { name: "quality", prompt: "Inspect quality risks using this context: {previous}", previous: scout },
       { name: "runtime", prompt: "Inspect runtime concerns using this context: {previous}", previous: scout },
-    ]);
+    ], { concurrency: 2 });
 
     const final = await ctx.task("synthesis", {
       prompt: "Synthesize findings and recommend next steps.",
@@ -83,8 +103,8 @@ All schemas support `description` and `required`. Prefer explicit descriptions b
 Prefer high-level primitives:
 
 - `ctx.task(name, options)` — one tracked stage + prompt, returns `WorkflowTaskResult`.
-- `ctx.parallel(steps, options?)` — run independent task steps together; keep authored fan-outs intentionally bounded.
-- `ctx.chain(steps, options?)` — run dependent task steps sequentially.
+- `ctx.parallel(steps, options?)` — run independent task steps together; supports shared task/session defaults plus `concurrency` and `failFast`.
+- `ctx.chain(steps, options?)` — run dependent task steps sequentially; supports shared task/session defaults.
 - `ctx.ui` — human-in-the-loop primitives when a run needs user input.
 
 Use `ctx.stage(name, options?)` only when you need lower-level session control. `StageContext` supports:
@@ -115,7 +135,7 @@ Common task/stage options include:
 - `previous` for handoff context; `{previous}` placeholder inserts it, otherwise context is appended
 - `context: "fresh" | "fork"`
 - `model`, `fallbackModels`, `thinkingLevel`
-- `output`, `outputMode`, `reads`, `progress`, `worktree`, `maxOutput`, `artifacts`, `sessionDir`, `cwd`
+- `output`, `outputMode`, `reads`, `worktree`, `maxOutput`, `artifacts`, `sessionDir`, `cwd`
 - `mcp: { allow?: string[], deny?: string[] }`
 
 `fallbackModels` retries transient provider/model failures with the primary `model` first, then each fallback, then the current pi-selected model when available. It is for rate limits, quota/auth/provider outages, unavailable models, network timeouts, and 5xx errors — not workflow-code errors, tool failures, validation failures, or cancellations. Use provider-qualified IDs when bare IDs would be ambiguous.
@@ -143,7 +163,7 @@ registry.names();
 registry.get("alpha");
 ```
 
-`@bastani/workflows` is a pi package/extension. Pi loads the extension from the package manifest; the extension registers the `workflow` tool, `/workflow` command, renderers, widgets, and lifecycle hooks. Use these user-facing surfaces:
+`@bastani/workflows` is an Atomic/pi package extension. Atomic loads extensions from the app-name package manifest key (for example `atomic.extensions`); legacy `pi.extensions` remains supported for existing packages. The extension registers the `workflow` tool, `/workflow` command, renderers, widgets, and lifecycle hooks. Use these user-facing surfaces:
 
 - `/workflow <name> key=value ...` inside pi.
 - The `workflow` tool for LLM-driven orchestration and direct one-off runs.
@@ -160,10 +180,30 @@ const definition = {
   inputs: {
     prompt: "map workflow sdk",
     max_partitions: 1,
+    max_concurrency: 4,
   },
 } as const;
 
 const options: WorkflowOptions = {};
 
 await runWorkflow(definition, options);
+
+await runWorkflow({
+  mode: "parallel",
+  task: "Audit auth changes",
+  tasks: [
+    { name: "security", task: "Review security risks" },
+    { name: "runtime", task: "Review runtime risks" },
+  ],
+  concurrency: 2,
+  reads: ["research/context.md"],
+  output: "research/auth-audit.md",
+  outputMode: "inline",
+  maxOutput: { lines: 2000 },
+  artifacts: true,
+});
 ```
+
+The programmatic definition object mirrors the workflow tool for named runs, direct single-task runs, parallel `tasks`, mixed `chain` runs, direct options, and stage/session options.
+
+Workflow stage sessions follow Atomic SDK directory defaults: resource discovery starts from `.atomic` locations (`~/.atomic/agent`, `<cwd>/.atomic`) and also considers legacy `.pi` locations where the SDK supports multiple config directories. Passing `agentDir` on a stage/task is an explicit user override; passing `resourceLoader` makes that loader responsible for discovery, while `cwd`/`agentDir` still affect session naming and tool path resolution.

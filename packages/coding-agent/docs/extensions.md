@@ -255,13 +255,13 @@ This pattern makes the fetched models available during normal startup and to `pi
     "zod": "^3.0.0",
     "chalk": "^5.0.0"
   },
-  "pi": {
+  "atomic": {
     "extensions": ["./src/index.ts"]
   }
 }
 ```
 
-Run `npm install` in the extension directory, then imports from `node_modules/` work automatically.
+The manifest key is the app name from `package.json` (`atomic` here); the legacy `pi` key is still accepted as a compatibility shim. Run `npm install` in the extension directory, then imports from `node_modules/` work automatically.
 
 ## Events
 

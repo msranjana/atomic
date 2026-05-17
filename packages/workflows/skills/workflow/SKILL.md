@@ -127,18 +127,37 @@ workflow({
 })
 ```
 
-Task options mirror pi session options plus workflow-owned fields such as `output`, `reads`, `progress`, `worktree`, `maxOutput`, `artifacts`, `sessionDir`, `model`, `fallbackModels`, `thinkingLevel`, and per-stage `mcp` allow/deny.
+Task options mirror pi session options plus workflow-owned fields such as `output`, `reads`, `worktree`, `maxOutput`, `artifacts`, `sessionDir`, `model`, `fallbackModels`, `thinkingLevel`, and per-stage `mcp` allow/deny.
 
 ## Authoring Process
 
 ### 1. Locate the workflow surface
 
-For user-authored workflows, place definitions where pi discovers them:
+For user-authored workflows, place definitions where Atomic/pi discovers them:
 
 - Project-local: `.atomic/workflows/*.{ts,js,mjs,cjs}` inside the current project. Legacy `.pi/workflows/` is also checked for compatibility.
 - User-global: `~/.atomic/agent/workflows/*.{ts,js,mjs,cjs}` for workflows available across projects. Legacy `~/.pi/agent/workflows/` is also checked.
-- Configured directories: `.atomic/extensions/workflow/config.json` or `~/.atomic/agent/extensions/workflow/config.json` may add named `workflows.<name>.path` entries; legacy `.pi/...` config paths are also considered.
-- Package workflows: a pi package can expose bundled workflow directories through `package.json` under `pi.builtin`.
+- Configured files: `.atomic/extensions/workflow/config.json` or `~/.atomic/agent/extensions/workflow/config.json` may add named `workflows.<name>.path` entries; legacy `.pi/...` config paths are also considered.
+- Package workflows: an Atomic/pi package can expose workflow SDK files through the app-name manifest key in `package.json` (for Atomic, `atomic.workflows`). Legacy `pi.workflows` is still accepted as a backwards-compatible shim. Packages may also omit a manifest and ship a conventional `workflows/` directory; singular `workflow/` is accepted as an alias.
+
+Package example:
+
+```json
+{
+  "name": "my-atomic-workflows",
+  "keywords": ["pi-package"],
+  "atomic": {
+    "extensions": ["./src/index.ts"],
+    "workflows": ["./workflows"]
+  }
+}
+```
+
+Compatibility notes:
+
+- Prefer app-name keys (`atomic`, `atomicConfig`) for new Atomic package metadata.
+- Treat `pi` and `piConfig` as legacy compatibility shims, not as the preferred names for new Atomic docs/examples.
+- Package workflow precedence is below project/user/configured workflows and above bundled workflows.
 
 If an existing project has workflow examples, inspect those first for import style and naming conventions. In a normal consumer project, import from the package:
 
@@ -200,7 +219,7 @@ Input types: `text`, `string`, `number`, `boolean`, `select`. All support `descr
 | Need | Use |
 | --- | --- |
 | One LLM task with workflow tracking | `ctx.task(name, options)` |
-| Independent branches | `ctx.parallel(steps, { task? })` |
+| Independent branches | `ctx.parallel(steps, { task?, concurrency?, failFast? })` |
 | Dependent stages | `ctx.chain(steps, { task? })` |
 | Low-level session controls | `ctx.stage(name, options)` then `stage.prompt/complete` |
 | User interaction during run | `ctx.ui.input/confirm/select/editor` |
@@ -223,7 +242,7 @@ Prefer concise structured returns and durable artifacts over dumping full transc
 
 ## Execution Model
 
-`@bastani/workflows` follows pi's package/extension model: pi loads the extension from the package manifest, and the extension registers the `workflow` tool, `/workflow` command, UI renderers, widgets, and lifecycle hooks in-process.
+`@bastani/workflows` follows Atomic/pi's package/extension model: Atomic loads the extension from the app-name package manifest key (for example `atomic.extensions`; legacy `pi.extensions` remains supported), and the extension registers the `workflow` tool, `/workflow` command, UI renderers, widgets, and lifecycle hooks in-process.
 
 Use these supported workflow surfaces:
 
@@ -243,19 +262,38 @@ const definition = {
   inputs: {
     prompt: "map workflow sdk",
     max_partitions: 1,
+    max_concurrency: 4,
   },
 } as const;
 
 const options: WorkflowOptions = {};
 
 await runWorkflow(definition, options);
+
+await runWorkflow({
+  mode: "parallel",
+  task: "Audit auth changes",
+  tasks: [
+    { name: "security", task: "Review security risks" },
+    { name: "runtime", task: "Review runtime risks" },
+  ],
+  concurrency: 2,
+  reads: ["research/context.md"],
+  output: "research/auth-audit.md",
+  outputMode: "inline",
+  maxOutput: { lines: 2000 },
+  artifacts: true,
+});
 ```
+
+The programmatic definition object mirrors the workflow tool for named runs, direct single-task runs, parallel `tasks`, mixed `chain` runs, direct options, and stage/session options.
 
 ## Safety and Compatibility Rules
 
 - Do not fabricate workflow names or inputs; list/inspect first with `list`, `get`, or `inputs`.
 - Do not use legacy workflow tool fields such as `agent`, `stage`, or run-control `name`.
 - Do not expect workflow-tool `create`, `update`, or `delete`; reusable definitions are code-authored.
+- For Atomic package metadata, prefer app-name manifest keys such as `atomic.workflows`/`atomic.extensions`; mention `pi.workflows`/`pi.extensions` only as backwards-compatible shims.
 - Use `/workflow` slash commands for named runs, input picker/help, graph attach, pause/resume, status, and diagnostics.
 - Prefer `ctx.task`, `ctx.parallel`, and `ctx.chain`; drop to `ctx.stage` only for lower-level controls.
 - Keep stage names user-readable because they appear in workflow status/UI.
