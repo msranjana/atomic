@@ -121,10 +121,38 @@ done
 echo "==> Creating release archives..."
 cd binaries
 
+create_zip_archive() {
+    local platform="$1"
+    local archive="atomic-$platform.zip"
+
+    if command -v zip >/dev/null 2>&1; then
+        (cd "$platform" && zip -rq "../$archive" .)
+        return
+    fi
+
+    local powershell_cmd=""
+    if command -v pwsh >/dev/null 2>&1; then
+        powershell_cmd="pwsh"
+    elif command -v powershell.exe >/dev/null 2>&1; then
+        powershell_cmd="powershell.exe"
+    elif command -v powershell >/dev/null 2>&1; then
+        powershell_cmd="powershell"
+    fi
+
+    if [[ -n "$powershell_cmd" ]]; then
+        "$powershell_cmd" -NoProfile -Command \
+            "\$ErrorActionPreference = 'Stop'; Compress-Archive -Path '$platform/*' -DestinationPath '$archive' -Force"
+        return
+    fi
+
+    echo "Neither zip nor PowerShell is available to create $archive" >&2
+    exit 1
+}
+
 for platform in "${PLATFORMS[@]}"; do
     if [[ "$platform" == windows-* ]]; then
         echo "Creating atomic-$platform.zip..."
-        (cd "$platform" && zip -rq "../atomic-$platform.zip" .)
+        create_zip_archive "$platform"
     else
         echo "Creating atomic-$platform.tar.gz..."
         mv "$platform" atomic && tar -czf "atomic-$platform.tar.gz" atomic && mv atomic "$platform"

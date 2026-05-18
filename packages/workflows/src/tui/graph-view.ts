@@ -17,9 +17,9 @@
  *   - DESIGN.md §4 (Elevation), §5 (Components)
  */
 import type { Component } from "@earendil-works/pi-tui";
-import { sliceByColumn } from "@earendil-works/pi-tui/dist/utils.js";
 import {
   matchesKey,
+  sliceColumns,
   truncateToWidth,
   visibleWidth,
 } from "./text-helpers.js";
@@ -842,7 +842,7 @@ export class GraphView implements Component {
 
   private _sliceColumns(line: string, fromCol: number, toCol: number): string {
     if (fromCol >= toCol) return "";
-    return sliceByColumn(line, fromCol, toCol - fromCol, true);
+    return sliceColumns(line, fromCol, toCol - fromCol, true);
   }
 
   // -------------------------------------------------------------------------

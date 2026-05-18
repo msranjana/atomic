@@ -162,6 +162,16 @@ jobs:
       - name: Build @bastani/atomic package and binaries
         run: ./scripts/build-binaries.sh
 
+      - name: Smoke test Linux release archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          smoke_dir="$RUNNER_TEMP/atomic-binary-smoke"
+          rm -rf "$smoke_dir"
+          mkdir -p "$smoke_dir"
+          tar -xzf packages/coding-agent/binaries/atomic-linux-x64.tar.gz -C "$smoke_dir"
+          "$smoke_dir/atomic/atomic" --version
+
       - name: Verify built package metadata
         working-directory: ${{ env.PACKAGE_DIR }}
         run: |

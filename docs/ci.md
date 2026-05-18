@@ -14,13 +14,15 @@ Pull request / push
   ├─ bun run typecheck
   ├─ cd packages/coding-agent && bun run build
   ├─ bun run test:unit
-  └─ bun run test:integration
+  ├─ bun run test:integration
+  └─ scripts/build-binaries.sh --platform <native-x64> + atomic --version smoke test
 
 v<version> tag pushed
   ├─ validate tag matches packages/coding-agent/package.json
   ├─ validate packages/workflows is private
   ├─ bun run typecheck && bun run test:all
   ├─ scripts/build-binaries.sh (regular build + cross-compile 6 targets)
+  ├─ smoke test the Linux release archive with atomic --version
   ├─ validate dist/builtin contains all bundled extensions
   ├─ extract release notes from packages/coding-agent/CHANGELOG.md
   ├─ bun pm pack --dry-run from packages/coding-agent
@@ -60,8 +62,8 @@ Runs on pushes to `main` and PRs targeting `main`.
 
 Matrix:
 
-- `ubuntu-latest`
-- `windows-latest`
+- `ubuntu-latest` with native `linux-x64` binary smoke coverage
+- `windows-latest` with native `windows-x64` binary smoke coverage
 
 Steps:
 
@@ -72,6 +74,8 @@ Steps:
 5. Build `@bastani/atomic` with `cd packages/coding-agent && bun run build`.
 6. Run `bun run test:unit`.
 7. Run `bun run test:integration`.
+8. Build the native release binary with `scripts/build-binaries.sh --platform <native-x64>`.
+9. Extract the generated release archive and run `atomic --version` from the extracted binary.
 
 ### Code Review (`code-review.yml`)
 
@@ -135,6 +139,7 @@ Publish @bastani/atomic
       - bun build --compile --target=bun-<platform> for all 6 targets
       - assemble per-platform asset trees
       - produce atomic-<platform>.tar.gz / .zip in packages/coding-agent/binaries/
+  · extract atomic-linux-x64.tar.gz and run atomic --version as a release-binary smoke check
   · validate dist/builtin has workflows, pi-subagents, pi-mcp-adapter, pi-web-access, pi-intercom
   · extract release notes from packages/coding-agent/CHANGELOG.md
   · determine npm tag: latest or next
