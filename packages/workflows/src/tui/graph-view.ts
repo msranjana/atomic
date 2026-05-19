@@ -1092,7 +1092,7 @@ export class GraphView implements Component {
     }
     // `ctrl+d` detaches the whole popup (host hides the overlay). This
     // is the graph-mode counterpart of the in-chat back affordance.
-    if (data === "\x04") {
+    if (matchesKey(data, "ctrl+d")) {
       if (this.onDetach) {
         this.onDetach();
       } else if (this.onHide) {

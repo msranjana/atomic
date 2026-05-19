@@ -676,52 +676,70 @@ describe("StageChatView", () => {
     view.dispose();
   });
 
-  test("Ctrl+D calls onDetach", () => {
-    const store = createStore();
-    setupRun(store, "run-1", "stage-a");
-    const { handle } = makeHandle();
-    let detached = 0;
-    const view = new StageChatView({
-      store,
-      graphTheme: deriveGraphTheme({}),
-      runId: "run-1",
-      stageId: "stage-a",
-      workflowName: "test-wf",
-      handle,
-      onDetach: () => {
-        detached += 1;
-      },
-      onClose: () => {},
-    });
-    view.handleInput("\x04");
-    assert.equal(detached, 1);
-    view.dispose();
+  test("Ctrl+D variants call onDetach", () => {
+    const ctrlDVariants = [
+      "\x04",
+      "\x1b[100;5u",
+      "\x1b[100;5:1u",
+      "\x1b[27;5;100~",
+    ];
+
+    for (const key of ctrlDVariants) {
+      const store = createStore();
+      setupRun(store, "run-1", "stage-a");
+      const { handle } = makeHandle();
+      let detached = 0;
+      const view = new StageChatView({
+        store,
+        graphTheme: deriveGraphTheme({}),
+        runId: "run-1",
+        stageId: "stage-a",
+        workflowName: "test-wf",
+        handle,
+        onDetach: () => {
+          detached += 1;
+        },
+        onClose: () => {},
+      });
+      view.handleInput(key);
+      assert.equal(detached, 1, JSON.stringify(key));
+      view.dispose();
+    }
   });
 
-  test("Ctrl+D closes a paused stage chat", () => {
-    const store = createStore();
-    setupRun(store, "run-1", "stage-a", "paused");
-    const { handle } = makeHandle(undefined, [], "paused");
-    let detached = 0;
-    let closed = 0;
-    const view = new StageChatView({
-      store,
-      graphTheme: deriveGraphTheme({}),
-      runId: "run-1",
-      stageId: "stage-a",
-      workflowName: "test-wf",
-      handle,
-      onDetach: () => {
-        detached += 1;
-      },
-      onClose: () => {
-        closed += 1;
-      },
-    });
-    view.handleInput("\x04");
-    assert.equal(closed, 1);
-    assert.equal(detached, 0);
-    view.dispose();
+  test("Ctrl+D variants close a paused stage chat", () => {
+    const ctrlDVariants = [
+      "\x04",
+      "\x1b[100;5u",
+      "\x1b[100;5:1u",
+      "\x1b[27;5;100~",
+    ];
+
+    for (const key of ctrlDVariants) {
+      const store = createStore();
+      setupRun(store, "run-1", "stage-a", "paused");
+      const { handle } = makeHandle(undefined, [], "paused");
+      let detached = 0;
+      let closed = 0;
+      const view = new StageChatView({
+        store,
+        graphTheme: deriveGraphTheme({}),
+        runId: "run-1",
+        stageId: "stage-a",
+        workflowName: "test-wf",
+        handle,
+        onDetach: () => {
+          detached += 1;
+        },
+        onClose: () => {
+          closed += 1;
+        },
+      });
+      view.handleInput(key);
+      assert.equal(closed, 1, JSON.stringify(key));
+      assert.equal(detached, 0, JSON.stringify(key));
+      view.dispose();
+    }
   });
 
   test("Escape variants on settled stages and Ctrl+C call onClose", () => {

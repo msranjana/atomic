@@ -951,7 +951,7 @@ export class StageChatView implements Component, Focusable {
     if (this.bodyViewport.handleInput(data)) {
       return true;
     }
-    if (data === "\x04") {
+    if (matchesKey(data, "ctrl+d")) {
       if (this._isPaused()) this.onClose();
       else this.onDetach();
       return true;
