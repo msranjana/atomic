@@ -549,6 +549,42 @@ describe("createStageContext — lazy attach", () => {
     assert.equal(result, "derived answer");
     assert.equal(ctx.getLastAssistantText(), "derived answer");
   });
+
+  test("prompt result falls back to terminating tool result text", async () => {
+    const messages = [
+      {
+        role: "user",
+        content: [{ type: "text", text: "question" }],
+        timestamp: Date.now(),
+      },
+    ] as AgentSession["messages"];
+    const { session } = makeMockSession({
+      async prompt() {
+        messages.push({
+          role: "assistant",
+          content: [{ type: "toolCall", id: "call-1", name: "review_decision", arguments: {} }],
+          timestamp: Date.now(),
+        } as AgentSession["messages"][number]);
+        messages.push({
+          role: "toolResult",
+          toolCallId: "call-1",
+          toolName: "review_decision",
+          content: [{ type: "text", text: '{"stop_review_loop":true}' }],
+          isError: false,
+          timestamp: Date.now(),
+        } as AgentSession["messages"][number]);
+      },
+      messages,
+      getLastAssistantText: undefined,
+    });
+    const agentSession: AgentSessionAdapter = { async create() { return session; } };
+    const ctx = createStageContext(makeOpts({ adapters: { agentSession } })) as InternalStageContext;
+
+    const result = await ctx.prompt("question");
+
+    assert.equal(result, '{"stop_review_loop":true}');
+    assert.equal(ctx.getLastAssistantText(), '{"stop_review_loop":true}');
+  });
 });
 
 function flushMicrotasks(times = 8): Promise<void> {

@@ -19,6 +19,7 @@
 
 import type { RunDetail } from "../runs/background/status.js";
 import type { StageSnapshot } from "../shared/store-types.js";
+import { elapsedRunMs, elapsedStageMs } from "../shared/timing.js";
 import type { GraphTheme } from "./graph-theme.js";
 import { renderBandHeader } from "./header.js";
 import type { BandBadge } from "./header.js";
@@ -201,7 +202,7 @@ function summaryRows(detail: RunDetail, now: number): Array<[string, string | un
   const startedAgo = formatRelative(now - detail.startedAt);
   const updatedAt = detail.endedAt ?? detail.startedAt;
   const updatedAgo = formatRelative(now - updatedAt);
-  const duration = detail.durationMs ?? (detail.endedAt !== undefined ? detail.endedAt - detail.startedAt : now - detail.startedAt);
+  const duration = elapsedRunMs(detail, now);
 
   const rows: Array<[string, string | undefined]> = [
     ["workflow", detail.name],
@@ -276,11 +277,8 @@ function stageLineThemed(stage: StageSnapshot, now: number, theme: GraphTheme, w
 }
 
 function stageDurationString(stage: StageSnapshot, now: number): string | undefined {
-  if (stage.durationMs !== undefined) return fmtDuration(stage.durationMs);
-  if (stage.startedAt !== undefined && stage.endedAt === undefined) {
-    return fmtDuration(now - stage.startedAt);
-  }
-  return undefined;
+  const elapsed = elapsedStageMs(stage, now);
+  return elapsed === undefined ? undefined : fmtDuration(elapsed);
 }
 
 function stageActivityString(stage: StageSnapshot): string | undefined {

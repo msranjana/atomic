@@ -69,8 +69,16 @@ describe("handlePromptCardInput — confirm", () => {
     assert.deepEqual(handlePromptCardInput("\r", state), { kind: "submit", response: true });
   });
 
-  test("esc variants and ctrl+c cancel", () => {
-    for (const key of ["\x1b", "\x1b[27u", "\x1b[27;1;27~", "\x03"]) {
+  test("esc variants and ctrl+c variants cancel", () => {
+    for (const key of [
+      "\x1b",
+      "\x1b[27u",
+      "\x1b[27;1;27~",
+      "\x03",
+      "\x1b[99;5u",
+      "\x1b[99;5:1u",
+      "\x1b[27;5;99~",
+    ]) {
       const state = createPromptCardState(makePrompt({ kind: "confirm" }));
       assert.deepEqual(handlePromptCardInput(key, state), { kind: "cancel" }, `key=${JSON.stringify(key)}`);
     }

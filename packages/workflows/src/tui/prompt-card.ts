@@ -99,7 +99,7 @@ export function handlePromptCardInput(
   data: string,
   state: PromptCardState,
 ): PromptCardAction {
-  if (data === "\x03" || matchesKey(data, "escape")) {
+  if (matchesKey(data, "ctrl+c") || matchesKey(data, "escape")) {
     return { kind: "cancel" };
   }
 
@@ -119,7 +119,7 @@ function handleConfirm(
   data: string,
   state: PromptCardState,
 ): PromptCardAction {
-  if (matchesKey(data, "left") || data === "\x1b[D" || matchesKey(data, "right") || data === "\x1b[C" || data === " " || matchesKey(data, "tab")) {
+  if (matchesKey(data, "left") || matchesKey(data, "right") || matchesKey(data, "space") || matchesKey(data, "tab")) {
     state.confirmValue = !state.confirmValue;
     return { kind: "noop" };
   }
@@ -129,7 +129,7 @@ function handleConfirm(
   if (data === "n" || data === "N") {
     return { kind: "submit", response: false };
   }
-  if (matchesKey(data, "enter") || data === "\r" || data === "\n") {
+  if (matchesKey(data, "enter")) {
     return { kind: "submit", response: state.confirmValue };
   }
   return { kind: "noop" };
@@ -138,7 +138,7 @@ function handleConfirm(
 function handleSelect(data: string, state: PromptCardState): PromptCardAction {
   const choices = state.prompt.choices ?? [];
   if (choices.length === 0) {
-    if (matchesKey(data, "enter") || data === "\r" || data === "\n") {
+    if (matchesKey(data, "enter")) {
       return { kind: "submit", response: "" };
     }
     return { kind: "noop" };
@@ -155,7 +155,7 @@ function handleSelect(data: string, state: PromptCardState): PromptCardAction {
 }
 
 function handleInput(data: string, state: PromptCardState): PromptCardAction {
-  if (matchesKey(data, "enter") || data === "\r" || data === "\n") {
+  if (matchesKey(data, "enter")) {
     return { kind: "submit", response: state.rawText };
   }
   return applyTextEdit(data, state);
@@ -172,7 +172,7 @@ function handleEditor(data: string, state: PromptCardState): PromptCardAction {
     }
     return { kind: "noop" };
   }
-  if (data === "\r" || data === "\n") {
+  if (matchesKey(data, "enter")) {
     state.rawText = state.rawText.slice(0, state.caret) + "\n" + state.rawText.slice(state.caret);
     state.caret += 1;
     return { kind: "noop" };
@@ -184,15 +184,15 @@ function applyTextEdit(
   data: string,
   state: PromptCardState,
 ): PromptCardAction {
-  if (data === "\x1b[D") {
+  if (matchesKey(data, "left")) {
     state.caret = previousGraphemeBoundary(state.rawText, state.caret);
     return { kind: "noop" };
   }
-  if (data === "\x1b[C") {
+  if (matchesKey(data, "right")) {
     state.caret = nextGraphemeBoundary(state.rawText, state.caret);
     return { kind: "noop" };
   }
-  if (data === "\x7f" || data === "\b") {
+  if (matchesKey(data, "backspace")) {
     if (state.caret > 0) {
       const prev = previousGraphemeBoundary(state.rawText, state.caret);
       state.rawText = state.rawText.slice(0, prev) + state.rawText.slice(state.caret);
@@ -335,8 +335,8 @@ function normalizeSelectKeyData(data: string): string {
   // The historical prompt card accepted left/right as select aliases; feed the
   // corresponding vertical key into pi-tui's SelectList so it owns the actual
   // wrap/clamp/selection update behavior.
-  if (matchesKey(data, "right") || data === "\x1b[C") return "\x1b[B";
-  if (matchesKey(data, "left") || data === "\x1b[D") return "\x1b[A";
+  if (matchesKey(data, "right")) return "\x1b[B";
+  if (matchesKey(data, "left")) return "\x1b[A";
   return data;
 }
 

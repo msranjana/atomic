@@ -95,6 +95,15 @@ test("handleSessionPickerInput: / enters filter mode and types into query", () =
   assert.equal(state.filterFocused, false);
 });
 
+test("handleSessionPickerInput: double esc exits filter mode", () => {
+  const state = createSessionPickerState();
+  const rows = [{ run: makeRun({ id: "id-1" }), bucket: "active" as const }];
+  handleSessionPickerInput("/", state, rows);
+  assert.equal(state.filterFocused, true);
+  assert.deepEqual(handleSessionPickerInput("\x1b\x1b", state, rows), { kind: "noop" });
+  assert.equal(state.filterFocused, false);
+});
+
 test("handleSessionPickerInput: a toggles includeAll", () => {
   const state = createSessionPickerState();
   assert.equal(state.includeAll, false);
@@ -104,10 +113,12 @@ test("handleSessionPickerInput: a toggles includeAll", () => {
   assert.equal(state.includeAll, false);
 });
 
-test("handleSessionPickerInput: esc closes", () => {
-  const state = createSessionPickerState();
-  const action = handleSessionPickerInput("\x1b", state, []);
-  assert.deepEqual(action, { kind: "close" });
+test("handleSessionPickerInput: esc variants close", () => {
+  for (const key of ["\x1b", "\x1b[27u", "\x1b[27;1;27~"]) {
+    const state = createSessionPickerState();
+    const action = handleSessionPickerInput(key, state, []);
+    assert.deepEqual(action, { kind: "close" }, JSON.stringify(key));
+  }
 });
 
 test("renderSessionPicker emits header, sections, and footer hints", () => {

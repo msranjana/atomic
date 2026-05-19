@@ -134,6 +134,70 @@ describe("store stage blocking", () => {
     assert.equal(stage.pausedAt, undefined);
     assert.equal(stage.resumedAt, 222);
   });
+
+  test("stage pause/resume tracks accumulated paused time", () => {
+    const s = createStore();
+    s.recordRunStart(makeRun("r1", [makeStage("a", { status: "running", startedAt: 1_000 })]));
+
+    assert.equal(s.recordStagePaused("r1", "a", 6_000), true);
+    assert.equal(s.recordStageResumed("r1", "a", 16_000), true);
+
+    const stage = s.snapshot().runs[0]!.stages[0]!;
+    assert.equal(stage.status, "running");
+    assert.equal(stage.pausedAt, undefined);
+    assert.equal(stage.resumedAt, 16_000);
+    assert.equal(stage.pausedDurationMs, 10_000);
+  });
+
+  test("pending stage pause/resume does not subtract time before start", () => {
+    const s = createStore();
+    s.recordRunStart(makeRun("r1", [makeStage("a", { status: "pending" })]));
+
+    assert.equal(s.recordStagePaused("r1", "a", 1_000), true);
+    assert.equal(s.recordStageResumed("r1", "a", 6_000), true);
+
+    const stage = s.snapshot().runs[0]!.stages[0]!;
+    assert.equal(stage.status, "running");
+    assert.equal(stage.pausedAt, undefined);
+    assert.equal(stage.resumedAt, 6_000);
+    assert.equal(stage.pausedDurationMs, undefined);
+  });
+});
+
+describe("store run pausing", () => {
+  test("run pause/resume tracks accumulated paused time", () => {
+    const s = createStore();
+    s.recordRunStart({ ...makeRun("r1"), startedAt: 1_000 });
+
+    assert.equal(s.recordRunPaused("r1", 6_000), true);
+    assert.equal(s.recordRunResumed("r1", 16_000), true);
+
+    const run = s.snapshot().runs[0]!;
+    assert.equal(run.status, "running");
+    assert.equal(run.pausedAt, undefined);
+    assert.equal(run.resumedAt, 16_000);
+    assert.equal(run.pausedDurationMs, 10_000);
+  });
+
+  test("recordRunEnd excludes paused time from final duration", () => {
+    const originalNow = Date.now;
+    try {
+      const s = createStore();
+      s.recordRunStart({ ...makeRun("r1"), startedAt: 1_000 });
+      assert.equal(s.recordRunPaused("r1", 6_000), true);
+      assert.equal(s.recordRunResumed("r1", 16_000), true);
+
+      Date.now = () => 21_000;
+      assert.equal(s.recordRunEnd("r1", "completed"), true);
+
+      const run = s.snapshot().runs[0]!;
+      assert.equal(run.durationMs, 10_000);
+      assert.equal(run.pausedAt, undefined);
+      assert.equal(run.pausedDurationMs, 10_000);
+    } finally {
+      Date.now = originalNow;
+    }
+  });
 });
 
 describe("store stage notices", () => {

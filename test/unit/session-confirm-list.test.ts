@@ -3,15 +3,18 @@
  */
 import { test } from "bun:test";
 import assert from "node:assert/strict";
+import { Key } from "@earendil-works/pi-tui";
 import {
   createKillConfirmState,
   handleKillConfirmInput,
   renderKillConfirm,
+  renderWorkflowKilledNotice,
 } from "../../packages/workflows/src/tui/session-confirm.ts";
 import { renderSessionList } from "../../packages/workflows/src/tui/session-list.ts";
 import { deriveGraphTheme } from "../../packages/workflows/src/tui/graph-theme.ts";
 import type { RunSnapshot } from "../../packages/workflows/src/shared/store-types.ts";
 import { visibleWidth } from "../../packages/workflows/src/tui/text-helpers.ts";
+
 
 function makeRun(over: Partial<RunSnapshot>): RunSnapshot {
   return {
@@ -28,23 +31,23 @@ function makeRun(over: Partial<RunSnapshot>): RunSnapshot {
   };
 }
 
-test("kill confirm: y always confirms, n / esc cancels", () => {
+test("kill confirm: y always confirms, n / esc variants cancel", () => {
   const s = createKillConfirmState();
   assert.deepEqual(handleKillConfirmInput("y", s), { kind: "confirm" });
   assert.deepEqual(handleKillConfirmInput("Y", s), { kind: "confirm" });
   assert.deepEqual(handleKillConfirmInput("n", s), { kind: "cancel" });
-  assert.deepEqual(handleKillConfirmInput("\x1b", s), { kind: "cancel" });
+  assert.deepEqual(handleKillConfirmInput(Key.escape, s), { kind: "cancel" });
 });
 
 test("kill confirm: tab toggles focus, enter commits focused button", () => {
   const s = createKillConfirmState();
   assert.equal(s.focusedButton, 0); // default Cancel
   // Enter on Cancel = cancel.
-  assert.deepEqual(handleKillConfirmInput("\r", s), { kind: "cancel" });
+  assert.deepEqual(handleKillConfirmInput(Key.enter, s), { kind: "cancel" });
   // Tab → focus Kill, then enter = confirm.
-  handleKillConfirmInput("\t", s);
+  handleKillConfirmInput(Key.tab, s);
   assert.equal(s.focusedButton, 1);
-  assert.deepEqual(handleKillConfirmInput("\r", s), { kind: "confirm" });
+  assert.deepEqual(handleKillConfirmInput(Key.enter, s), { kind: "confirm" });
 });
 
 test("kill confirm renders run identity and button row", () => {
@@ -86,6 +89,57 @@ test("kill confirm clamps long and wide workflow names to the dialog width", () 
     assert.ok(visibleWidth(line) <= width, `line exceeds ${width}: ${visibleWidth(line)} ${JSON.stringify(line)}`);
   }
   assert.match(lines.join("\n"), /…/);
+});
+
+test("workflow killed notice renders transparent completion details", () => {
+  const theme = deriveGraphTheme({});
+  const width = 72;
+  const run = makeRun({
+    id: "abc12345-0000-0000-0000-000000000000",
+    name: "issue-973-validation",
+    status: "running",
+    stages: [
+      { id: "s1", name: "plan", status: "running", parentIds: [], toolEvents: [] },
+      { id: "s2", name: "build", status: "pending", parentIds: ["s1"], toolEvents: [] },
+    ],
+  });
+  const lines = renderWorkflowKilledNotice({
+    width,
+    theme,
+    run,
+    previousStatus: "running",
+    wasInFlight: true,
+  });
+  const joined = lines.join("\n");
+  assert.match(joined, /Workflow killed/);
+  assert.match(joined, /issue-973-validation/);
+  assert.match(joined, /abc12345/);
+  assert.match(joined, /removed from live history/);
+  assert.match(joined, /Active stage work was aborted/);
+  assert.doesNotMatch(joined, /close/);
+  for (const line of lines) {
+    assert.ok(visibleWidth(line) <= width, `line exceeds ${width}: ${visibleWidth(line)} ${JSON.stringify(line)}`);
+  }
+});
+
+test("workflow killed notice stays within narrow panes", () => {
+  const theme = deriveGraphTheme({});
+  const width = 40;
+  const lines = renderWorkflowKilledNotice({
+    width,
+    theme,
+    run: makeRun({
+      id: "abc12345-0000-0000-0000-000000000000",
+      name: "very-long-workflow-name-that-must-fit",
+      status: "running",
+      stages: [{ id: "s1", name: "plan", status: "running", parentIds: [], toolEvents: [] }],
+    }),
+    previousStatus: "running",
+    wasInFlight: true,
+  });
+  for (const line of lines) {
+    assert.ok(visibleWidth(line) <= width, `line exceeds ${width}: ${visibleWidth(line)} ${JSON.stringify(line)}`);
+  }
 });
 
 test("session list renders the band-header chrome with both runs and a detail hint", () => {

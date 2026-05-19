@@ -12,6 +12,136 @@ import type { WorkflowTaskResult } from "../src/shared/types.js";
 
 const DEFAULT_MAX_LOOPS = 10;
 
+type ReviewFinding = {
+  readonly title: string;
+  readonly body: string;
+  readonly confidence_score: number;
+  readonly priority?: number | null;
+  readonly code_location: {
+    readonly absolute_file_path: string;
+    readonly line_range: {
+      readonly start: number;
+      readonly end: number;
+    };
+  };
+};
+
+type ReviewerError = {
+  readonly kind:
+    | "validation_unavailable"
+    | "dependency_unavailable"
+    | "tool_failure"
+    | "reviewer_failure";
+  readonly message: string;
+  readonly attempted_recovery: string;
+};
+
+type ReviewDecision = {
+  readonly findings: readonly ReviewFinding[];
+  readonly overall_correctness: "patch is correct" | "patch is incorrect";
+  readonly overall_explanation: string;
+  readonly overall_confidence_score: number;
+  readonly stop_review_loop: boolean;
+  readonly reviewer_error?: ReviewerError | null;
+};
+
+const reviewDecisionSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "findings",
+    "overall_correctness",
+    "overall_explanation",
+    "overall_confidence_score",
+    "stop_review_loop",
+  ],
+  properties: {
+    findings: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["title", "body", "confidence_score", "code_location"],
+        properties: {
+          title: { type: "string" },
+          body: { type: "string" },
+          confidence_score: { type: "number", minimum: 0, maximum: 1 },
+          priority: { type: ["integer", "null"], minimum: 0, maximum: 3 },
+          code_location: {
+            type: "object",
+            additionalProperties: false,
+            required: ["absolute_file_path", "line_range"],
+            properties: {
+              absolute_file_path: { type: "string" },
+              line_range: {
+                type: "object",
+                additionalProperties: false,
+                required: ["start", "end"],
+                properties: {
+                  start: { type: "integer", minimum: 1 },
+                  end: { type: "integer", minimum: 1 },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    overall_correctness: {
+      type: "string",
+      enum: ["patch is correct", "patch is incorrect"],
+    },
+    overall_explanation: { type: "string" },
+    overall_confidence_score: { type: "number", minimum: 0, maximum: 1 },
+    stop_review_loop: { type: "boolean" },
+    reviewer_error: {
+      anyOf: [
+        { type: "null" },
+        {
+          type: "object",
+          additionalProperties: false,
+          required: ["kind", "message", "attempted_recovery"],
+          properties: {
+            kind: {
+              type: "string",
+              enum: [
+                "validation_unavailable",
+                "dependency_unavailable",
+                "tool_failure",
+                "reviewer_failure",
+              ],
+            },
+            message: { type: "string" },
+            attempted_recovery: { type: "string" },
+          },
+        },
+      ],
+    },
+  },
+} as const;
+
+const reviewDecisionTool = {
+  name: "review_decision",
+  label: "Review Decision",
+  description:
+    "Emit the final structured review verdict after inspecting the patch.",
+  promptSnippet: "Emit the final review verdict as structured data",
+  promptGuidelines: [
+    "Call review_decision after completing review investigation and validation.",
+    "This is a terminating structured-output tool; do not emit another assistant response after calling it.",
+  ],
+  parameters: reviewDecisionSchema,
+  async execute(_toolCallId: string, params: ReviewDecision) {
+    return {
+      content: [
+        { type: "text" as const, text: JSON.stringify(params, null, 2) },
+      ],
+      details: params,
+      terminate: true,
+    };
+  },
+};
+
 const PLANNER_RFC_TEMPLATE = `
 # [Project Name] Technical Design Document / RFC
 
@@ -95,21 +225,59 @@ function positiveInteger(value: number | undefined, fallback: number): number {
     : fallback;
 }
 
+function parseReviewDecision(text: string): ReviewDecision | undefined {
+  try {
+    const parsed = JSON.parse(text) as Partial<ReviewDecision>;
+    if (
+      parsed.overall_correctness !== "patch is correct" &&
+      parsed.overall_correctness !== "patch is incorrect"
+    ) {
+      return undefined;
+    }
+    if (!Array.isArray(parsed.findings)) return undefined;
+    if (typeof parsed.stop_review_loop !== "boolean") return undefined;
+    if (typeof parsed.overall_explanation !== "string") return undefined;
+    if (typeof parsed.overall_confidence_score !== "number") return undefined;
+    return parsed as ReviewDecision;
+  } catch {
+    return undefined;
+  }
+}
+
 function reviewApproved(text: string): boolean {
-  const normalized = text.toLowerCase();
-  if (
-    normalized.includes("patch is correct") ||
-    normalized.includes("overall_correctness: patch is correct")
-  ) {
-    return true;
-  }
-  if (
-    normalized.startsWith("approved") ||
-    normalized.includes("no actionable findings")
-  ) {
-    return true;
-  }
-  return false;
+  const decision = parseReviewDecision(text);
+  if (decision === undefined) return false;
+  return (
+    decision.stop_review_loop === true &&
+    decision.overall_correctness === "patch is correct" &&
+    decision.findings.length === 0 &&
+    decision.reviewer_error == null
+  );
+}
+
+function reviewerErrorResult(
+  iteration: number,
+  error: string,
+): WorkflowTaskResult {
+  const decision: ReviewDecision = {
+    findings: [],
+    overall_correctness: "patch is incorrect",
+    overall_explanation:
+      "Reviewer execution failed, so the review loop cannot safely approve this iteration.",
+    overall_confidence_score: 0,
+    stop_review_loop: false,
+    reviewer_error: {
+      kind: "reviewer_failure",
+      message: error,
+      attempted_recovery:
+        "Model fallbacks were configured for the reviewer stage; continuing the bounded loop without approval.",
+    },
+  };
+  return {
+    name: `reviewer-${iteration}-error`,
+    stageName: `reviewer-${iteration}-error`,
+    text: JSON.stringify(decision, null, 2),
+  };
 }
 
 function formatDiscovery(results: readonly WorkflowTaskResult[]): string {
@@ -131,7 +299,7 @@ export default defineWorkflow("ralph")
   .input("prompt", {
     type: "text",
     required: true,
-    description: "The task or goal for ralph to plan, execute, and refine.",
+    description: "The task or goal to plan, execute, and refine.",
   })
   .input("max_loops", {
     type: "number",
@@ -212,6 +380,7 @@ export default defineWorkflow("ralph")
       ],
       thinkingLevel: "high" as const,
       tools: noAskQuestionToolSet,
+      customTools: [reviewDecisionTool],
     };
 
     let explorerModelConfig = {
@@ -286,6 +455,22 @@ export default defineWorkflow("ralph")
                 ].join("\n"),
               ],
               [
+                "stage_contract",
+                [
+                  "This stage is investigation-first RFC authoring. The RFC is only valid if it is grounded in repository inspection performed during this stage.",
+                  "Do not fill the template from generic architecture guesses. Before writing the final RFC, inspect relevant code, docs, tests, configs, and prior design material.",
+                  "Treat the output format as the report after investigation, not a substitute for investigation.",
+                ].join("\n"),
+              ],
+              [
+                "evidence_expectations",
+                [
+                  "Every major design claim should be traceable to concrete evidence: file paths, symbols, commands, docs, tests, configs, or prior RFCs.",
+                  "Include those concrete references inside the RFC sections where they support the design.",
+                  "If expected evidence cannot be found, say so in the relevant RFC section or Open Questions rather than papering over the gap.",
+                ].join("\n"),
+              ],
+              [
                 "output_discipline",
                 [
                   "Render the RFC Template exactly as the final document structure: preserve every header and the metadata table.",
@@ -315,12 +500,33 @@ export default defineWorkflow("ralph")
               [
                 "delegation_policy",
                 [
-                  "All non-trivial operations must be delegated to subagents via the `subagent` tool.",
+                  "You are not the implementer. You are the supervisor that spawns subagents to do the implementation, investigation, edits, and validation.",
+                  "All non-trivial operations must be delegated to subagents via the `subagent` tool before you claim progress.",
                   "Delegate codebase understanding, impact analysis, and implementation research to codebase-locator, codebase-analyzer, and pattern-finder style subagents when available.",
                   "Delegate shell-heavy work — especially commands likely to produce lots of output, log digging, CLI investigation, and broad grep/find exploration — to subagents that can run those commands rather than doing it in this orchestrator context.",
+                  "Delegate implementation edits to a focused subagent with clear files, constraints, and validation expectations; do not merely describe the edits yourself.",
                   "Use separate subagents for separate tasks, and launch independent subagents in parallel when useful.",
                   "Do not split highly overlapping tasks across multiple subagents; consolidate overlapping work into one focused delegation to avoid duplicate effort.",
                   "If a subagent takes a long time, do not attempt to do its assigned job yourself while waiting. Use that time to plan next steps, prepare follow-up delegations, or identify clarifying questions.",
+                ].join("\n"),
+              ],
+              [
+                "execution_contract",
+                [
+                  "The required output format is a completion report, not the task itself.",
+                  "Do not jump straight to the report. First spawn the necessary subagents, wait for their results, coordinate any follow-up subagents, and only then write the report.",
+                  "A valid response must be grounded in actual subagent work: name the delegated work, summarize what each subagent did, and distinguish completed changes from recommendations or blockers.",
+                  "If you cannot spawn or use subagents, treat that as a blocker and report it honestly instead of pretending the requested work was done.",
+                ].join("\n"),
+              ],
+              [
+                "subagent_tracking",
+                [
+                  "Use the `todo` tool as your active control ledger for subagent work.",
+                  "Before launching subagents, create todo items for each delegated task with enough detail to identify owner, purpose, and expected output.",
+                  "Mark todo items in_progress when the corresponding subagent starts, append progress/results as subagents report back, and close them only after you have incorporated or explicitly rejected their result.",
+                  "Keep pending, in_progress, blocked, and completed work accurate so you do not lose track of parallel subagents or unresolved follow-ups.",
+                  "Before writing the final report, review the todo list and resolve every pending/in_progress item as completed, blocked, or deferred with an explanation.",
                 ].join("\n"),
               ],
               [
@@ -338,11 +544,12 @@ export default defineWorkflow("ralph")
               [
                 "output_format",
                 [
-                  "Markdown with headings:",
-                  "1. Changes made",
-                  "2. Files touched",
-                  "3. Validation run / recommended",
-                  "4. Deferred work or blockers",
+                  "After subagents have done the work, return Markdown with headings:",
+                  "1. Delegations performed — subagents spawned and what each completed",
+                  "2. Changes made — concrete changes from subagent work, not intentions",
+                  "3. Files touched",
+                  "4. Validation run / recommended",
+                  "5. Deferred work or blockers",
                 ].join("\n"),
               ],
             ]),
@@ -408,6 +615,27 @@ export default defineWorkflow("ralph")
             ].join("\n"),
           ],
           [
+            "stage_contract",
+            [
+              "This is an active code-refinement stage, not just a commentary stage.",
+              "Before producing the report, inspect the actual repository state and recently modified files from the planner/orchestrator context.",
+              "Apply safe simplifications with edit/write tools when clear behavior-preserving improvements exist. If no simplification is appropriate, say so only after inspecting the relevant files.",
+            ].join("\n"),
+          ],
+          [
+            "required_actions_before_output",
+            [
+              "1. Identify the concrete files/sections changed in this iteration.",
+              "2. Read those files before deciding whether to simplify.",
+              "3. Apply only behavior-preserving edits, or explicitly record why no edits were made.",
+              "4. Run or recommend focused validation tied to the touched files.",
+            ].join("\n"),
+          ],
+          [
+            "handoff_expectations",
+            "In the final report, distinguish edits actually applied from observations only. Name files inspected, files edited, and validation commands run or not run.",
+          ],
+          [
             "process",
             [
               "Identify recently modified code sections from the iteration context and repository state.",
@@ -446,12 +674,21 @@ export default defineWorkflow("ralph")
                 `Find review-relevant infrastructure for the task: ${prompt}`,
               ],
               [
+                "stage_contract",
+                [
+                  "This is a repository-discovery stage. Do not answer from assumptions or common project layouts.",
+                  "Before output, inspect the repository for each infrastructure category: package scripts, test configs, CI workflows, generated artifacts, lint/typecheck setup, and release gates.",
+                  "The table is a compact handoff after discovery, not a substitute for discovery.",
+                ].join("\n"),
+              ],
+              [
                 "instructions",
                 [
                   "Locate package scripts, test configs, CI workflows, generated artifacts, lint/typecheck setup, and release gates.",
+                  "Search/read relevant files such as package manifests, CI workflow directories, test configs, lint/typecheck configs, build scripts, release configs, and generated-artifact markers.",
                   "Prefer exact file paths and commands.",
                   "Explain how each item should influence review or validation.",
-                  "If a category does not exist, state that explicitly.",
+                  "If a category does not exist, report `not found` and briefly name the paths or patterns checked.",
                 ].join("\n"),
               ],
               [
@@ -473,13 +710,26 @@ export default defineWorkflow("ralph")
                 `Assess infrastructure and changed-code risks for the task: ${prompt}`,
               ],
               [
+                "stage_contract",
+                [
+                  "This stage analyzes actual repository coupling, not generic integration risks.",
+                  "Before output, inspect the changed-code context plus relevant infrastructure/configuration files discovered or inferable from the repo.",
+                  "Classify a risk as confirmed only when repository evidence shows the coupling; otherwise mark it speculative.",
+                ].join("\n"),
+              ],
+              [
                 "instructions",
                 [
                   "Identify hidden coupling with build, tests, linting, runtime config, release automation, or generated files.",
                   "Name the exact validations that would most efficiently detect regressions.",
                   "Separate confirmed risks from speculative risks.",
                   "Do not repeat generic review advice; ground findings in repository evidence.",
+                  "Copy validation commands from actual repository scripts/configs when available; do not invent commands that are not supported by the repo.",
                 ].join("\n"),
+              ],
+              [
+                "evidence_expectations",
+                "Each confirmed risk must include concrete evidence: path, command, symbol, config key, script name, or file relationship.",
               ],
               [
                 "output_format",
@@ -500,13 +750,27 @@ export default defineWorkflow("ralph")
                 `Extract conventions relevant to reviewing this task: ${prompt}`,
               ],
               [
+                "stage_contract",
+                [
+                  "This is an evidence-gathering stage for repository conventions. Do not describe generic best practices.",
+                  "Before output, find concrete examples in the repository that demonstrate conventions relevant to this task.",
+                  "Read enough of each example to understand the convention before reporting it.",
+                ].join("\n"),
+              ],
+              [
                 "instructions",
                 [
                   "Find examples of build/test/style/release/architecture patterns the patch should mirror.",
+                  "Search for nearby or analogous implementations, tests, configs, scripts, and docs.",
                   "Use concrete paths, commands, or symbols as evidence.",
                   "Highlight conventions that commonly cause subtle review failures.",
                   "If examples conflict, describe the conflict instead of forcing a single rule.",
+                  "If no relevant example exists, state what was searched and that no pattern was found.",
                 ].join("\n"),
+              ],
+              [
+                "handoff_expectations",
+                "For every required convention or useful example, include the supporting path, command, symbol, or file relationship so reviewers can verify it quickly.",
               ],
               [
                 "output_format",
@@ -523,7 +787,11 @@ export default defineWorkflow("ralph")
       const reviewPrompt = taggedPrompt([
         [
           "role",
-          "You are acting as a reviewer for a proposed code change made by another engineer.",
+          [
+            "You are acting as a reviewer for a proposed code change made by another engineer.",
+            "Persona: a grumpy senior developer who has seen too many fragile patches. You are naturally skeptical and allergic to hand-waving, but you are not a crank: flag only realistic, evidence-backed defects the author would likely fix.",
+            "Be terse, concrete, and technically fair. Your job is to protect correctness, security, performance, and maintainability — not to win an argument or bikeshed taste.",
+          ].join("\n"),
         ],
         [
           "objective",
@@ -538,29 +806,41 @@ export default defineWorkflow("ralph")
             "Use the repository's AGENTS.md and/or CLAUDE.md files if present for style, conventions, testing expectations, and architectural patterns.",
             "Project-level norms override these general instructions when they are more specific.",
             "Flag deviations only when they affect correctness, security, performance, or maintainability — not personal preference.",
+            "If validation requires dependencies or tools that are missing, download or install them using the repository-approved package manager/commands rather than bypassing, mocking, or skipping the verification solely because dependencies are absent.",
+          ].join("\n"),
+        ],
+        [
+          "validation_expectations",
+          [
+            "Inspect the actual diff/repository state rather than trusting stage summaries.",
+            "Run or delegate focused validation when it is necessary to distinguish a real bug from a hunch.",
+            "If tests or typechecks fail because dependencies are missing, install/download the missing dependencies with the repo's documented package manager instead of bypassing the check.",
+            "If validation cannot be completed after reasonable recovery, record the limitation in overall_explanation and reviewer_error; do not use missing dependencies as a reason to approve.",
           ].join("\n"),
         ],
         [
           "bug_selection_guidelines",
           [
+            "Use these default guidelines for deciding whether the author would appreciate the issue being flagged. More specific user, project, or file-level guidance overrides them.",
             "Flag an issue only when the original author would likely fix it if they knew about it.",
             "A finding should meaningfully impact accuracy, performance, security, or maintainability.",
-            "A finding must be discrete and actionable, not a broad complaint about the whole codebase.",
-            "Do not demand rigor inconsistent with the rest of the repository.",
-            "Flag only bugs introduced by this iteration's patch; do not flag pre-existing issues.",
+            "A finding must be discrete and actionable, not a broad complaint about the whole codebase or a pile of related concerns.",
+            "Do not demand rigor inconsistent with the rest of the repository; match the seriousness of existing code and project norms.",
+            "Flag only bugs introduced by this iteration's patch; do not flag pre-existing issues unless the patch makes them worse in a concrete way.",
             "Do not rely on unstated assumptions about author intent or codebase behavior.",
             "Speculation is insufficient: identify the code path, scenario, environment, or input that is provably affected.",
             "Do not flag intentional behavior changes as bugs unless they clearly violate the task or documented contract.",
             "Ignore trivial style unless it obscures meaning or violates documented standards in a way that affects correctness/security/maintainability.",
+            "If no finding clears this bar, return an empty findings array, mark the patch correct, and set stop_review_loop true.",
           ].join("\n"),
         ],
         [
           "comment_guidelines",
           [
-            "Each finding title must start with a priority tag such as [P1], [P2], or [P3]. Use [P0] only for universal release/operations blockers.",
-            "Also include numeric priority: 0 for P0, 1 for P1, 2 for P2, 3 for P3.",
-            "The body must be one concise paragraph explaining why this is a bug and the exact scenario or inputs required for it to arise.",
-            "Use a matter-of-fact, non-accusatory tone. Avoid praise such as `Great job` or `Thanks for`.",
+            "Each finding title must start with a priority tag: [P0] drop-everything blocker, [P1] urgent next-cycle fix, [P2] normal fix, [P3] low-priority nice-to-have.",
+            "Also include numeric priority: 0 for P0, 1 for P1, 2 for P2, 3 for P3; use null only if priority genuinely cannot be determined.",
+            "The body must be one concise paragraph explaining why this is a bug and the exact scenario, environment, or inputs required for it to arise.",
+            "Use a matter-of-fact, non-accusatory tone. Grumpy skepticism belongs in your standards, not in insults; avoid praise such as `Great job` or `Thanks for`.",
             "Keep code_location ranges as short as possible, ideally one line and never longer than 5-10 lines unless unavoidable.",
             "The code_location must overlap the diff/change under review.",
             "Use one finding per distinct issue. Do not generate a PR fix.",
@@ -576,9 +856,37 @@ export default defineWorkflow("ralph")
           ].join("\n"),
         ],
         [
-          "output_schema",
+          "review_stage_contract",
           [
-            "Return JSON only. Do not wrap the JSON in markdown fences or add extra prose.",
+            "The structured review decision is only valid after you inspect the actual repository state for this iteration.",
+            "Do not approve based solely on orchestrator, simplifier, or discovery summaries.",
+            "The tool call is the final verdict after review work, not a shortcut around review work.",
+          ].join("\n"),
+        ],
+        [
+          "required_actions_before_tool_call",
+          [
+            "1. Identify the changed files or diff under review.",
+            "2. Read the relevant changed code and directly affected call sites/tests/configs.",
+            "3. Run or delegate focused validation when needed to resolve uncertainty.",
+            "4. If you cannot inspect or validate enough to approve safely, populate reviewer_error and set stop_review_loop=false.",
+          ].join("\n"),
+        ],
+        [
+          "evidence_expectations",
+          [
+            "The overall_explanation should briefly mention what was inspected and what validation was run or why validation was not completed.",
+            "Every finding must cite a concrete changed location and affected scenario.",
+          ].join("\n"),
+        ],
+        [
+          "structured_output_contract",
+          [
+            "You have a structured-output tool named review_decision. Use it after your investigation and validation attempts.",
+            "The tool terminates the turn and provides the structured data; do not emit a separate final assistant response after calling it.",
+            "The review loop decides whether to stop only by parsing the JSON object returned by this tool; invalid JSON, missing fields, reviewer_error, or stop_review_loop=false are treated as not approved for safety.",
+            "Set stop_review_loop=true only when findings is empty, overall_correctness is patch is correct, and reviewer_error is null/omitted.",
+            "If you hit a reviewer/tool/validation error, still return the object with stop_review_loop=false and reviewer_error populated instead of pretending the patch is approved.",
             "The JSON must match this schema exactly:",
             "{",
             '  "findings": [',
@@ -586,38 +894,46 @@ export default defineWorkflow("ralph")
             '      "title": "<≤ 80 chars, imperative, starts with [P0]/[P1]/[P2]/[P3]>",',
             '      "body": "<one paragraph of valid Markdown explaining why this is a problem; cite files/lines/functions>",',
             '      "confidence_score": <float 0.0-1.0>,',
-            '      "priority": <int 0-3, optional>,',
+            '      "priority": <int 0-3 or null>,',
             '      "code_location": {',
-            '        "file_path": "<repo-relative path>",',
+            '        "absolute_file_path": "<absolute file path>",',
             '        "line_range": {"start": <int>, "end": <int>}',
             "      }",
             "    }",
             "  ],",
             '  "overall_correctness": "patch is correct" | "patch is incorrect",',
             '  "overall_explanation": "<1-3 sentence explanation justifying the verdict>",',
-            '  "overall_confidence_score": <float 0.0-1.0>',
+            '  "overall_confidence_score": <float 0.0-1.0>,',
+            '  "stop_review_loop": <boolean>,',
+            '  "reviewer_error": null | {"kind": "validation_unavailable" | "dependency_unavailable" | "tool_failure" | "reviewer_failure", "message": "<what failed>", "attempted_recovery": "<what you tried>"}',
             "}",
           ].join("\n"),
         ],
       ]);
 
-      const reviews = await ctx.parallel(
-        [
-          {
-            name: `reviewer-${iteration}-a`,
-            task: reviewPrompt,
-            previous: [orchestrator, simplifier, ...discovery],
-            ...reviewerModelConfig,
-          },
-          {
-            name: `reviewer-${iteration}-b`,
-            task: reviewPrompt,
-            previous: [orchestrator, simplifier, ...discovery],
-            ...reviewerModelConfig,
-          },
-        ],
-        { task: prompt },
-      );
+      let reviews: WorkflowTaskResult[];
+      try {
+        reviews = await ctx.parallel(
+          [
+            {
+              name: `reviewer-${iteration}-a`,
+              task: reviewPrompt,
+              previous: [orchestrator, simplifier, ...discovery],
+              ...reviewerModelConfig,
+            },
+            {
+              name: `reviewer-${iteration}-b`,
+              task: reviewPrompt,
+              previous: [orchestrator, simplifier, ...discovery],
+              ...reviewerModelConfig,
+            },
+          ],
+          { task: prompt, failFast: false },
+        );
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        reviews = [reviewerErrorResult(iteration, message)];
+      }
 
       approved =
         reviews.length > 0 &&

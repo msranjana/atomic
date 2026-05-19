@@ -24,6 +24,7 @@ interface MockCalls {
   readonly parallelOptions: WorkflowParallelOptions[];
   readonly chain: string[][];
   readonly prompts: Record<string, string[]>;
+  readonly taskOptions: Record<string, WorkflowTaskOptions[]>;
 }
 
 interface MockResponders {
@@ -50,6 +51,7 @@ function makeMockCtx<TInputs extends Record<string, unknown>>(
     parallelOptions: [],
     chain: [],
     prompts: {},
+    taskOptions: {},
   };
 
   const ui: WorkflowUIContext = {
@@ -63,6 +65,7 @@ function makeMockCtx<TInputs extends Record<string, unknown>>(
     calls.task.push(name);
     const text = promptText(options);
     calls.prompts[name] = [...(calls.prompts[name] ?? []), text];
+    calls.taskOptions[name] = [...(calls.taskOptions[name] ?? []), options];
     const override = responders.task?.(name, options, calls);
     return makeTaskResult(name, override ?? `[mock-task:${name}] ${text.slice(0, 80)}`);
   };
@@ -172,6 +175,17 @@ describe("deep-research-codebase", () => {
 // ---------------------------------------------------------------------------
 
 describe("ralph", () => {
+  function approvedReviewJson(): string {
+    return JSON.stringify({
+      findings: [],
+      overall_correctness: "patch is correct",
+      overall_explanation: "No actionable findings remain.",
+      overall_confidence_score: 0.9,
+      stop_review_loop: true,
+      reviewer_error: null,
+    });
+  }
+
   test("loads and has correct shape", async () => {
     const mod = await import("../../packages/workflows/builtin/ralph.js");
     assertWorkflowDefinition(mod.default);
@@ -193,7 +207,7 @@ describe("ralph", () => {
       { prompt: "Refactor tests", max_loops: 5 },
       {
         task: (name) => {
-          if (name.startsWith("reviewer-")) return "overall_correctness: patch is correct";
+          if (name.startsWith("reviewer-")) return approvedReviewJson();
           return undefined;
         },
       },
@@ -203,10 +217,38 @@ describe("ralph", () => {
 
     assert.deepEqual(ctx.calls.stage, []);
     assert.ok(ctx.calls.task.includes("planner-1"));
+    const plannerPrompt = ctx.calls.prompts["planner-1"]?.[0] ?? "";
+    assert.match(plannerPrompt, /investigation-first RFC authoring/);
+    assert.match(plannerPrompt, /report after investigation, not a substitute/);
     assert.ok(ctx.calls.task.includes("orchestrator-1"));
+    const orchestratorPrompt = ctx.calls.prompts["orchestrator-1"]?.[0] ?? "";
+    assert.match(orchestratorPrompt, /not the implementer/);
+    assert.match(orchestratorPrompt, /completion report, not the task itself/);
+    assert.match(orchestratorPrompt, /Use the `todo` tool as your active control ledger/);
+    assert.match(orchestratorPrompt, /After subagents have done the work/);
     assert.ok(ctx.calls.task.includes("code-simplifier-1"));
+    const simplifierPrompt = ctx.calls.prompts["code-simplifier-1"]?.[0] ?? "";
+    assert.match(simplifierPrompt, /active code-refinement stage, not just a commentary stage/);
+    assert.match(simplifierPrompt, /edits actually applied from observations only/);
     assert.ok(ctx.calls.parallel.some((names) => names.includes("infra-locate-1") && names.includes("infra-patterns-1")));
+    const locatePrompt = ctx.calls.prompts["infra-locate-1"]?.[0] ?? "";
+    assert.match(locatePrompt, /repository-discovery stage/);
+    assert.match(locatePrompt, /not a substitute for discovery/);
+    const analyzePrompt = ctx.calls.prompts["infra-analyze-1"]?.[0] ?? "";
+    assert.match(analyzePrompt, /actual repository coupling, not generic integration risks/);
+    assert.match(analyzePrompt, /Copy validation commands from actual repository scripts/);
+    const patternsPrompt = ctx.calls.prompts["infra-patterns-1"]?.[0] ?? "";
+    assert.match(patternsPrompt, /evidence-gathering stage for repository conventions/);
+    assert.match(patternsPrompt, /Do not describe generic best practices/);
     assert.ok(ctx.calls.parallel.some((names) => names.includes("reviewer-1-a") && names.includes("reviewer-1-b")));
+    const reviewerPrompt = ctx.calls.prompts["reviewer-1-a"]?.[0] ?? "";
+    assert.match(reviewerPrompt, /grumpy senior developer/);
+    assert.match(reviewerPrompt, /download or install them/);
+    assert.match(reviewerPrompt, /only valid after you inspect the actual repository state/);
+    assert.match(reviewerPrompt, /parsing the JSON object returned by this tool/);
+    const reviewerOptions = ctx.calls.taskOptions["reviewer-1-a"]?.[0];
+    assert.ok(reviewerOptions?.customTools?.some((tool) => tool.name === "review_decision"));
+    assert.equal(ctx.calls.parallelOptions.at(-1)?.failFast, false);
     assert.equal(result["approved"], true);
     assert.equal(result["iterations_completed"], 1);
   });
@@ -218,8 +260,28 @@ describe("ralph", () => {
       { prompt: "test task", max_loops: 2 },
       {
         task: (name) => {
-          if (name === "reviewer-1-a" || name === "reviewer-1-b") return "ACTIONABLE: cover edge cases";
-          if (name === "reviewer-2-a" || name === "reviewer-2-b") return "overall_correctness: patch is correct";
+          if (name === "reviewer-1-a" || name === "reviewer-1-b") {
+            return JSON.stringify({
+              findings: [
+                {
+                  title: "[P2] Cover edge cases",
+                  body: "This scenario still lacks coverage for the changed behavior.",
+                  confidence_score: 0.8,
+                  priority: 2,
+                  code_location: {
+                    absolute_file_path: "/tmp/example.test.ts",
+                    line_range: { start: 1, end: 1 },
+                  },
+                },
+              ],
+              overall_correctness: "patch is incorrect",
+              overall_explanation: "Actionable findings remain.",
+              overall_confidence_score: 0.8,
+              stop_review_loop: false,
+              reviewer_error: null,
+            });
+          }
+          if (name === "reviewer-2-a" || name === "reviewer-2-b") return approvedReviewJson();
           return undefined;
         },
       },
@@ -232,6 +294,25 @@ describe("ralph", () => {
     assert.equal(result["approved"], true);
     assert.equal(result["iterations_completed"], 2);
     assert.match(String(result["review_report"]), /patch is correct/);
+  });
+
+  test("does not approve reviewer output unless the structured object parses", async () => {
+    const mod = await import("../../packages/workflows/builtin/ralph.js");
+    const d = mod.default as unknown as WorkflowDefinition;
+    const ctx = makeMockCtx(
+      { prompt: "test task", max_loops: 1 },
+      {
+        task: (name) => {
+          if (name.startsWith("reviewer-")) return "overall_correctness: patch is correct";
+          return undefined;
+        },
+      },
+    );
+
+    const result = await d.run(ctx);
+
+    assert.equal(result["approved"], false);
+    assert.equal(result["iterations_completed"], 1);
   });
 });
 

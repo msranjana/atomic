@@ -49,6 +49,7 @@ function makeHandle(
   },
   messages: AgentSession["messages"] = [],
   status: StageControlHandle["status"] = "running",
+  agentSession?: AgentSession,
 ): { handle: StageControlHandle; state: HandleState; emit: (event: AgentSessionEvent) => void } {
   let listener: ((e: AgentSessionEvent) => void) | undefined;
   let handleStatus = status;
@@ -65,6 +66,7 @@ function makeHandle(
       return state.isStreaming;
     },
     messages,
+    agentSession,
     async ensureAttached() {},
     async prompt(text: string) {
       state.promptCalls.push(text);
@@ -190,6 +192,49 @@ function assistantTextMessage(text: string): AgentSession["messages"][number] {
 }
 
 describe("StageChatView", () => {
+  test("header duration freezes while the stage is paused", () => {
+    const originalNow = Date.now;
+    try {
+      Date.now = () => 71_000;
+      const store = createStore();
+      store.recordRunStart({
+        id: "run-1",
+        name: "test-wf",
+        inputs: {},
+        status: "running",
+        stages: [],
+        startedAt: 1_000,
+      });
+      store.recordStageStart("run-1", {
+        id: "stage-a",
+        name: "review-a",
+        status: "paused",
+        parentIds: [],
+        toolEvents: [],
+        startedAt: 1_000,
+        pausedAt: 11_000,
+      });
+      const { handle } = makeHandle(undefined, [], "paused");
+      const view = new StageChatView({
+        store,
+        graphTheme: deriveGraphTheme({}),
+        runId: "run-1",
+        stageId: "stage-a",
+        workflowName: "test-wf",
+        handle,
+        onDetach: () => {},
+        onClose: () => {},
+      });
+
+      const rendered = stripAnsi(view.render(96).join("\n"));
+      assert.match(rendered, /10s/);
+      assert.doesNotMatch(rendered, /1m 10s/);
+      view.dispose();
+    } finally {
+      Date.now = originalNow;
+    }
+  });
+
   test("uses coding-agent CustomEditor when pi overlay host objects are provided", async () => {
     const store = createStore();
     setupRun(store, "run-1", "stage-a", "pending");
@@ -318,10 +363,10 @@ describe("StageChatView", () => {
     view.dispose();
   });
 
-  test("running Enter calls handle.steer by default", async () => {
+  test("streaming Enter queues steering without clearing the live transcript", async () => {
     const store = createStore();
     setupRun(store, "run-1", "stage-a");
-    const { handle, state } = makeHandle({
+    const { handle, state, emit } = makeHandle({
       promptCalls: [],
       steerCalls: [],
       followUpCalls: [],
@@ -339,19 +384,86 @@ describe("StageChatView", () => {
       onDetach: () => {},
       onClose: () => {},
     });
+
+    emit({
+      type: "message_start",
+      message: { role: "assistant", content: [] },
+    } as unknown as AgentSessionEvent);
+    emit({
+      type: "message_update",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "partial answer" }],
+      },
+    } as unknown as AgentSessionEvent);
+
     for (const ch of "redirect") view.handleInput(ch);
     view.handleInput("\r");
     await flush();
     await flush();
+
     assert.deepEqual(state.steerCalls, ["redirect"]);
     assert.equal(state.promptCalls.length, 0);
+    assert.equal(view._transcript.some((entry) => entry.role === "user" && entry.text === "redirect"), false);
+    assert.equal(view._transcript.at(-1)?.role, "assistant");
+    assert.equal(view._transcript.at(-1)?.text, "partial answer");
+
+    emit({
+      type: "queue_update",
+      steering: ["redirect"],
+      followUp: [],
+    } as unknown as AgentSessionEvent);
+    assert.match(stripAnsi(view.render(96).join("\n")), /Steering: redirect/);
+
+    emit({
+      type: "message_update",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "partial answer continued" }],
+      },
+    } as unknown as AgentSessionEvent);
+    assert.equal(view._transcript.at(-1)?.role, "assistant");
+    assert.equal(view._transcript.at(-1)?.text, "partial answer continued");
+    assert.equal(view._transcript.some((entry) => entry.role === "user" && entry.text === "redirect"), false);
+
+    emit({ type: "queue_update", steering: [], followUp: [] } as unknown as AgentSessionEvent);
+    emit({
+      type: "message_start",
+      message: { role: "user", content: "redirect" },
+    } as unknown as AgentSessionEvent);
+    emit({
+      type: "message_end",
+      message: { role: "user", content: "redirect" },
+    } as unknown as AgentSessionEvent);
+    assert.equal(view._transcript.filter((entry) => entry.role === "user" && entry.text === "redirect").length, 1);
+    assert.doesNotMatch(stripAnsi(view.render(96).join("\n")), /Steering: redirect/);
     view.dispose();
   });
 
-  test("ctrl+f sends a follow-up", async () => {
+  test("streaming Enter uses AgentSession prompt steering when available", async () => {
     const store = createStore();
     setupRun(store, "run-1", "stage-a");
-    const { handle, state } = makeHandle();
+    const promptCalls: Array<{
+      text: string;
+      streamingBehavior: "steer" | "followUp" | undefined;
+    }> = [];
+    const agentSession = {
+      isStreaming: true,
+      prompt: async (
+        text: string,
+        options?: { streamingBehavior?: "steer" | "followUp" },
+      ) => {
+        promptCalls.push({ text, streamingBehavior: options?.streamingBehavior });
+      },
+    } as unknown as AgentSession;
+    const { handle, state } = makeHandle({
+      promptCalls: [],
+      steerCalls: [],
+      followUpCalls: [],
+      pauseCalls: 0,
+      resumeCalls: [],
+      isStreaming: true,
+    }, [], "running", agentSession);
     const view = new StageChatView({
       store,
       graphTheme: deriveGraphTheme({}),
@@ -362,12 +474,72 @@ describe("StageChatView", () => {
       onDetach: () => {},
       onClose: () => {},
     });
-    for (const ch of "afterwards") view.handleInput(ch);
-    view.handleInput("\x06");
+    for (const ch of "redirect") view.handleInput(ch);
+    view.handleInput("\r");
     await flush();
     await flush();
-    assert.deepEqual(state.followUpCalls, ["afterwards"]);
+    assert.deepEqual(promptCalls, [{ text: "redirect", streamingBehavior: "steer" }]);
+    assert.deepEqual(state.steerCalls, []);
+    assert.deepEqual(state.promptCalls, []);
+    assert.equal(view._transcript.some((entry) => entry.role === "user" && entry.text === "redirect"), false);
     view.dispose();
+  });
+
+  test("streaming UI state steers even if the handle has not caught up", async () => {
+    const store = createStore();
+    setupRun(store, "run-1", "stage-a");
+    const { handle, state, emit } = makeHandle({
+      promptCalls: [],
+      steerCalls: [],
+      followUpCalls: [],
+      pauseCalls: 0,
+      resumeCalls: [],
+      isStreaming: false,
+    });
+    const view = new StageChatView({
+      store,
+      graphTheme: deriveGraphTheme({}),
+      runId: "run-1",
+      stageId: "stage-a",
+      workflowName: "test-wf",
+      handle,
+      onDetach: () => {},
+      onClose: () => {},
+    });
+    emit({ type: "agent_start" } as unknown as AgentSessionEvent);
+    for (const ch of "redirect") view.handleInput(ch);
+    view.handleInput("\r");
+    await flush();
+    await flush();
+    assert.deepEqual(state.steerCalls, ["redirect"]);
+    assert.deepEqual(state.promptCalls, []);
+    view.dispose();
+  });
+
+  test("ctrl+f variants send a follow-up", async () => {
+    const ctrlFVariants = ["\x06", "\x1b[102;5u", "\x1b[102;5:1u", "\x1b[27;5;102~"];
+
+    for (const key of ctrlFVariants) {
+      const store = createStore();
+      setupRun(store, "run-1", "stage-a");
+      const { handle, state } = makeHandle();
+      const view = new StageChatView({
+        store,
+        graphTheme: deriveGraphTheme({}),
+        runId: "run-1",
+        stageId: "stage-a",
+        workflowName: "test-wf",
+        handle,
+        onDetach: () => {},
+        onClose: () => {},
+      });
+      for (const ch of "afterwards") view.handleInput(ch);
+      view.handleInput(key);
+      await flush();
+      await flush();
+      assert.deepEqual(state.followUpCalls, ["afterwards"], JSON.stringify(key));
+      view.dispose();
+    }
   });
 
   test("Escape interrupts a pending streaming stage without replacing the chat UI", async () => {
@@ -633,29 +805,73 @@ describe("StageChatView", () => {
     view.dispose();
   });
 
-  test("Ctrl+D calls onDetach", () => {
-    const store = createStore();
-    setupRun(store, "run-1", "stage-a");
-    const { handle } = makeHandle();
-    let detached = 0;
-    const view = new StageChatView({
-      store,
-      graphTheme: deriveGraphTheme({}),
-      runId: "run-1",
-      stageId: "stage-a",
-      workflowName: "test-wf",
-      handle,
-      onDetach: () => {
-        detached += 1;
-      },
-      onClose: () => {},
-    });
-    view.handleInput("\x04");
-    assert.equal(detached, 1);
-    view.dispose();
+  test("Ctrl+D variants call onDetach", () => {
+    const ctrlDVariants = [
+      "\x04",
+      "\x1b[100;5u",
+      "\x1b[100;5:1u",
+      "\x1b[27;5;100~",
+    ];
+
+    for (const key of ctrlDVariants) {
+      const store = createStore();
+      setupRun(store, "run-1", "stage-a");
+      const { handle } = makeHandle();
+      let detached = 0;
+      const view = new StageChatView({
+        store,
+        graphTheme: deriveGraphTheme({}),
+        runId: "run-1",
+        stageId: "stage-a",
+        workflowName: "test-wf",
+        handle,
+        onDetach: () => {
+          detached += 1;
+        },
+        onClose: () => {},
+      });
+      view.handleInput(key);
+      assert.equal(detached, 1, JSON.stringify(key));
+      view.dispose();
+    }
   });
 
-  test("Escape variants on settled stages and Ctrl+C call onClose", () => {
+  test("Ctrl+D variants close a paused stage chat", () => {
+    const ctrlDVariants = [
+      "\x04",
+      "\x1b[100;5u",
+      "\x1b[100;5:1u",
+      "\x1b[27;5;100~",
+    ];
+
+    for (const key of ctrlDVariants) {
+      const store = createStore();
+      setupRun(store, "run-1", "stage-a", "paused");
+      const { handle } = makeHandle(undefined, [], "paused");
+      let detached = 0;
+      let closed = 0;
+      const view = new StageChatView({
+        store,
+        graphTheme: deriveGraphTheme({}),
+        runId: "run-1",
+        stageId: "stage-a",
+        workflowName: "test-wf",
+        handle,
+        onDetach: () => {
+          detached += 1;
+        },
+        onClose: () => {
+          closed += 1;
+        },
+      });
+      view.handleInput(key);
+      assert.equal(closed, 1, JSON.stringify(key));
+      assert.equal(detached, 0, JSON.stringify(key));
+      view.dispose();
+    }
+  });
+
+  test("Escape variants and Ctrl+C variants on settled stages call onClose", () => {
     const store = createStore();
     setupRun(store, "run-1", "stage-a", "completed");
     let closed = 0;
@@ -670,10 +886,19 @@ describe("StageChatView", () => {
         closed += 1;
       },
     });
-    for (const key of ["\x1b", "\x1b[27u", "\x1b[27;1;27~", "\x03"]) {
+    const closeKeys = [
+      "\x1b",
+      "\x1b[27u",
+      "\x1b[27;1;27~",
+      "\x03",
+      "\x1b[99;5u",
+      "\x1b[99;5:1u",
+      "\x1b[27;5;99~",
+    ];
+    for (const key of closeKeys) {
       view.handleInput(key);
     }
-    assert.equal(closed, 4);
+    assert.equal(closed, closeKeys.length);
     view.dispose();
   });
 

@@ -174,7 +174,7 @@ type MessageWithTextContent = {
   readonly content?: string | readonly TextLikeContent[];
 };
 
-function extractAssistantText(message: AgentSession["messages"][number]): string {
+function extractMessageText(message: AgentSession["messages"][number]): string {
   const { content } = message as MessageWithTextContent;
   if (typeof content === "string") return content;
   if (Array.isArray(content)) {
@@ -186,11 +186,11 @@ function extractAssistantText(message: AgentSession["messages"][number]): string
   return "";
 }
 
-function lastAssistantTextFromMessages(messages: AgentSession["messages"]): string | undefined {
+function lastOutputTextFromMessages(messages: AgentSession["messages"]): string | undefined {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
-    if (!message || message.role !== "assistant") continue;
-    const text = extractAssistantText(message).trim();
+    if (!message || (message.role !== "assistant" && message.role !== "toolResult")) continue;
+    const text = extractMessageText(message).trim();
     if (text) return text;
   }
   return undefined;
@@ -217,7 +217,7 @@ function lastAssistantTextFromSession(
   if (!activeSession) return fallback;
   const direct = activeSession.getLastAssistantText?.();
   if (direct !== undefined && direct.trim()) return direct;
-  return lastAssistantTextFromMessages(activeSession.messages) ?? direct ?? fallback;
+  return lastOutputTextFromMessages(activeSession.messages) ?? direct ?? fallback;
 }
 
 const DEFAULT_MAX_OUTPUT_BYTES = 200 * 1024;

@@ -442,14 +442,23 @@ describe("GraphView keyboard navigation", () => {
     view.dispose();
   });
 
-  it("Escape variants and Ctrl+C call onClose", () => {
+  it("Escape variants and Ctrl+C variants call onClose", () => {
     const stages = [makeStage("A")];
     const onClose = mock(() => {});
     const view = makeView(stages, onClose);
-    for (const key of ["\x1b", "\x1b[27u", "\x1b[27;1;27~", "\x03"]) {
+    const closeKeys = [
+      "\x1b",
+      "\x1b[27u",
+      "\x1b[27;1;27~",
+      "\x03",
+      "\x1b[99;5u",
+      "\x1b[99;5:1u",
+      "\x1b[27;5;99~",
+    ];
+    for (const key of closeKeys) {
       view.handleInput(key);
     }
-    assert.equal(onClose.mock.calls.length, 4);
+    assert.equal(onClose.mock.calls.length, closeKeys.length);
     view.dispose();
   });
 
@@ -625,6 +634,33 @@ describe("GraphView keyboard navigation", () => {
     assert.match(afterNav, /╭.*child-5/);
     assert.doesNotMatch(afterNav, /^\s*○ child-5\s+pending/m);
     view.dispose();
+  });
+
+  it("Ctrl+D variants detach in overlay graph mode", () => {
+    const ctrlDVariants = [
+      "\x04",
+      "\x1b[100;5u",
+      "\x1b[100;5:1u",
+      "\x1b[27;5;100~",
+    ];
+
+    for (const key of ctrlDVariants) {
+      const snap = makeSnap([makeStage("A")]);
+      const store = makeStore(snap);
+      let detached = 0;
+      const view = new GraphView({
+        mode: "overlay",
+        runId: "run-1",
+        store,
+        graphTheme: defaultTheme,
+        onDetach: () => {
+          detached += 1;
+        },
+      });
+      view.handleInput(key);
+      assert.equal(detached, 1, JSON.stringify(key));
+      view.dispose();
+    }
   });
 
   it("render returns lines in overlay mode", () => {

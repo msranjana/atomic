@@ -51,6 +51,7 @@ import {
   type WorktreeSetup,
 } from "../shared/worktree.js";
 import { store as defaultStore } from "../../shared/store.js";
+import { elapsedStageMs } from "../../shared/timing.js";
 import {
   appendRunStart,
   appendStageStart,
@@ -1520,10 +1521,7 @@ export async function run<TInputs extends Record<string, unknown>>(
           throw err;
         } finally {
           stageSnapshot.endedAt = Date.now();
-          stageSnapshot.durationMs =
-            stageSnapshot.startedAt !== undefined
-              ? stageSnapshot.endedAt - stageSnapshot.startedAt
-              : undefined;
+          stageSnapshot.durationMs = elapsedStageMs(stageSnapshot, stageSnapshot.endedAt);
 
           const finalModelMeta = innerCtx.__modelFallbackMeta();
           if (finalModelMeta.model !== undefined) stageSnapshot.model = finalModelMeta.model;

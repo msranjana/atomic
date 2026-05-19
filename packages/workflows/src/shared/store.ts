@@ -13,6 +13,7 @@ import type {
   RunStatus,
   WorkflowNotice,
 } from "./store-types.js";
+import { accumulatePausedDurationMs, elapsedRunMs } from "./timing.js";
 
 /** Statuses that represent a terminal run state — cannot be overwritten. */
 const TERMINAL_STATUSES: ReadonlySet<RunStatus> = new Set(["completed", "failed", "killed"]);
@@ -263,6 +264,14 @@ export function createStore(): Store {
       if (!existing) return;
       existing.status = stage.status;
       existing.endedAt = stage.endedAt;
+      if (existing.endedAt !== undefined && existing.pausedAt !== undefined) {
+        existing.pausedDurationMs = accumulatePausedDurationMs(
+          existing.pausedDurationMs,
+          existing.pausedAt,
+          existing.endedAt,
+        );
+        existing.pausedAt = undefined;
+      }
       existing.durationMs = stage.durationMs;
       existing.result = stage.result;
       existing.error = stage.error;
@@ -283,7 +292,15 @@ export function createStore(): Store {
       if (TERMINAL_STATUSES.has(run.status)) return false;
       run.status = status;
       run.endedAt = Date.now();
-      run.durationMs = run.endedAt - run.startedAt;
+      if (run.pausedAt !== undefined) {
+        run.pausedDurationMs = accumulatePausedDurationMs(
+          run.pausedDurationMs,
+          run.pausedAt,
+          run.endedAt,
+        );
+        run.pausedAt = undefined;
+      }
+      run.durationMs = elapsedRunMs(run, run.endedAt);
       if (status === "completed" && result !== undefined) {
         run.result = result;
       }
@@ -547,8 +564,16 @@ export function createStore(): Store {
       const stage = findStage(run, stageId);
       if (!stage) return false;
       if (stage.status !== "paused" && stage.status !== "blocked") return false;
+      const resumedTs = resumedAt ?? Date.now();
       stage.status = "running";
-      stage.resumedAt = resumedAt ?? Date.now();
+      if (stage.startedAt !== undefined) {
+        stage.pausedDurationMs = accumulatePausedDurationMs(
+          stage.pausedDurationMs,
+          stage.pausedAt,
+          resumedTs,
+        );
+      }
+      stage.resumedAt = resumedTs;
       stage.pausedAt = undefined;
       delete stage.blockedByStageId;
       delete stage.awaitingInputSince;
@@ -557,23 +582,33 @@ export function createStore(): Store {
       return true;
     },
 
-    recordRunPaused(runId: string, _pausedAt?: number): boolean {
+    recordRunPaused(runId: string, pausedAt?: number): boolean {
       const run = findRun(runId);
       if (!run) return false;
       if (TERMINAL_STATUSES.has(run.status)) return false;
       if (run.status === "paused") return false;
       run.status = "paused";
+      run.pausedAt = pausedAt ?? Date.now();
+      run.resumedAt = undefined;
       _version++;
       notify();
       return true;
     },
 
-    recordRunResumed(runId: string, _resumedAt?: number): boolean {
+    recordRunResumed(runId: string, resumedAt?: number): boolean {
       const run = findRun(runId);
       if (!run) return false;
       if (TERMINAL_STATUSES.has(run.status)) return false;
       if (run.status !== "paused") return false;
+      const resumedTs = resumedAt ?? Date.now();
       run.status = "running";
+      run.pausedDurationMs = accumulatePausedDurationMs(
+        run.pausedDurationMs,
+        run.pausedAt,
+        resumedTs,
+      );
+      run.resumedAt = resumedTs;
+      run.pausedAt = undefined;
       _version++;
       notify();
       return true;
