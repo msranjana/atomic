@@ -2,9 +2,9 @@
 
 This document describes the GitHub Actions workflows for the Atomic monorepo and the single publishable npm package, `@bastani/atomic`.
 
-`@bastani/atomic` lives in `packages/coding-agent`. It is the Atomic-branded coding-agent CLI package and now bundles the first-party workflows extension plus the companion pi packages into its published tarball under `dist/builtin/`.
+`@bastani/atomic` lives in `packages/coding-agent`. It is the Atomic-branded coding-agent CLI package and bundles the first-party workflows, subagents, MCP, web-access, and intercom packages into its published tarball under `dist/builtin/`.
 
-No other workspace package is published. In particular, `packages/workflows` is a private workspace package that is copied into `@bastani/atomic` at build time.
+No other workspace package is published. The companion packages under `packages/*` remain private and are copied into `@bastani/atomic` at build time.
 
 ## Workflow Overview
 
@@ -20,15 +20,19 @@ Pull request / push
 v<version> tag pushed
   ├─ smoke test Linux x64 release archive in a dedicated job
   ├─ smoke test Windows x64 release archive in a dedicated job
-  ├─ validate tag matches packages/coding-agent/package.json
-  ├─ validate packages/workflows is private
-  ├─ bun run typecheck && bun run test:all
-  ├─ scripts/build-binaries.sh (regular build + cross-compile 6 targets)
-  ├─ validate dist/builtin contains all bundled extensions
-  ├─ extract release notes from packages/coding-agent/CHANGELOG.md
-  ├─ bun pm pack --dry-run from packages/coding-agent
-  ├─ npm publish --provenance from packages/coding-agent
-  └─ create GitHub Release with binaries attached
+  └─ publish after both smoke jobs pass
+     ├─ resolve and validate the release tag
+     ├─ bun install --frozen-lockfile
+     ├─ bun run typecheck && bun run test:all
+     ├─ validate package metadata, synced versions, and private bundled packages
+     ├─ scripts/build-binaries.sh (regular build + cross-compile 6 targets)
+     ├─ validate dist/builtin contains all bundled extensions
+     ├─ extract release notes from packages/coding-agent/CHANGELOG.md
+     ├─ check whether the npm version already exists
+     ├─ bun pm pack --dry-run from packages/coding-agent when publishing
+     ├─ npm publish --provenance --tag "$NPM_TAG" from packages/coding-agent when needed
+     ├─ determine GitHub Release type
+     └─ create GitHub Release with binaries attached
 ```
 
 ## Package Shape
@@ -43,15 +47,15 @@ The only publishable workspace package is `packages/coding-agent/package.json`:
 - `types`: `./dist/index.d.ts`
 - package version: shared by all `packages/*` packages
 
-Bundled builtin pi packages copied into `packages/coding-agent/dist/builtin/` during `bun run build`:
+Bundled builtin packages copied into `packages/coding-agent/dist/builtin/` during `bun run build`:
 
-- `workflows` from `packages/workflows`
-- `pi-subagents`
-- `pi-mcp-adapter`
-- `pi-web-access`
-- `pi-intercom`
+- `workflows` from `packages/workflows` (`@bastani/workflows`)
+- `subagents` from `packages/subagents` (`@bastani/subagents`)
+- `mcp` from `packages/mcp` (`@bastani/mcp`)
+- `web-access` from `packages/web-access` (`@bastani/web-access`)
+- `intercom` from `packages/intercom` (`@bastani/intercom`)
 
-`packages/workflows` remains in the workspace for source organization and tests, but is marked `private: true` and must not be published independently.
+These companion packages remain in the workspace for source organization and tests, but are marked `private: true` and must not be published independently.
 
 ---
 
@@ -76,19 +80,19 @@ Steps:
 6. Run `bun run test:unit`.
 7. Run `bun run test:integration`.
 8. Build the native release binary with `scripts/build-binaries.sh --platform <native-x64>`.
-9. Extract the generated release archive and run `atomic --version` from the extracted binary.
+9. Extract the generated release archive and run `atomic --version` from the extracted binary. The PR/push smoke tests do not run the longer `--no-session` runtime smoke; that coverage is reserved for the release smoke jobs.
 
 ### Code Review (`code-review.yml`)
 
-Runs Claude-powered automated code review on pull requests.
+Runs Claude-powered automated code review when pull requests are opened or synchronized.
 
 ### PR Description (`pr-description.yml`)
 
-Generates or updates pull request descriptions.
+Generates or updates pull request descriptions when pull requests are opened or synchronized, except for Dependabot-authored pull requests.
 
 ### Claude Interactive (`claude.yml`)
 
-Responds to `@claude` mentions in issues and pull requests.
+Responds to `@claude` mentions in issue comments, pull request review comments, submitted pull request reviews, and newly opened or assigned issues.
 
 ---
 
@@ -140,23 +144,26 @@ git push origin v0.8.0
        └─ after both smoke jobs pass
           ▼
 Publish @bastani/atomic
+  · resolve and validate the tag name
   · checkout the tag
-  · setup Bun and Node (Node 24 only for npm provenance publish)
+  · setup Bun and Node (Node 24 for npm provenance publish)
   · bun install --frozen-lockfile
   · bun run typecheck && bun run test:all
   · validate tag matches packages/coding-agent/package.json
-  · validate packages/workflows is private
+  · validate every package manifest has a synced version
+  · validate bundled packages remain private and are not independently publishable
   · scripts/build-binaries.sh
       - bun run build (regular dist/)
       - bun build --compile --target=bun-<platform> for all 6 targets
       - assemble per-platform asset trees
       - produce atomic-<platform>.tar.gz / .zip in packages/coding-agent/binaries/
-  · validate dist/builtin has workflows, pi-subagents, pi-mcp-adapter, pi-web-access, pi-intercom
+  · validate dist/builtin has workflows, subagents, mcp, web-access, intercom
   · extract release notes from packages/coding-agent/CHANGELOG.md
   · determine npm tag: latest or next
   · skip publish if version already exists on npm
   · cd packages/coding-agent && bun pm pack --dry-run
-  · cd packages/coding-agent && npm publish --provenance --access public
+  · cd packages/coding-agent && npm publish --provenance --access public --tag "$NPM_TAG" --registry https://registry.npmjs.org
+  · determine GitHub Release prerelease/latest settings
        │
        ▼
 Create GitHub Release with softprops/action-gh-release@v3
@@ -202,10 +209,10 @@ CI must publish exactly one npm package: `@bastani/atomic` from `packages/coding
 Do not add publish steps for:
 
 - `@bastani/workflows`
-- `pi-subagents`
-- `pi-mcp-adapter`
-- `pi-web-access`
-- `pi-intercom`
+- `@bastani/subagents`
+- `@bastani/mcp`
+- `@bastani/web-access`
+- `@bastani/intercom`
 - any other `packages/*` workspace
 
 Those extensions are bundled into `@bastani/atomic` by `packages/coding-agent/scripts/copy-builtin-packages.ts`.
@@ -230,11 +237,11 @@ The meaningful pre-publish checks are:
 
 | File | Trigger | Purpose |
 |------|---------|---------|
-| `test.yml` | Push to `main`, PR to `main` | Install, typecheck, build `@bastani/atomic`, unit tests, integration tests |
+| `test.yml` | Push to `main`, PR to `main` | Install, typecheck, build `@bastani/atomic`, unit/integration tests, build native Linux/Windows binaries, and run `atomic --version` archive smoke tests |
 | `publish.yml` | `v*` tag push, manual dispatch with tag input | Smoke test Linux/Windows binaries in parallel, build binaries, publish `@bastani/atomic` to npm with OIDC provenance, create GitHub Release with binaries |
-| `code-review.yml` | PR events | Claude-powered code review |
-| `pr-description.yml` | PR events | PR description generation |
-| `claude.yml` | `@claude` mentions and configured issue/PR events | Interactive Claude assistant |
+| `code-review.yml` | PR opened/synchronized | Claude-powered code review |
+| `pr-description.yml` | PR opened/synchronized | Claude-powered PR description generation, skipped for Dependabot |
+| `claude.yml` | Issue/PR comments, issues, PR reviews | Interactive Claude assistant gated on `@claude` mentions |
 
 ---
 
@@ -257,12 +264,20 @@ The meaningful pre-publish checks are:
    cd ../..
    bun run test:unit
    bun run test:integration
+   ./scripts/build-binaries.sh --platform linux-x64
+   tmpdir=$(mktemp -d)
+   tar -xzf packages/coding-agent/binaries/atomic-linux-x64.tar.gz -C "$tmpdir"
+   "$tmpdir/atomic/atomic" --version
+   rm -rf "$tmpdir"
    ```
+
+   On Windows, substitute `--platform windows-x64`, extract `atomic-windows-x64.zip`, and run `atomic.exe --version`.
 
 4. Commit and tag:
 
    ```sh
-   git add packages/*/package.json packages/*/README.md packages/coding-agent/CHANGELOG.md bun.lock
+   git add packages/*/package.json packages/coding-agent/CHANGELOG.md bun.lock
+   git add packages/*/README.md # only if the version bump script changed README badges
    git commit -m "chore(release): bump to v0.8.0"
    git tag v0.8.0
    git push origin main
