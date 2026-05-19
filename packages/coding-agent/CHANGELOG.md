@@ -6,6 +6,18 @@
 
 - Reintroduced `/atomic` as an interactive guide with options for overview, examples, workflows, and release notes.
 
+## [0.8.9] - 2026-05-19
+
+### Changed
+
+- Prepared the 0.8.9 release.
+
+## [0.8.9-0] - 2026-05-19
+
+### Changed
+
+- Prepared the 0.8.9-0 prerelease.
+
 ## [0.8.8] - 2026-05-19
 
 ### Changed
