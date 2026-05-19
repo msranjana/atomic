@@ -29,6 +29,7 @@ import type {
   StoreSnapshot,
   RunSnapshot,
 } from "../shared/store-types.js";
+import { elapsedRunMs } from "../shared/timing.js";
 import type { PiTheme } from "./store-widget-installer.js";
 import { renderBandHeader } from "./header.js";
 import type { BandBadge } from "./header.js";
@@ -166,7 +167,7 @@ function elapsedLabel(run: RunSnapshot, now: number): string {
     if (run.status === "killed") return `killed · ${ago} ago`;
     return `${run.status} · ${ago} ago`;
   }
-  if (run.startedAt != null) return formatDuration(now - run.startedAt);
+  if (run.startedAt != null) return formatDuration(elapsedRunMs(run, now));
   return "";
 }
 

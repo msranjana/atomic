@@ -26,6 +26,7 @@
  */
 
 import type { StageSnapshot, StageStatus } from "../shared/store-types.js";
+import { elapsedStageMs } from "../shared/timing.js";
 import type { GraphTheme } from "./graph-theme.js";
 import { fmtDuration, statusIcon } from "./status-helpers.js";
 import { lerpColor, hexToAnsi, hexBg, paint, RESET, BOLD } from "./color-utils.js";
@@ -111,9 +112,8 @@ function blockedBadgeText(
 }
 
 function durationText(stage: StageSnapshot): string {
-  if (stage.durationMs != null) return fmtDuration(stage.durationMs);
-  if (stage.startedAt != null) return fmtDuration(Date.now() - stage.startedAt);
-  return "—";
+  const elapsed = elapsedStageMs(stage);
+  return elapsed === undefined ? "—" : fmtDuration(elapsed);
 }
 
 function metaText(stage: StageSnapshot): string {

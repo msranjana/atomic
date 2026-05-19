@@ -190,6 +190,49 @@ function assistantTextMessage(text: string): AgentSession["messages"][number] {
 }
 
 describe("StageChatView", () => {
+  test("header duration freezes while the stage is paused", () => {
+    const originalNow = Date.now;
+    try {
+      Date.now = () => 71_000;
+      const store = createStore();
+      store.recordRunStart({
+        id: "run-1",
+        name: "test-wf",
+        inputs: {},
+        status: "running",
+        stages: [],
+        startedAt: 1_000,
+      });
+      store.recordStageStart("run-1", {
+        id: "stage-a",
+        name: "review-a",
+        status: "paused",
+        parentIds: [],
+        toolEvents: [],
+        startedAt: 1_000,
+        pausedAt: 11_000,
+      });
+      const { handle } = makeHandle(undefined, [], "paused");
+      const view = new StageChatView({
+        store,
+        graphTheme: deriveGraphTheme({}),
+        runId: "run-1",
+        stageId: "stage-a",
+        workflowName: "test-wf",
+        handle,
+        onDetach: () => {},
+        onClose: () => {},
+      });
+
+      const rendered = stripAnsi(view.render(96).join("\n"));
+      assert.match(rendered, /10s/);
+      assert.doesNotMatch(rendered, /1m 10s/);
+      view.dispose();
+    } finally {
+      Date.now = originalNow;
+    }
+  });
+
   test("uses coding-agent CustomEditor when pi overlay host objects are provided", async () => {
     const store = createStore();
     setupRun(store, "run-1", "stage-a", "pending");

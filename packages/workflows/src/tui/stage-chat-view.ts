@@ -66,6 +66,7 @@ import type {
 } from "@earendil-works/pi-tui";
 import type { Store } from "../shared/store.js";
 import type { StageNotice, StageSnapshot } from "../shared/store-types.js";
+import { elapsedStageMs } from "../shared/timing.js";
 import type { GraphTheme } from "./graph-theme.js";
 import type { StageControlHandle } from "../runs/foreground/stage-control-registry.js";
 import { BOLD, RESET, hexBg, hexToAnsi, lerpColor } from "./color-utils.js";
@@ -1462,10 +1463,9 @@ function tailStreamingText(text: string): string {
 }
 
 function stageDurationText(stage: StageSnapshot | undefined): string {
-  if (!stage?.startedAt) return "";
-  const end = stage.endedAt ?? Date.now();
-  const ms = Math.max(0, end - stage.startedAt);
-  return formatDuration(ms);
+  if (!stage) return "";
+  const elapsed = elapsedStageMs(stage);
+  return elapsed === undefined ? "" : formatDuration(elapsed);
 }
 
 function formatDuration(ms: number): string {

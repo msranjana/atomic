@@ -101,6 +101,8 @@ export interface StageSnapshot {
   attachable?: boolean;
   /** True while a user pane is actively attached to this stage. */
   attached?: boolean;
+  /** Milliseconds spent paused across completed pause intervals. */
+  pausedDurationMs?: number;
   /** Timestamp set when a controlled pause begins; cleared on resume. */
   pausedAt?: number;
   /** Timestamp recorded on the most recent resume from a paused state. */
@@ -116,6 +118,12 @@ export interface RunSnapshot {
   startedAt: number;
   endedAt?: number;
   durationMs?: number;
+  /** Milliseconds spent paused across completed pause intervals. */
+  pausedDurationMs?: number;
+  /** Timestamp set when a controlled pause begins; cleared on resume. */
+  pausedAt?: number;
+  /** Timestamp recorded on the most recent resume from a paused state. */
+  resumedAt?: number;
   result?: Record<string, unknown>;
   error?: string;
   /**

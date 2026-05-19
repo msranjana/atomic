@@ -19,6 +19,7 @@
  */
 
 import type { RunSnapshot } from "../shared/store-types.js";
+import { elapsedRunMs } from "../shared/timing.js";
 import type { GraphTheme } from "./graph-theme.js";
 import { keyText } from "@bastani/atomic";
 import { fmtDuration, statusIcon, statusColor } from "./status-helpers.js";
@@ -206,13 +207,7 @@ function renderFilterRow(inner: number, theme: GraphTheme, state: SessionPickerS
 }
 
 function fmtElapsed(run: RunSnapshot, now: number): string {
-  if (run.endedAt !== undefined && run.durationMs !== undefined) {
-    return fmtDuration(run.durationMs);
-  }
-  if (run.endedAt !== undefined) {
-    return fmtDuration(Math.max(0, run.endedAt - run.startedAt));
-  }
-  return fmtDuration(Math.max(0, now - run.startedAt));
+  return fmtDuration(elapsedRunMs(run, now));
 }
 
 function stageProgress(run: RunSnapshot): string {

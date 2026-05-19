@@ -36,7 +36,10 @@ function makeStage(opts: Partial<StageSnapshot> = {}): StageSnapshot {
     parentIds: opts.parentIds ?? [],
     toolEvents: opts.toolEvents ?? [],
     durationMs: opts.durationMs,
+    pausedDurationMs: opts.pausedDurationMs,
     startedAt: opts.startedAt,
+    pausedAt: opts.pausedAt,
+    resumedAt: opts.resumedAt,
     blockedByStageId: opts.blockedByStageId,
   };
 }
@@ -267,5 +270,32 @@ describe("renderNodeCard — duration line", () => {
     const body = stripAnsi(lines[1]!);
     // fmtDuration(65000) → "1m 5s" (per status-helpers.ts).
     assert.match(body, /1m 5s/);
+  });
+
+  test("freezes the duration line while paused and resumes active elapsed time", () => {
+    const originalNow = Date.now;
+    try {
+      Date.now = () => 71_000;
+      const paused = renderNodeCard(
+        makeStage({ status: "paused", startedAt: 1_000, pausedAt: 11_000 }),
+        { theme },
+      );
+      assert.match(stripAnsi(paused[1]!), /10s/);
+      assert.doesNotMatch(stripAnsi(paused[1]!), /1m/);
+
+      Date.now = () => 76_000;
+      const resumed = renderNodeCard(
+        makeStage({
+          status: "running",
+          startedAt: 1_000,
+          pausedDurationMs: 60_000,
+          resumedAt: 71_000,
+        }),
+        { theme },
+      );
+      assert.match(stripAnsi(resumed[1]!), /15s/);
+    } finally {
+      Date.now = originalNow;
+    }
   });
 });

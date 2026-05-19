@@ -20,6 +20,7 @@
 
 import { keyText } from "@bastani/atomic";
 import type { RunSnapshot } from "../shared/store-types.js";
+import { elapsedRunMs } from "../shared/timing.js";
 import type { GraphTheme } from "./graph-theme.js";
 import { fmtDuration } from "./status-helpers.js";
 import { hexToAnsi, hexBg, RESET, BOLD } from "./color-utils.js";
@@ -117,9 +118,7 @@ export function renderKillConfirm(opts: KillConfirmRenderOpts): string[] {
   const inner = Math.max(50, width - 2);
 
   const idShort = run.id.slice(0, 8);
-  const elapsed = run.endedAt !== undefined
-    ? fmtDuration(run.durationMs ?? Math.max(0, run.endedAt - run.startedAt))
-    : fmtDuration(Math.max(0, now - run.startedAt));
+  const elapsed = fmtDuration(elapsedRunMs(run, now));
   const stagesRunning = run.stages.filter((s) => s.status === "running").length;
   const stagesTotal = run.stages.length;
 

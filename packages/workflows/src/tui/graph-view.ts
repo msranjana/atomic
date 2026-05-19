@@ -30,6 +30,7 @@ import type {
   StoreSnapshot,
   RunSnapshot,
 } from "../shared/store-types.js";
+import { elapsedStageMs } from "../shared/timing.js";
 import type { GraphTheme } from "./graph-theme.js";
 import type { SwitcherState } from "./switcher.js";
 import type { LayoutNode } from "./layout.js";
@@ -146,8 +147,8 @@ const OVERLAY_VERTICAL_MARGIN_ROWS = 1;
 
 /**
  * Animation tick period. Overlay re-renders fire on this cadence so
- * duration counters (rendered from `Date.now() - stage.startedAt`)
- * tick and the running-stage border lerps between `borderDim` and
+ * duration counters tick from active elapsed time (freezing while paused)
+ * and the running-stage border lerps between `borderDim` and
  * `warning` without a key press. The host-supplied `requestRender`
  * gate prevents work while the overlay is hidden or unfocused.
  */
@@ -964,10 +965,8 @@ export class GraphView implements Component {
   }
 
   private _duration(stage: StageSnapshot): string {
-    if (stage.durationMs != null) return fmtDuration(stage.durationMs);
-    if (stage.startedAt != null)
-      return fmtDuration(Date.now() - stage.startedAt);
-    return "";
+    const elapsed = elapsedStageMs(stage);
+    return elapsed === undefined ? "" : fmtDuration(elapsed);
   }
 
   private _counts(run: RunSnapshot): {

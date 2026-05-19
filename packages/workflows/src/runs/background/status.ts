@@ -70,6 +70,9 @@ export interface RunDetail {
   readonly startedAt: number;
   readonly endedAt?: number;
   readonly durationMs?: number;
+  readonly pausedDurationMs?: number;
+  readonly pausedAt?: number;
+  readonly resumedAt?: number;
   readonly inputs: Readonly<Record<string, unknown>>;
   readonly stages: readonly RunSnapshot["stages"][number][];
   readonly result?: Record<string, unknown>;
@@ -433,6 +436,9 @@ export function inspectRun(
     startedAt: copy.startedAt,
     endedAt: copy.endedAt,
     durationMs: copy.durationMs,
+    pausedDurationMs: copy.pausedDurationMs,
+    pausedAt: copy.pausedAt,
+    resumedAt: copy.resumedAt,
     inputs: copy.inputs,
     stages: copy.stages,
     result: copy.result,

@@ -27,6 +27,7 @@
  */
 
 import type { RunSnapshot, StageSnapshot, StageStatus } from "../shared/store-types.js";
+import { elapsedRunMs, elapsedStageMs } from "../shared/timing.js";
 import type { GraphTheme } from "./graph-theme.js";
 import { fmtDuration } from "./status-helpers.js";
 import {
@@ -211,7 +212,7 @@ function runCardMeta(run: RunSnapshot, now: number): string {
   const ago = run.endedAt !== undefined
     ? `${fmtDuration(now - run.endedAt)} ago`
     : run.startedAt != null
-      ? fmtDuration(now - run.startedAt)
+      ? fmtDuration(elapsedRunMs(run, now))
       : undefined;
 
   if (run.status === "running") {
@@ -264,11 +265,8 @@ function lastStageDuration(run: RunSnapshot, now: number): string | undefined {
 }
 
 function stageDurationString(stage: StageSnapshot, now: number): string | undefined {
-  if (stage.durationMs !== undefined) return fmtDuration(stage.durationMs);
-  if (stage.startedAt !== undefined && stage.endedAt === undefined) {
-    return fmtDuration(now - stage.startedAt);
-  }
-  return undefined;
+  const elapsed = elapsedStageMs(stage, now);
+  return elapsed === undefined ? undefined : fmtDuration(elapsed);
 }
 
 function stageCells(run: RunSnapshot): Array<{ status: StageStatus }> {
