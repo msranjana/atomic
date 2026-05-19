@@ -241,6 +241,15 @@ describe("renderNodeCard — status border colours", () => {
     assert.match(row, /↑ blocked/);
     assert.doesNotMatch(row, /very-long-upstream-stage/);
   });
+
+  test("paused status renders a single pause icon", () => {
+    const lines = renderNodeCard(makeStage({ status: "paused" }), { theme });
+    const rendered = stripAnsi(lines.join("\n"));
+    const pauseIconCount = rendered.match(/❚❚/g)?.length ?? 0;
+
+    assert.equal(pauseIconCount, 1);
+    assert.match(rendered, /❚❚ paused/);
+  });
 });
 
 describe("renderNodeCard — duration line", () => {

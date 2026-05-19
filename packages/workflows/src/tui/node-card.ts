@@ -253,8 +253,6 @@ export function renderNodeCard(stage: StageSnapshot, opts: NodeCardOpts): string
   const bodyText =
     stage.status === "blocked"
       ? blockedBadgeText(stage, opts.stages, innerWidth)
-      : stage.status === "paused"
-        ? "❚❚ paused"
       : durationText(stage);
   const bodyHex = durationColor(stage.status, theme);
   const statusText = `${statusIcon(stage.status)} ${statusLabel(stage.status)}`;
