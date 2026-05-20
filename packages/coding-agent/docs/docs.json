@@ -12,7 +12,7 @@
           "path": "quickstart.md"
         },
         {
-          "title": "Using Pi",
+          "title": "Using Atomic",
           "path": "usage.md"
         },
         {
@@ -49,6 +49,10 @@
           "path": "skills.md"
         },
         {
+          "title": "Atomic Workflows",
+          "path": "workflows.md"
+        },
+        {
           "title": "Prompt Templates",
           "path": "prompt-templates.md"
         },
@@ -57,7 +61,7 @@
           "path": "themes.md"
         },
         {
-          "title": "Pi Packages",
+          "title": "Atomic Packages",
           "path": "packages.md"
         },
         {
