@@ -5,15 +5,6 @@ import { getChangelogPath, parseChangelog } from "../utils/changelog.js";
 export const ATOMIC_GUIDE_COMMAND_NAME = "atomic";
 export const ATOMIC_GUIDE_COMMAND_DESCRIPTION = "Atomic onboarding and help guide";
 
-const HELP_MENU = `# Atomic
-
-Select where to start:
-
-- \`overview\` — run \`/atomic overview\`
-- \`workflows\` — run \`/atomic workflows\`
-- \`example\` — run \`/atomic example\`
-- \`what's new\` — run \`/atomic what's new\``;
-
 const OVERVIEW = `# Atomic overview
 
 Atomic turns one-off prompts into developer workflows: on-call debugging, repo research that turns into implementation, testing and review loops, and larger multi-stage automation. Start it in a project with \`atomic\`, then talk to it normally. Use \`@file\` to attach files, \`!command\` to run shell output through the model, and \`!!command\` to run shell output without adding it to context.
@@ -214,14 +205,68 @@ Where to next:
 \`/atomic example\` — see workflows in a normal task flow
 \`/atomic overview\` — quick refresh`;
 
-export const ATOMIC_GUIDE_HELP_CHOICES = ["overview", "workflows", "example", "what's new"] as const;
+const GUIDE_SECTIONS = [
+	{
+		name: "overview",
+		aliases: [],
+		label: "overview",
+		description: "30-second overview",
+		render: () => OVERVIEW,
+	},
+	{
+		name: "workflows",
+		aliases: ["workflow"],
+		label: "workflows",
+		description: "Workflow primer",
+		render: () => WORKFLOWS,
+	},
+	{
+		name: "example",
+		aliases: ["examples"],
+		label: "example",
+		description: "Practical first workflow",
+		render: () => EXAMPLE,
+	},
+	{
+		name: "whats-new",
+		aliases: ["what's new", "whats new", "news", "updates", "changelog"],
+		label: "what's new",
+		description: "Recent release notes",
+		render: readLatestStableChangelog,
+	},
+] as const satisfies readonly {
+	readonly name: string;
+	readonly aliases: readonly string[];
+	readonly label: string;
+	readonly description: string;
+	readonly render: (cwd: string) => string;
+}[];
 
-export type AtomicGuideHelpChoice = (typeof ATOMIC_GUIDE_HELP_CHOICES)[number];
+type AtomicGuideSection = (typeof GUIDE_SECTIONS)[number];
+type AtomicGuideSectionName = AtomicGuideSection["name"];
 
-export type AtomicGuideMode = "help" | "overview" | "example" | "workflows" | "whats-new";
+export type AtomicGuideHelpChoice = AtomicGuideSection["label"];
+
+export type AtomicGuideMode = "help" | AtomicGuideSectionName;
+
+export const ATOMIC_GUIDE_HELP_CHOICES: readonly AtomicGuideHelpChoice[] = GUIDE_SECTIONS.map(
+	(section) => section.label,
+);
+
+const GUIDE_SECTIONS_BY_NAME = new Map<AtomicGuideSectionName, AtomicGuideSection>(
+	GUIDE_SECTIONS.map((section) => [section.name, section]),
+);
+const GUIDE_SECTIONS_BY_LABEL = new Map<string, AtomicGuideSection>(
+	GUIDE_SECTIONS.map((section) => [section.label, section]),
+);
+const GUIDE_SECTIONS_BY_INPUT = new Map<string, AtomicGuideSection>(
+	GUIDE_SECTIONS.flatMap((section) =>
+		[section.name, section.label, ...section.aliases].map((input) => [input, section] as const),
+	),
+);
 
 export function isAtomicGuideHelpChoice(choice: string): choice is AtomicGuideHelpChoice {
-	return (ATOMIC_GUIDE_HELP_CHOICES as readonly string[]).includes(choice);
+	return GUIDE_SECTIONS_BY_LABEL.has(choice);
 }
 
 const ATOMIC_GUIDE_TRAILING_PUNCTUATION = "?!.,;:";
@@ -234,24 +279,37 @@ function stripTrailingAtomicGuidePunctuation(value: string): string {
 	return value.slice(0, end);
 }
 
+function getGuideSectionForChoice(choice: string): AtomicGuideSection | undefined {
+	return GUIDE_SECTIONS_BY_LABEL.get(choice);
+}
+
+function getGuideSectionForMode(mode: AtomicGuideSectionName): AtomicGuideSection {
+	const section = GUIDE_SECTIONS_BY_NAME.get(mode);
+	if (!section) throw new Error(`Unknown Atomic guide section: ${mode}`);
+	return section;
+}
+
+function getAtomicGuideHelpMenu(): string {
+	const sectionHelp = GUIDE_SECTIONS.map(
+		(section) => `- \`${section.label}\` — run \`/atomic ${section.label}\``,
+	).join("\n");
+	return `# Atomic\n\nSelect where to start:\n\n${sectionHelp}`;
+}
+
 export function normalizeAtomicGuideMode(args: string): AtomicGuideMode {
 	const normalized = stripTrailingAtomicGuidePunctuation(args.trim().toLowerCase());
 	if (!normalized) return "help";
-	if (normalized === "overview") return "overview";
-	if (normalized === "workflows" || normalized === "workflow") return "workflows";
-	if (normalized === "example" || normalized === "examples") return "example";
-	if (["what's new", "whats new", "news", "updates", "changelog"].includes(normalized)) return "whats-new";
-	return "help";
+
+	return GUIDE_SECTIONS_BY_INPUT.get(normalized)?.name ?? "help";
 }
 
 export function getAtomicGuideArgumentCompletions(prefix: string): AutocompleteItem[] | null {
-	const items = [
-		{ value: "overview", label: "overview", description: "30-second overview" },
-		{ value: "workflows", label: "workflows", description: "Workflow primer" },
-		{ value: "example", label: "example", description: "Practical first workflow" },
-		{ value: "what's new", label: "what's new", description: "Recent release notes" },
-	];
 	const query = prefix.trim().toLowerCase();
+	const items = GUIDE_SECTIONS.map((section) => ({
+		value: section.label,
+		label: section.label,
+		description: section.description,
+	}));
 	const filtered = query
 		? items.filter((item) => item.value.startsWith(query) || item.label.startsWith(query))
 		: items;
@@ -275,30 +333,11 @@ function readLatestStableChangelog(cwd: string): string {
 }
 
 export function getAtomicGuideMessage(mode: AtomicGuideMode, cwd: string): string {
-	switch (mode) {
-		case "help":
-			return HELP_MENU;
-		case "overview":
-			return OVERVIEW;
-		case "example":
-			return EXAMPLE;
-		case "workflows":
-			return WORKFLOWS;
-		case "whats-new":
-			return readLatestStableChangelog(cwd);
-	}
+	if (mode === "help") return getAtomicGuideHelpMenu();
+	return getGuideSectionForMode(mode).render(cwd);
 }
 
 export function atomicGuideModeForChoice(choice: AtomicGuideHelpChoice): AtomicGuideMode {
-	switch (choice) {
-		case "overview":
-			return "overview";
-		case "workflows":
-			return "workflows";
-		case "example":
-			return "example";
-		case "what's new":
-			return "whats-new";
-	}
+	return getGuideSectionForChoice(choice)?.name ?? "help";
 }
 

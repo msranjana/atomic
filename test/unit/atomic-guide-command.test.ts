@@ -39,6 +39,10 @@ describe("/atomic guide command", () => {
     assert.match(getAtomicGuideMessage(normalizeAtomicGuideMode("what's new"), cwd), /^# What's new/);
   });
 
+  test("treats adversarial punctuation arguments as unknown help requests", () => {
+    assert.equal(normalizeAtomicGuideMode(`${"!".repeat(50_000)}a`), "help");
+  });
+
   test("UI help choices map only to static guide options", () => {
     assert.equal(atomicGuideModeForChoice("overview"), "overview");
     assert.equal(atomicGuideModeForChoice("workflows"), "workflows");
