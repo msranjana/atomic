@@ -2,11 +2,17 @@
 
 ## [Unreleased]
 
-## [0.8.10] - 2026-05-20
+## [0.8.11] - 2026-05-20
 
 ### Changed
 
-- Prepared the 0.8.10 release.
+- Updated the What's New release notes to highlight the new `/atomic` onboarding guide, including overview, examples, workflows, and release notes from inside the CLI.
+
+## [0.8.10] - 2026-05-20
+
+### Added
+
+- Added the `/atomic` onboarding guide, with built-in overview, examples, workflows, and release notes to help users discover Atomic from inside the CLI.
 
 ## [0.8.10-0] - 2026-05-20
 
