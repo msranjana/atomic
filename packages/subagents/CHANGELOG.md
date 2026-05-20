@@ -14,7 +14,10 @@
 ### Added
 
 ### Fixed
+- Smooth live subagent widget animation by requesting redraws on spinner ticks without remounting the widget, preserving 250ms async status polling while reducing flicker.
 - Append the current user-selected model as the final subagent fallback candidate, so retryable provider/model failures still get one last attempt after configured `fallbackModels` are exhausted.
+- Keep subagent running glyphs stable between live animation ticks by deriving their base frame from progress state.
+- Treat intermediate child provider/tool errors as recovered when a later clean assistant response succeeds, for both foreground and async subagent runs.
 
 ## [0.24.2] - 2026-05-10
 
