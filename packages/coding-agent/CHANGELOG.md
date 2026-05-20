@@ -2,9 +2,15 @@
 
 ## [Unreleased]
 
+## [0.8.10-0] - 2026-05-20
+
 ### Added
 
 - Reintroduced `/atomic` as an interactive guide with options for overview, examples, workflows, and release notes.
+
+### Changed
+
+- Prepared the 0.8.10-0 prerelease.
 
 ## [0.8.9] - 2026-05-19
 
