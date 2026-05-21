@@ -18,13 +18,13 @@ pkg install nodejs termux-api git
 
 # Install Atomic (choose one package manager available in Termux; npm is installed with nodejs)
 # npm
-npm install -g --ignore-scripts @bastani/atomic
+npm install -g @bastani/atomic
 
 # Bun
-bun install -g --ignore-scripts @bastani/atomic
+bun install -g @bastani/atomic
 
 # pnpm
-pnpm add -g --ignore-scripts @bastani/atomic
+pnpm add -g @bastani/atomic
 
 # Create config directory
 mkdir -p ~/.atomic/agent
@@ -33,7 +33,7 @@ mkdir -p ~/.atomic/agent
 atomic
 ```
 
-`--ignore-scripts` disables dependency lifecycle scripts during install. Atomic does not require install scripts for normal package-manager installs.
+Atomic does not require package install scripts. If you want to disable dependency lifecycle scripts during the Atomic install, you can add `--ignore-scripts` to the install command.
 
 ## Clipboard Support
 

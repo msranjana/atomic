@@ -148,16 +148,14 @@ npm dependencies work too. Add a `package.json` next to your extension (or in a 
 
 ```bash
 # npm
-npm install --ignore-scripts
+npm install
 
 # Bun
-bun install --ignore-scripts
+bun install
 
 # pnpm
-pnpm install --ignore-scripts
+pnpm install
 ```
-
-`--ignore-scripts` disables dependency lifecycle scripts during install. Use it when your extension dependencies do not require install scripts.
 
 Imports from `node_modules/` are resolved automatically.
 
@@ -276,7 +274,7 @@ This pattern makes the fetched models available during normal startup and to `at
 }
 ```
 
-The manifest key is the app name from `package.json` (`atomic` here); the legacy `pi` key is still accepted as a compatibility shim. Run `npm install --ignore-scripts`, `bun install --ignore-scripts`, or `pnpm install --ignore-scripts` in the extension directory, then imports from `node_modules/` work automatically.
+The manifest key is the app name from `package.json` (`atomic` here); the legacy `pi` key is still accepted as a compatibility shim. Run `npm install`, `bun install`, or `pnpm install` in the extension directory, then imports from `node_modules/` work automatically.
 
 ## Events
 

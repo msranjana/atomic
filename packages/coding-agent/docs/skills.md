@@ -119,16 +119,14 @@ description: What this skill does and when to use it. Be specific.
 Run once before first use (choose one):
 ```bash
 # npm
-cd /path/to/skill && npm install --ignore-scripts
+cd /path/to/skill && npm install
 
 # Bun
-cd /path/to/skill && bun install --ignore-scripts
+cd /path/to/skill && bun install
 
 # pnpm
-cd /path/to/skill && pnpm install --ignore-scripts
+cd /path/to/skill && pnpm install
 ```
-
-`--ignore-scripts` disables dependency lifecycle scripts during install. Use it when your skill dependencies do not require install scripts.
 
 ## Usage
 
@@ -219,13 +217,13 @@ description: Web search and content extraction via Brave Search API. Use for sea
 
 ```bash
 # npm
-cd /path/to/brave-search && npm install --ignore-scripts
+cd /path/to/brave-search && npm install
 
 # Bun
-cd /path/to/brave-search && bun install --ignore-scripts
+cd /path/to/brave-search && bun install
 
 # pnpm
-cd /path/to/brave-search && pnpm install --ignore-scripts
+cd /path/to/brave-search && pnpm install
 ```
 
 ## Search

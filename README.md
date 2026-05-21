@@ -56,6 +56,8 @@ With bun:
 bun add -g @bastani/atomic
 ```
 
+Atomic does not require package install scripts. If you want to disable dependency lifecycle scripts during the Atomic install, you can add `--ignore-scripts` to the install command.
+
 ### Authenticate and run
 
 Set an API key and start a session:

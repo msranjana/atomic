@@ -734,7 +734,7 @@ ctx.ui.setStatus("my-ext", ctx.ui.theme.fg("accent", "● active"));
 ctx.ui.setStatus("my-ext", undefined);
 ```
 
-**Examples:** [status-line.ts](https://github.com/flora131/atomic/blob/main/packages/coding-agent/examples/extensions/status-line.ts), [plan-mode.ts](https://github.com/flora131/atomic/blob/main/packages/coding-agent/examples/extensions/plan-mode.ts), [preset.ts](https://github.com/flora131/atomic/blob/main/packages/coding-agent/examples/extensions/preset.ts)
+**Examples:** [status-line.ts](https://github.com/flora131/atomic/blob/main/packages/coding-agent/examples/extensions/status-line.ts), [plan-mode/index.ts](https://github.com/flora131/atomic/blob/main/packages/coding-agent/examples/extensions/plan-mode/index.ts), [preset.ts](https://github.com/flora131/atomic/blob/main/packages/coding-agent/examples/extensions/preset.ts)
 
 ### Pattern 4b: Working Indicator Customization
 
@@ -794,7 +794,7 @@ ctx.ui.setWidget("my-widget", (_tui, theme) => {
 ctx.ui.setWidget("my-widget", undefined);
 ```
 
-**Examples:** [plan-mode.ts](https://github.com/flora131/atomic/blob/main/packages/coding-agent/examples/extensions/plan-mode.ts)
+**Examples:** [plan-mode/index.ts](https://github.com/flora131/atomic/blob/main/packages/coding-agent/examples/extensions/plan-mode/index.ts)
 
 ### Pattern 6: Custom Footer
 
@@ -911,7 +911,7 @@ export default function (pi: ExtensionAPI) {
 - **Selection UI**: [examples/extensions/preset.ts](https://github.com/flora131/atomic/blob/main/packages/coding-agent/examples/extensions/preset.ts) - SelectList with DynamicBorder framing
 - **Async with cancel**: [examples/extensions/qna.ts](https://github.com/flora131/atomic/blob/main/packages/coding-agent/examples/extensions/qna.ts) - BorderedLoader for LLM calls
 - **Settings toggles**: [examples/extensions/tools.ts](https://github.com/flora131/atomic/blob/main/packages/coding-agent/examples/extensions/tools.ts) - SettingsList for tool enable/disable
-- **Status indicators**: [examples/extensions/plan-mode.ts](https://github.com/flora131/atomic/blob/main/packages/coding-agent/examples/extensions/plan-mode.ts) - setStatus and setWidget
+- **Status indicators**: [examples/extensions/plan-mode/index.ts](https://github.com/flora131/atomic/blob/main/packages/coding-agent/examples/extensions/plan-mode/index.ts) - setStatus and setWidget
 - **Working indicator**: [examples/extensions/working-indicator.ts](https://github.com/flora131/atomic/blob/main/packages/coding-agent/examples/extensions/working-indicator.ts) - setWorkingIndicator
 - **Custom footer**: [examples/extensions/custom-footer.ts](https://github.com/flora131/atomic/blob/main/packages/coding-agent/examples/extensions/custom-footer.ts) - setFooter with stats
 - **Custom editor**: [examples/extensions/modal-editor.ts](https://github.com/flora131/atomic/blob/main/packages/coding-agent/examples/extensions/modal-editor.ts) - Vim-like modal editing

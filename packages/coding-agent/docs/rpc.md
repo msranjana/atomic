@@ -1200,8 +1200,8 @@ Parse errors:
 ## Types
 
 Source files:
-- [`packages/ai/src/types.ts`](https://github.com/flora131/atomic/blob/main/packages/ai/src/types.ts) - `Model`, `UserMessage`, `AssistantMessage`, `ToolResultMessage`
-- [`packages/agent/src/types.ts`](https://github.com/flora131/atomic/blob/main/packages/agent/src/types.ts) - `AgentMessage`, `AgentEvent`
+- [`packages/ai/src/types.ts`](https://github.com/earendil-works/pi-mono/blob/main/packages/ai/src/types.ts) - `Model`, `UserMessage`, `AssistantMessage`, `ToolResultMessage`
+- [`packages/agent/src/types.ts`](https://github.com/earendil-works/pi-mono/blob/main/packages/agent/src/types.ts) - `AgentMessage`, `AgentEvent`
 - [`src/core/messages.ts`](https://github.com/flora131/atomic/blob/main/packages/coding-agent/src/core/messages.ts) - `BashExecutionMessage`
 - [`src/modes/rpc/rpc-types.ts`](https://github.com/flora131/atomic/blob/main/packages/coding-agent/src/modes/rpc/rpc-types.ts) - RPC command/response types, extension UI request/response types
 

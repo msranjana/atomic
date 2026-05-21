@@ -43,16 +43,16 @@ Choose npm, Bun, or pnpm:
 
 ```bash
 # npm
-npm install --ignore-scripts @bastani/atomic
+npm install @bastani/atomic
 
 # Bun
-bun add --ignore-scripts @bastani/atomic
+bun add @bastani/atomic
 
 # pnpm
-pnpm add --ignore-scripts @bastani/atomic
+pnpm add @bastani/atomic
 ```
 
-`--ignore-scripts` disables dependency lifecycle scripts during install. Atomic does not require install scripts for normal package-manager installs.
+Atomic does not require package install scripts. If you want to disable dependency lifecycle scripts during the Atomic install, you can add `--ignore-scripts` to the install command.
 
 The SDK is included in the main package. No separate installation needed.
 
