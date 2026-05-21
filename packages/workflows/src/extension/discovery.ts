@@ -20,10 +20,14 @@
  *   const result = await discoverWorkflows({ cwd: process.cwd(), homeDir: os.homedir() });
  */
 
+import { existsSync } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { join, resolve, extname, isAbsolute } from "node:path";
-import { CONFIG_DIR_NAMES, getProjectConfigPaths } from "@bastani/atomic";
+import { CONFIG_DIR_NAMES, getProjectConfigPaths, isBunBinary } from "@bastani/atomic";
+import { createJiti } from "jiti/static";
 import type { WorkflowDefinition } from "../shared/types.js";
+import * as workflowsSdkSurface from "../sdk-surface.js";
 import { createRegistry } from "../workflows/registry.js";
 import type { WorkflowRegistry } from "../workflows/registry.js";
 import * as bundledManifest from "../../builtin/index.js";
@@ -273,8 +277,89 @@ async function scanWorkflowDir(dir: string): Promise<string[] | null> {
  *
  * Strategy: try the default export first, then every named export.
  * Both are collected — a file may export multiple workflow definitions.
- * Bun natively handles .ts, .js, .mjs, and .cjs via dynamic import.
+ * jiti loads package-authored .ts/.js/.mjs/.cjs files with the same
+ * @bastani/workflows authoring import that project/user workflow files use.
  */
+type RunWorkflowFunction = typeof import("../runs/shared/workflow-runner.js").runWorkflow;
+
+const runWorkflow: RunWorkflowFunction = async (...args) => {
+  const { runWorkflow: actualRunWorkflow } = await import("../runs/shared/workflow-runner.js");
+  return actualRunWorkflow(...args);
+};
+
+const require = createRequire(import.meta.url);
+const WORKFLOWS_MODULE_SPECIFIER = "@bastani/workflows";
+// Keep this in sync with index.ts through sdk-surface.ts. runWorkflow stays as
+// a lazy wrapper because the public re-export comes from workflow-runner.ts,
+// which imports this discovery module and would otherwise reintroduce a cycle.
+const WORKFLOWS_SDK_MODULE: Record<string, unknown> = {
+  ...workflowsSdkSurface,
+  runWorkflow,
+};
+const WORKFLOWS_VIRTUAL_MODULES: Record<string, unknown> = {
+  [WORKFLOWS_MODULE_SPECIFIER]: WORKFLOWS_SDK_MODULE,
+};
+
+function resolveWorkflowsSdkAlias(): string {
+  // Resolve the package self-reference through package.json exports instead of
+  // pinning discovery.ts to the current src/extension -> src/index.ts layout.
+  const sdkEntry = require.resolve(WORKFLOWS_MODULE_SPECIFIER);
+  if (!existsSync(sdkEntry)) {
+    throw new Error(
+      `Unable to resolve ${WORKFLOWS_MODULE_SPECIFIER} SDK entry at ${sdkEntry}. ` +
+        "Check the package exports map for the workflows SDK entry.",
+    );
+  }
+  return sdkEntry;
+}
+
+const workflowModuleLoader = createJiti(import.meta.url, {
+  moduleCache: false,
+  // Keep workflow-file import semantics deterministic: jiti owns .ts/.js/.mjs/.cjs
+  // resolution instead of handing some imports back to native import().
+  tryNative: false,
+  ...(isBunBinary
+    ? { virtualModules: WORKFLOWS_VIRTUAL_MODULES }
+    : { alias: { [WORKFLOWS_MODULE_SPECIFIER]: resolveWorkflowsSdkAlias() } }),
+});
+
+function materializeModuleObject(mod: object): Record<string, unknown> {
+  const materialized: Record<string, unknown> = {};
+
+  // jiti's callable API can return an interop namespace proxy. Its own property
+  // descriptors contain the authored export values, but property access may apply
+  // default-export conveniences (and even expose a throwing inherited `then`
+  // getter for `export default null`). Copy own descriptors into a plain object
+  // so candidate collection sees the exact authored exports.
+  for (const key of Object.getOwnPropertyNames(mod)) {
+    const descriptor = Object.getOwnPropertyDescriptor(mod, key);
+    if (descriptor === undefined) continue;
+
+    const value = "value" in descriptor ? descriptor.value : descriptor.get?.call(mod);
+    Object.defineProperty(materialized, key, {
+      value,
+      enumerable: descriptor.enumerable,
+      configurable: true,
+      writable: true,
+    });
+  }
+
+  return materialized;
+}
+
+function normalizeWorkflowModule(mod: unknown): Record<string, unknown> {
+  if (mod !== null && typeof mod === "object") {
+    return materializeModuleObject(mod);
+  }
+  // CJS/default interop can return the exported value directly; wrap it so the
+  // candidate collector can handle it the same way as an ESM default export.
+  return { default: mod };
+}
+
+function loadWorkflowModule(filePath: string): Record<string, unknown> {
+  return normalizeWorkflowModule(workflowModuleLoader(filePath));
+}
+
 async function importWorkflowFile(
   filePath: string,
   kind: DiscoveryKind,
@@ -282,7 +367,7 @@ async function importWorkflowFile(
 ): Promise<Array<{ value: unknown; exportKey: string; kind: DiscoveryKind; filePath: string }>> {
   let mod: Record<string, unknown>;
   try {
-    mod = (await import(filePath)) as Record<string, unknown>;
+    mod = loadWorkflowModule(filePath);
   } catch (err) {
     diagnostics.push({
       level: "error",
@@ -346,15 +431,14 @@ async function loadFromPaths(
     const absPath = isAbsolute(rawPath) ? rawPath : resolve(baseCwd, rawPath);
 
     // Give a specific PATH_NOT_FOUND when we can detect the file is absent.
-    let exists = false;
+    let pathStats: Awaited<ReturnType<typeof stat>> | undefined;
     try {
-      await stat(absPath);
-      exists = true;
+      pathStats = await stat(absPath);
     } catch {
-      exists = false;
+      pathStats = undefined;
     }
 
-    if (!exists) {
+    if (pathStats === undefined) {
       diagnostics.push({
         level: "error",
         code: "PATH_NOT_FOUND",
@@ -364,7 +448,9 @@ async function loadFromPaths(
       continue;
     }
 
-    const candidates = await importWorkflowFile(absPath, kind, diagnostics);
+    const candidates = pathStats.isDirectory()
+      ? await loadFromDir(absPath, kind, diagnostics)
+      : await importWorkflowFile(absPath, kind, diagnostics);
     for (const c of candidates) {
       all.push({ ...c, ...(configuredName !== undefined ? { configuredName } : {}) });
     }
