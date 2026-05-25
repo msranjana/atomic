@@ -31,6 +31,7 @@ import { defineWorkflow } from "../../packages/workflows/src/workflows/define-wo
 import type { WorkflowDefinition } from "../../packages/workflows/src/shared/types.js";
 import { createExtensionRuntime } from "../../packages/workflows/src/extension/runtime.js";
 import { store } from "../../packages/workflows/src/shared/store.js";
+import { WORKFLOW_AUTH_FAILURE_MESSAGE } from "../../packages/workflows/src/shared/workflow-failures.js";
 import type {
   PiCustomComponent,
   PiCustomOverlayFactoryTui,
@@ -1006,5 +1007,137 @@ describe("tool run-control actions", () => {
     const r = result as { action: string; status: string; runId: string };
     assert.equal(r.status, "ok");
     assert.equal(r.runId, runId);
+  });
+
+  test("runtime runDirect classifies direct pre-run model auth failures", async () => {
+    const runtime = createExtensionRuntime({
+      registry: createRegistry([]),
+      models: {
+        async listModels() {
+          throw { message: "request failed", status: 401 };
+        },
+      },
+    });
+
+    const result = await runtime.runDirect({ task: { name: "scout", task: "inspect repo", model: "openai/gpt" }, async: true });
+
+    assert.equal(result.status, "failed");
+    assert.equal(result.error, WORKFLOW_AUTH_FAILURE_MESSAGE);
+  });
+
+  test("makeExecuteWorkflowTool resume rejects ambiguous stage prefixes", async () => {
+    const runId = `resume-tool-ambiguous-stage-${Date.now()}`;
+    store.recordRunStart(makeInflightRun(runId));
+    for (const stageId of ["ambiguous-stage-aaa", "ambiguous-stage-bbb"]) {
+      store.recordStageStart(runId, {
+        id: stageId,
+        name: stageId,
+        status: "failed",
+        parentIds: [],
+        toolEvents: [],
+      });
+      store.recordStageEnd(runId, {
+        id: stageId,
+        name: stageId,
+        status: "failed",
+        parentIds: [],
+        toolEvents: [],
+        error: "boom",
+      });
+    }
+    store.recordRunEnd(runId, "failed", undefined, "boom", { resumable: true, failedStageId: "ambiguous-stage-aaa" });
+    const handler = makeToolHandler();
+
+    const result = await handler({ action: "resume", runId, stageId: "ambiguous-stage" }, {} as never);
+
+    assert.equal(result.action, "resume");
+    const r = result as { action: string; status: string; runId: string; message: string };
+    assert.equal(r.status, "noop");
+    assert.equal(r.runId, runId);
+    assert.match(r.message, /Ambiguous stage identifier/);
+    assert.match(r.message, /ambiguous-stage-aaa/);
+    assert.match(r.message, /ambiguous-stage-bbb/);
+  });
+
+  test("makeExecuteWorkflowTool resume starts linked continuation for failed resumable workflow", async () => {
+    const sourceRunId = `resume-tool-source-${Date.now()}`;
+    const def = defineWorkflow("tool-resume-wf")
+      .run(async (ctx) => {
+        const first = await ctx.stage("first").prompt("first");
+        const second = await ctx.stage("second").prompt(`second:${first}`);
+        return { first, second };
+      })
+      .compile();
+
+    store.recordRunStart({
+      id: sourceRunId,
+      name: def.name,
+      inputs: {},
+      status: "running",
+      startedAt: Date.now(),
+      stages: [],
+    });
+    store.recordStageStart(sourceRunId, { id: "old-first", name: "first", status: "completed", parentIds: [], toolEvents: [], result: "first-old" });
+    store.recordStageEnd(sourceRunId, { id: "old-first", name: "first", status: "completed", parentIds: [], toolEvents: [], result: "first-old" });
+    store.recordStageStart(sourceRunId, { id: "old-second", name: "second", status: "failed", parentIds: ["old-first"], toolEvents: [], error: "rate limit" });
+    store.recordStageEnd(sourceRunId, { id: "old-second", name: "second", status: "failed", parentIds: ["old-first"], toolEvents: [], error: "rate limit" });
+    store.recordRunEnd(sourceRunId, "failed", undefined, "rate limit", { resumable: true, failedStageId: "old-second", failureKind: "rate_limit" });
+
+    const calls: string[] = [];
+    const runtime = createExtensionRuntime({
+      registry: createRegistry([def]),
+      store,
+      adapters: { prompt: { prompt: async (text) => { calls.push(text); return "second-new"; } } },
+    });
+    const handler = makeExecuteWorkflowTool(runtime, () => undefined);
+
+    const result = await handler({ action: "resume", runId: sourceRunId }, {} as never);
+
+    assert.equal(result.action, "resume");
+    const r = result as { action: string; status: string; runId: string; message: string };
+    assert.equal(r.status, "running");
+    assert.notEqual(r.runId, sourceRunId);
+    assert.match(r.message, /Resuming failed workflow/);
+    await jobTracker.get(r.runId)?.promise;
+    assert.deepEqual(calls, ["second:first-old"]);
+    const continued = store.runs().find((run) => run.id === r.runId)!;
+    assert.equal(continued.status, "completed");
+    assert.equal(continued.resumedFromRunId, sourceRunId);
+    assert.equal(continued.stages[0]!.replayed, true);
+    assert.equal(store.runs().find((run) => run.id === sourceRunId)!.status, "failed");
+  });
+
+  test("makeExecuteWorkflowTool resume surfaces workflow_not_found for failed resumable run without registry definition", async () => {
+    const runId = `resume-tool-failed-${Date.now()}`;
+    store.recordRunStart(makeInflightRun(runId));
+    store.recordStageStart(runId, {
+      id: "stage-a",
+      name: "stage-a",
+      status: "failed",
+      parentIds: [],
+      toolEvents: [],
+    });
+    store.recordStageEnd(runId, {
+      id: "stage-a",
+      name: "stage-a",
+      status: "failed",
+      parentIds: [],
+      toolEvents: [],
+      error: "boom",
+    });
+    store.recordRunEnd(runId, "failed", undefined, "boom", { resumable: true, failedStageId: "stage-a" });
+
+    const handler = makeToolHandler();
+
+    const result = await handler(
+      { action: "resume", runId },
+      {} as never,
+    );
+
+    assert.equal(result.action, "resume");
+    const r = result as { action: string; status: string; runId: string; message: string };
+    assert.equal(r.status, "noop");
+    assert.equal(r.runId, runId);
+    assert.match(r.message, /workflow_not_found/);
   });
 });
