@@ -371,7 +371,7 @@ describe("MockExtensionAPI — tool registration", () => {
         },
       },
     });
-    const executeWorkflowTool = makeExecuteWorkflowTool(runtime, () => undefined);
+    const executeWorkflowTool = makeExecuteWorkflowTool(runtime, () => undefined, () => undefined);
 
     const started = await executeWorkflowTool({
       task: { name: "blocking-scout", task: "wait for interrupt" },
@@ -870,6 +870,17 @@ describe("renderResult — all action branches", () => {
         },
       },
       { action: "run", runId: "run-abcdef", status: "running", message: "A very long background dispatch message." },
+      {
+        action: "transcript",
+        runId: "run-abcdef",
+        stageId: "stage-abcdef",
+        source: "snapshot",
+        entries: Array.from({ length: 10 }, (_, index) => ({
+          role: "assistant",
+          text: `A very long transcript entry ${index} ${"x".repeat(80)}`,
+        })),
+        truncated: false,
+      },
       { action: "interrupt", runId: "run-abcdef", status: "paused", message: "A very long interrupt response message." },
       { action: "kill", runId: "run-abcdef", status: "killed", message: "A very long kill response message." },
       { action: "resume", runId: "run-abcdef", status: "ok", message: "A very long resume response message." },

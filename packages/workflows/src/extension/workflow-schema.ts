@@ -99,21 +99,78 @@ export const WorkflowParametersSchema = Type.Object({
     Type.Literal("get"),
     Type.Literal("inputs"),
     Type.Literal("status"),
+    Type.Literal("stages"),
+    Type.Literal("stage"),
+    Type.Literal("transcript"),
+    Type.Literal("send"),
+    Type.Literal("pause"),
     Type.Literal("interrupt"),
     Type.Literal("kill"),
     Type.Literal("resume"),
-  ])),
+    Type.Literal("reload"),
+  ], {
+    description: "Workflow action: run/list/get/inputs/status, inspect stages/transcripts, send messages or prompt answers, pause/resume/interrupt/kill runs, or reload workflow resources.",
+  })),
   runId: Type.Optional(Type.String({
-    description: "Run identifier or unique prefix for status/interrupt/kill/resume. Use '--all' for interrupt/kill all.",
+    description: "Run identifier or unique prefix for status/stages/stage/transcript/send/pause/resume/interrupt/kill. Use '--all' or all:true for supported bulk run-control actions.",
   })),
   all: Type.Optional(Type.Boolean({
-    description: "Apply supported run-control actions (interrupt/kill) to all in-flight runs.",
+    description: "Apply supported run-control actions (pause/interrupt/kill) to all in-flight runs instead of one run; cannot be combined with stageId.",
   })),
   stageId: Type.Optional(Type.String({
-    description: "Stage id, unique prefix, or stage name for stage-scoped resume.",
+    description: "Stage id, unique prefix, or stage name for stage-scoped inspection, transcript, send, pause, or resume.",
   })),
   message: Type.Optional(Type.String({
-    description: "Optional message forwarded when resuming paused work.",
+    description: "Message payload for send/follow-up/prompt/steer/resume, or optional text forwarded when resuming paused work.",
+  })),
+  statusFilter: Type.Optional(Type.Union([
+    Type.Literal("pending"),
+    Type.Literal("running"),
+    Type.Literal("awaiting_input"),
+    Type.Literal("paused"),
+    Type.Literal("blocked"),
+    Type.Literal("completed"),
+    Type.Literal("failed"),
+    Type.Literal("skipped"),
+    Type.Literal("all"),
+  ], {
+    description: "Filter stages by status for the stages action; use 'all' to include every stage.",
+  })),
+  format: Type.Optional(Type.Union([Type.Literal("text"), Type.Literal("json")], {
+    description: "Agent-visible output format for data-bearing inspection actions.",
+  })),
+  limit: Type.Optional(Type.Integer({
+    minimum: 0,
+    description: "Transcript-only: maximum number of most recent transcript entries to return; applied before tool output is serialized.",
+  })),
+  tail: Type.Optional(Type.Integer({
+    minimum: 0,
+    description: "Transcript-only: return only the last N transcript entries; overrides limit when both are provided.",
+  })),
+  includeToolOutput: Type.Optional(Type.Boolean({
+    description: "Transcript-only: include captured tool output entries when building results from stage snapshots; live session transcripts may not expose tool output.",
+  })),
+  text: Type.Optional(Type.String({
+    description: "Text to send to a stage for prompt answers, steering, follow-ups, or resume messages.",
+  })),
+  response: Type.Optional(Type.Unknown({
+    description: "Structured response payload for answering a pending stage prompt.",
+  })),
+  delivery: Type.Optional(Type.Union([
+    Type.Literal("auto"),
+    Type.Literal("answer"),
+    Type.Literal("prompt"),
+    Type.Literal("steer"),
+    Type.Literal("followUp"),
+    Type.Literal("resume"),
+  ], {
+    description: "Delivery mode for the send action: auto answers pending prompts first, then resumes paused stages, steers streaming stages, or queues a follow-up.",
+  })),
+  promptId: Type.Optional(Type.String({
+    description: "Pending prompt identifier to answer when using the send action.",
+  })),
+  reason: Type.Optional(Type.String({
+    description: "Human-readable reason for the reload action, echoed in the reload result.",
   })),
   task: Type.Optional(Type.Union([
     DirectTaskSchema,
