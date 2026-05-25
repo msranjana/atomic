@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ToolInfo } from "@bastani/atomic";
+import type { AgentToolUpdateCallback, ExtensionAPI, ExtensionContext, ToolInfo } from "@bastani/atomic";
 import type { McpExtensionState } from "./state.ts";
 import { Type } from "typebox";
 import { showStatus, showTools, reconnectServers, authenticateServer, logoutServer, openMcpAuthPanel, openMcpPanel, openMcpSetup } from "./commands.ts";
@@ -8,7 +8,7 @@ import { flushMetadataCache, initializeMcp, updateStatusBar } from "./init.ts";
 import { loadMetadataCache } from "./metadata-cache.ts";
 import { executeCall, executeConnect, executeDescribe, executeList, executeSearch, executeStatus, executeUiMessages } from "./proxy-modes.ts";
 import { getConfigPathFromArgv, truncateAtWord } from "./utils.ts";
-import { initializeOAuth, shutdownOAuth } from "./mcp-auth-flow.ts";
+import { shutdownOAuth } from "./mcp-auth-flow.ts";
 import { renderMcpToolResult } from "./tool-result-renderer.ts";
 
 export default function mcpAdapter(pi: ExtensionAPI) {
@@ -103,10 +103,6 @@ export default function mcpAdapter(pi: ExtensionAPI) {
     if (generation !== lifecycleGeneration) {
       return;
     }
-
-    await initializeOAuth().catch(() => {
-      console.error("MCP OAuth initialization failed");
-    });
 
     const promise = initializeMcp(pi, ctx);
     initPromise = promise;
@@ -264,7 +260,7 @@ export default function mcpAdapter(pi: ExtensionAPI) {
         action: Type.Optional(Type.String({ description: "Action: 'ui-messages' to retrieve prompts/intents from UI sessions" })),
       }),
       renderResult: renderMcpToolResult,
-      async execute(_toolCallId, params: {
+      async execute(_toolCallId: string, params: {
         tool?: string;
         args?: string;
         connect?: string;
@@ -274,7 +270,7 @@ export default function mcpAdapter(pi: ExtensionAPI) {
         includeSchemas?: boolean;
         server?: string;
         action?: string;
-      }, _signal, _onUpdate, _ctx) {
+      }, _signal: AbortSignal | undefined, _onUpdate: AgentToolUpdateCallback<Record<string, unknown>> | undefined, _ctx: ExtensionContext) {
         let parsedArgs: Record<string, unknown> | undefined;
         if (params.args) {
           try {
