@@ -3256,6 +3256,41 @@ function factory(pi: ExtensionAPI): void {
   // 4. Persistence: session_start restore + session_before_compact hook (§5.6, Phase D)
   // -------------------------------------------------------------------------
   if (typeof pi.on === "function") {
+    pi.on("session_before_switch", async (event, ctx) => {
+      const reason = typeof event === "object" && event !== null && "reason" in event
+        ? (event as { readonly reason?: string }).reason
+        : undefined;
+      if (reason !== "new" && reason !== "resume") return undefined;
+
+      // "In-flight" intentionally includes paused runs: session_start kills any run
+      // without endedAt, so warn for the same set that would be stopped by the switch.
+      const inFlightWorkflowCount = inFlightRunCount();
+      if (inFlightWorkflowCount === 0) return undefined;
+
+      const confirmSessionSwitch = ctx?.ui?.confirm;
+      // Headless/non-interactive callers intentionally fail open so automation cannot wedge.
+      if (typeof confirmSessionSwitch !== "function") return undefined;
+
+      const workflowNoun = inFlightWorkflowCount === 1 ? "workflow" : "workflows";
+      const actionLabel = reason === "new" ? "Start a new session" : "Resume another session";
+      const messageLabel = reason === "new" ? "Starting a new session" : "Resuming another session";
+      const promptTitle = `${actionLabel} and stop ${inFlightWorkflowCount} in-flight ${workflowNoun}?`;
+      const promptMessage =
+        `${messageLabel} will stop/kill ${inFlightWorkflowCount} in-flight ${workflowNoun} and clear workflow history tied to the current session.`;
+      let shouldSwitchSession: boolean | undefined;
+      try {
+        shouldSwitchSession = await confirmSessionSwitch(promptTitle, promptMessage);
+      } catch {
+        // Keep headless/failed UI behavior fail-open so session automation cannot wedge.
+        return undefined;
+      }
+      if (shouldSwitchSession) return undefined;
+
+      const cancelledLabel = reason === "new" ? "New session" : "Resume";
+      ctx?.ui?.notify?.(`${cancelledLabel} cancelled; in-flight workflows were left unchanged.`, "info");
+      return { cancel: true };
+    });
+
     pi.on("session_start", async (_event, ctx) => {
       // Workflow lifecycle is scoped to the originating chat session.
       // A new session inherits a clean store; any leftover runs from a
