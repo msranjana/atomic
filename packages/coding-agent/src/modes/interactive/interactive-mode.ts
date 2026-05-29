@@ -758,8 +758,16 @@ export class InteractiveMode {
     this.ui.addChild(this.widgetContainerAbove);
     this.ui.addChild(this.usageMeter);
     this.ui.addChild(this.editorContainer);
-    this.ui.addChild(this.widgetContainerBelow);
+    // Footer (persistent model + cwd identity) stays pinned directly under the
+    // editor; below-editor widgets render after it, at the very bottom. This
+    // keeps the session identity line attached to the input and places
+    // transient run status (e.g. the workflow companion counter) beneath it.
+    // Rendering below-editor widgets last also keeps a live widget at the
+    // absolute bottom of the buffer (always within the viewport), so its
+    // per-tick updates never sit above the fold — preserving the #1109
+    // resize-flicker fix.
     this.ui.addChild(this.footer);
+    this.ui.addChild(this.widgetContainerBelow);
     this.ui.setFocus(this.editor);
 
     this.setupKeyHandlers();
@@ -2261,7 +2269,11 @@ export class InteractiveMode {
       this.widgetContainerBelow,
       this.extensionWidgetsBelow,
       false,
-      false,
+      // leadingSpacer: blank line between the footer (model + cwd identity) and
+      // below-editor widgets such as the workflow companion counter, so the
+      // transient run status is visually separated from the session identity
+      // line. Only emitted when a below-editor widget is actually present.
+      true,
     );
     this.ui.requestRender();
   }
@@ -2284,8 +2296,16 @@ export class InteractiveMode {
     if (leadingSpacer) {
       container.addChild(new Spacer(1));
     }
+    let firstWidget = true;
     for (const component of widgets.values()) {
+      // Separate stacked widgets (e.g. the async-subagent widget and the
+      // workflow run counter, both belowEditor) with a blank line so each
+      // panel reads as its own block.
+      if (!firstWidget) {
+        container.addChild(new Spacer(1));
+      }
       container.addChild(component);
+      firstWidget = false;
     }
   }
 
@@ -2306,21 +2326,34 @@ export class InteractiveMode {
       this.customFooter.dispose();
     }
 
-    // Remove current footer from UI
-    if (this.customFooter) {
-      this.ui.removeChild(this.customFooter);
+    // Swap the footer IN PLACE so it keeps its slot directly above
+    // `widgetContainerBelow`. Using removeChild + addChild would append the new
+    // footer to the very end of the UI (after the below-editor widgets), which
+    // breaks the ordering invariant established for #1109: the footer must stay
+    // pinned under the editor, and the below-editor widget container must remain
+    // the last UI child so a live widget's per-tick line stays within the bottom
+    // viewport (above-fold ticks trigger pi-tui's full-screen/scrollback clear).
+    const currentFooter: Component = this.customFooter ?? this.footer;
+    const footerIndex = this.ui.children.indexOf(currentFooter);
+
+    let nextFooter: Component;
+    if (factory) {
+      const created = factory(this.ui, theme, this.footerDataProvider);
+      this.customFooter = created;
+      nextFooter = created;
     } else {
-      this.ui.removeChild(this.footer);
+      this.customFooter = undefined;
+      nextFooter = this.footer;
     }
 
-    if (factory) {
-      // Create and add custom footer, passing the data provider
-      this.customFooter = factory(this.ui, theme, this.footerDataProvider);
-      this.ui.addChild(this.customFooter);
+    if (footerIndex !== -1) {
+      this.ui.children[footerIndex] = nextFooter;
     } else {
-      // Restore built-in footer
-      this.customFooter = undefined;
-      this.ui.addChild(this.footer);
+      // Footer slot not found (e.g. swapped before init attached it): append the
+      // footer, then re-attach the below-editor container so it stays last.
+      this.ui.addChild(nextFooter);
+      this.ui.removeChild(this.widgetContainerBelow);
+      this.ui.addChild(this.widgetContainerBelow);
     }
 
     this.ui.requestRender();
