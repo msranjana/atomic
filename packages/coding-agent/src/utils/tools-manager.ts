@@ -2,17 +2,15 @@ import chalk from "chalk";
 import { type SpawnSyncReturns, spawnSync } from "child_process";
 import {
   chmodSync,
-  createWriteStream,
   existsSync,
   mkdirSync,
   readdirSync,
   renameSync,
   rmSync,
 } from "fs";
+import { writeFile } from "fs/promises";
 import { arch, platform } from "os";
 import { join } from "path";
-import { Readable } from "stream";
-import { pipeline } from "stream/promises";
 import { APP_NAME, ENV_OFFLINE, getBinDir, getEnvValue } from "../config.ts";
 
 const TOOLS_DIR = getBinDir();
@@ -154,8 +152,7 @@ async function downloadFile(url: string, dest: string): Promise<void> {
     throw new Error("No response body");
   }
 
-  const fileStream = createWriteStream(dest);
-  await pipeline(Readable.fromWeb(response.body), fileStream);
+  await writeFile(dest, Buffer.from(await response.arrayBuffer()));
 }
 
 function findBinaryRecursively(
