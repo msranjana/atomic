@@ -88,9 +88,27 @@ function truncLine(text: string, maxWidth: number): string {
 }
 
 const RUNNING_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-const STATIC_RUNNING_GLYPH = "●";
+
+/**
+ * Spinner cadence (ms per frame). The running glyph is derived from wall-clock
+ * time so every active spinner advances smoothly and in lockstep, independent
+ * of how often (or how irregularly) progress data updates arrive. The animation
+ * timers below only schedule re-renders; the displayed frame always comes from
+ * the clock. This fixes the frozen/stuttering spinner from issue #1084 while
+ * keeping per-frame diffs to a single glyph cell so the differential renderer
+ * never needs a full-clear (no flicker).
+ */
+export const RUNNING_ANIMATION_MS = 80;
 
 type ProgressSeedSource = Partial<Pick<AgentProgress, "index" | "toolCount" | "tokens" | "durationMs" | "lastActivityAt" | "currentToolStartedAt" | "turnCount">>;
+
+/**
+ * Wall-clock-derived animation frame counter. Advances exactly one step every
+ * `RUNNING_ANIMATION_MS`. Exposed for tests so they can pin a deterministic now.
+ */
+export function currentRunningFrame(now: number = Date.now()): number {
+	return Math.floor(now / RUNNING_ANIMATION_MS);
+}
 
 function runningSeed(...values: Array<number | undefined>): number | undefined {
 	let seed: number | undefined;
@@ -102,8 +120,11 @@ function runningSeed(...values: Array<number | undefined>): number | undefined {
 }
 
 function runningGlyph(seed?: number): string {
-	if (seed === undefined) return STATIC_RUNNING_GLYPH;
-	return RUNNING_FRAMES[Math.abs(seed) % RUNNING_FRAMES.length]!;
+	// Fold the wall-clock frame into the (optional) progress seed so the glyph
+	// advances over time. The frame is always finite, so a running entity always
+	// animates; the seed only offsets its starting phase between concurrent agents.
+	const animatedSeed = runningSeed(seed, currentRunningFrame()) ?? 0;
+	return RUNNING_FRAMES[Math.abs(animatedSeed) % RUNNING_FRAMES.length]!;
 }
 
 function progressRunningSeed(progress: ProgressSeedSource | undefined): number | undefined {
@@ -119,15 +140,83 @@ function progressRunningSeed(progress: ProgressSeedSource | undefined): number |
 	);
 }
 
-interface LegacyResultAnimationContext {
-	state: { subagentResultAnimationTimer?: ReturnType<typeof setInterval> };
+type ResultAnimationState = { subagentResultAnimationTimer?: ReturnType<typeof setInterval> };
+
+interface ResultAnimationContext {
+	state: ResultAnimationState;
+	invalidate: () => void;
 }
 
-export function clearLegacyResultAnimationTimer(context: LegacyResultAnimationContext): void {
+type LegacyResultAnimationContext = { state: ResultAnimationState };
+type ResultAnimationEntry = ResultAnimationContext;
+
+// Registry of every live result-animation timer so they can be torn down in one
+// shot on reload/shutdown even if their owning render context never re-renders.
+// Each tick reads the latest `invalidate` from here so a re-sync can refresh the
+// callback if the host ever swaps render contexts for the same renderable.
+const resultAnimationTimers = new Map<ReturnType<typeof setInterval>, ResultAnimationEntry>();
+
+function resultIsRunning(result: AgentToolResult<Details>): boolean {
+	return Boolean(
+		result.details?.progress?.some((entry) => entry.status === "running")
+		|| result.details?.results.some((entry) => entry.progress?.status === "running"),
+	);
+}
+
+function stopResultAnimation(context: LegacyResultAnimationContext): void {
 	const timer = context.state.subagentResultAnimationTimer;
 	if (!timer) return;
 	clearInterval(timer);
+	resultAnimationTimers.delete(timer);
 	context.state.subagentResultAnimationTimer = undefined;
+}
+
+export function clearLegacyResultAnimationTimer(context: LegacyResultAnimationContext): void {
+	stopResultAnimation(context);
+}
+
+/**
+ * Keep a running subagent result's spinner animating by scheduling a steady
+ * re-render while it is active, and tearing the timer down once it settles.
+ * The timer only calls `context.invalidate()`; the glyph value itself comes
+ * from {@link currentRunningFrame}, so each tick produces a single-glyph diff.
+ */
+export function syncResultAnimation(result: AgentToolResult<Details>, context: ResultAnimationContext): void {
+	if (!resultIsRunning(result)) {
+		stopResultAnimation(context);
+		return;
+	}
+	const existing = context.state.subagentResultAnimationTimer;
+	if (existing) {
+		// Keep using the most recent invalidate in case the host handed us a fresh
+		// render context object on this re-sync.
+		const entry = resultAnimationTimers.get(existing);
+		if (entry) entry.invalidate = context.invalidate;
+		return;
+	}
+	const timer = setInterval(() => {
+		const entry = resultAnimationTimers.get(timer);
+		if (!entry) return;
+		try {
+			entry.invalidate();
+		} catch {
+			// A cosmetic spinner tick must never crash the host (e.g. a stale extension
+			// context after reload/session swap, or any other render glitch). Stop this
+			// timer; the next real render re-syncs and restarts it while still running.
+			stopResultAnimation(context);
+		}
+	}, RUNNING_ANIMATION_MS);
+	timer.unref?.();
+	context.state.subagentResultAnimationTimer = timer;
+	resultAnimationTimers.set(timer, { state: context.state, invalidate: context.invalidate });
+}
+
+export function stopResultAnimations(): void {
+	for (const [timer, entry] of resultAnimationTimers) {
+		clearInterval(timer);
+		entry.state.subagentResultAnimationTimer = undefined;
+	}
+	resultAnimationTimers.clear();
 }
 
 function extractOutputTarget(task: string): string | undefined {
@@ -836,18 +925,95 @@ function fitWidgetLineBudget(lines: string[], theme: Theme, width: number, expan
 	return [...lines.slice(0, visibleLines), truncLine(theme.fg("dim", hint), width)];
 }
 
-function buildWidgetComponent(jobs: AsyncJobState[], expanded: boolean): (_tui: unknown, theme: Theme) => Component {
-	return (_tui, theme) => {
-		const width = getTermWidth();
+/**
+ * Live async-agents widget. Recomputes its lines on every render so the
+ * wall-clock-driven running glyph (and elapsed-time labels) stay current; the
+ * widget animation ticker below schedules those re-renders while jobs run.
+ */
+class LiveWidgetComponent implements Component {
+	private readonly container = new Container();
+
+	constructor(
+		private readonly jobs: AsyncJobState[],
+		private readonly theme: Theme,
+		private readonly getExpanded: () => boolean,
+	) {}
+
+	render(width: number): string[] {
+		const expanded = this.getExpanded();
 		const lines = expanded
-			? buildWidgetLines(jobs, theme, width, true)
-			: jobs.length === 1
-				? compactSingleWidgetLines(jobs[0]!, theme, width)
-				: buildWidgetLines(jobs, theme, width, false);
-		const container = new Container();
-		for (const line of fitWidgetLineBudget(lines, theme, width, expanded)) container.addChild(new Text(line, 1, 0));
-		return container;
-	};
+			? buildWidgetLines(this.jobs, this.theme, width, true)
+			: this.jobs.length === 1
+				? compactSingleWidgetLines(this.jobs[0]!, this.theme, width)
+				: buildWidgetLines(this.jobs, this.theme, width, false);
+		this.container.clear();
+		for (const line of fitWidgetLineBudget(lines, this.theme, width, expanded)) this.container.addChild(new Text(line, 1, 0));
+		return this.container.render(width);
+	}
+
+	invalidate(): void {
+		this.container.invalidate();
+	}
+}
+
+function buildWidgetComponent(jobs: AsyncJobState[], getExpanded: () => boolean): (_tui: unknown, theme: Theme) => Component {
+	return (_tui, theme) => new LiveWidgetComponent(jobs, theme, getExpanded);
+}
+
+interface RenderRequestingContext {
+	ui: ExtensionContext["ui"] & { requestRender?: () => void };
+}
+
+// There is only ever one async-agents widget per host process, so the widget
+// ticker keeps its driving context/jobs in module-level singletons.
+let latestWidgetCtx: ExtensionContext | undefined;
+let latestWidgetJobs: AsyncJobState[] = [];
+let widgetTimer: ReturnType<typeof setInterval> | undefined;
+
+function hasAnimatedWidgetJobs(jobs: AsyncJobState[]): boolean {
+	// Animate while any job — or any of its nested steps — is still running so the
+	// header/step spinners never freeze before the work actually settles.
+	return jobs.some((job) => job.status === "running" || job.steps?.some((step) => step.status === "running"));
+}
+
+function refreshAnimatedWidget(): void {
+	if (!latestWidgetCtx?.hasUI) return;
+	try {
+		// The cast is required because narrowing on `hasUI` above collapses `ui` to
+		// the base ExtensionUIContext, which does not declare the optional
+		// requestRender that the running interactive host actually provides.
+		(latestWidgetCtx as RenderRequestingContext).ui.requestRender?.();
+	} catch {
+		// Never let a cosmetic widget tick crash the host; stop on any error.
+		stopWidgetAnimation();
+	}
+}
+
+function ensureWidgetAnimation(): void {
+	if (widgetTimer) return;
+	widgetTimer = setInterval(() => {
+		if (!hasAnimatedWidgetJobs(latestWidgetJobs)) {
+			stopWidgetAnimation();
+			return;
+		}
+		refreshAnimatedWidget();
+	}, RUNNING_ANIMATION_MS);
+	widgetTimer.unref?.();
+}
+
+// Stop only the ticker, keeping the last-rendered widget context/jobs intact.
+function stopWidgetTicker(): void {
+	if (widgetTimer) {
+		clearInterval(widgetTimer);
+		widgetTimer = undefined;
+	}
+}
+
+// Full teardown: stop the ticker and forget the driving context/jobs entirely.
+export function stopWidgetAnimation(): void {
+	stopWidgetTicker();
+	latestWidgetCtx = undefined;
+	latestWidgetJobs = [];
 }
 
 export function buildWidgetLines(jobs: AsyncJobState[], theme: Theme, width = getTermWidth(), expanded = false): string[] {
@@ -925,11 +1091,21 @@ export function buildWidgetLines(jobs: AsyncJobState[], theme: Theme, width = ge
  */
 export function renderWidget(ctx: ExtensionContext, jobs: AsyncJobState[]): void {
 	if (jobs.length === 0) {
+		stopWidgetAnimation();
 		if (ctx.hasUI) ctx.ui.setWidget(WIDGET_KEY, undefined);
 		return;
 	}
-	if (!ctx.hasUI) return;
-	ctx.ui.setWidget(WIDGET_KEY, buildWidgetComponent(jobs, ctx.ui.getToolsExpanded?.() ?? false));
+	if (!ctx.hasUI) {
+		stopWidgetAnimation();
+		return;
+	}
+	latestWidgetCtx = ctx;
+	latestWidgetJobs = [...jobs];
+	ctx.ui.setWidget(WIDGET_KEY, buildWidgetComponent(jobs, () => ctx.ui.getToolsExpanded?.() ?? false));
+	// Keep the just-rendered ctx/jobs as the last-rendered state; only the ticker
+	// is conditional on whether anything is still animating.
+	if (hasAnimatedWidgetJobs(jobs)) ensureWidgetAnimation();
+	else stopWidgetTicker();
 }
 
 function renderSingleCompact(d: Details, r: Details["results"][number], theme: Theme): Component {
