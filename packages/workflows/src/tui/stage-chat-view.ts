@@ -109,6 +109,12 @@ export interface StageChatViewOpts {
   onClose: () => void;
   /** Request a host TUI repaint after SDK events mutate local chat state. */
   requestRender?: () => void;
+  /**
+   * Re-assert overlay keyboard focus. Showing a stage custom UI (e.g. the
+   * readiness gate) must make the overlay the focused pi-tui component again,
+   * otherwise key events keep going elsewhere and the UI looks frozen (#1120).
+   */
+  requestFocus?: () => void;
   /** Live pi-tui host objects. When present, stage input uses pi's editor UI. */
   piTui?: TUI;
   piTheme?: unknown;
@@ -190,6 +196,8 @@ export class StageChatView implements Component, Focusable {
   private onDetach: () => void;
   private onClose: () => void;
   private requestRender: (() => void) | undefined;
+  private requestFocus: (() => void) | undefined;
+  private focusHoldTimer: ReturnType<typeof setInterval> | undefined;
   private getViewportRows?: () => number | undefined;
   private piTui?: TUI;
   private piTheme?: unknown;
@@ -198,6 +206,7 @@ export class StageChatView implements Component, Focusable {
   private chatHost: ChatSessionHost<NoticeEntry>;
   private stageUiBroker: StageUiBroker;
   private mountedCustomUi: MountedStageCustomUi | null = null;
+  private mountingRequestId: string | null = null;
   private promptState: PromptCardState | null = null;
   private promptEditor: EditorComponent | null = null;
   private promptEditorPromptId: string | null = null;
@@ -227,6 +236,25 @@ export class StageChatView implements Component, Focusable {
     this.onDetach = opts.onDetach;
     this.onClose = opts.onClose;
     this.requestRender = opts.requestRender;
+    this.requestFocus = opts.requestFocus;
+    // Hold overlay keyboard focus against host focus-steals. pi-tui overlays
+    // capture focus on show, but any tui.setFocus() elsewhere (the host editor
+    // during background workflow activity) steals it, leaving the gate/composer
+    // input-dead. Re-claim it on a short interval — only while NOT streaming, so
+    // a mid-turn ask_user_question never refocuses during the agent's
+    // continuation (which would stall the stream).
+    if (opts.requestFocus) {
+      this.focusHoldTimer = setInterval(() => {
+        // Hold focus on the overlay whenever there is something to interact
+        // with: a mounted custom UI (ask_user_question / readiness gate) must
+        // stay answerable even mid-turn, and an idle composer should keep focus.
+        // During a pure streaming continuation (no custom UI mounted) we leave
+        // focus alone so we never reclaim it out from under the agent's live
+        // output. requestFocus is idempotent, so this is a no-op whenever the
+        // overlay already owns focus.
+        if (this.mountedCustomUi !== null || !this._isStreaming()) this.requestFocus?.();
+      }, 150);
+    }
     this.getViewportRows = opts.getViewportRows;
     this.piTui = opts.piTui;
     this.piTheme = opts.piTheme;
@@ -367,7 +395,15 @@ export class StageChatView implements Component, Focusable {
   private async _showCustomUi(request: StageCustomUiRequest): Promise<void> {
     this.mountedCustomUi?.component.dispose?.();
     this.mountedCustomUi = null;
+    // Track the request currently being mounted. `mountStageCustomUi` is async,
+    // so the broker can resolve/reject/abort the request (clearing it via
+    // `_hideMountedCustomUi`) before we finish awaiting. Without this guard the
+    // post-await assignment below would strand a settled gate as a permanent
+    // `mountedCustomUi`, hiding the transcript and crashing on the next
+    // keystroke routed into the dead component (readiness gate #1099).
+    this.mountingRequestId = request.id;
     if (!this.piTui || this.piTheme === undefined || this.piKeybindings === undefined) {
+      this.mountingRequestId = null;
       this.stageUiBroker.reject(
         request,
         new Error("pi-workflows: stage custom UI cannot mount without attached TUI host"),
@@ -375,7 +411,7 @@ export class StageChatView implements Component, Focusable {
       return;
     }
     try {
-      this.mountedCustomUi = await mountStageCustomUi(
+      const mounted = await mountStageCustomUi(
         request,
         this.piTui,
         this.piTheme,
@@ -390,8 +426,25 @@ export class StageChatView implements Component, Focusable {
           this.requestRender?.();
         },
       );
+      // Settled or superseded while mounting: drop the freshly-built component
+      // instead of showing a gate the broker has already torn down.
+      if (this.mountingRequestId !== request.id) {
+        mounted.component.dispose?.();
+        return;
+      }
+      this.mountingRequestId = null;
+      this.mountedCustomUi = mounted;
+      // A freshly-shown custom UI (ask_user_question / readiness gate) must own
+      // keyboard focus to be answerable — including a question mounted mid-turn
+      // while the agent is "streaming" (it is blocked on this very question, and
+      // host focus may have drifted off the overlay during the turn, e.g. after a
+      // stay-loop composer submit). requestFocus is idempotent (a no-op when the
+      // overlay already owns focus), so this never re-runs a redundant focus
+      // transition that would stall the stream (#1120).
+      this.requestFocus?.();
       this.requestRender?.();
     } catch (error) {
+      if (this.mountingRequestId === request.id) this.mountingRequestId = null;
       this.stageUiBroker.reject(request, error);
     }
   }
@@ -579,6 +632,13 @@ export class StageChatView implements Component, Focusable {
     this._syncPromptState(stage?.pendingPrompt);
     const promptActive = !customUiActive && this.promptState !== null;
     const readOnlyArchive = this._isReadOnlyArchive(stage);
+
+    // ask_user_question / readiness-gate custom UI renders as a bottom panel
+    // (in the high-priority composer slot) so the live transcript stays visible
+    // and scrollable above it — matching the standalone ask_user_question tool.
+    // Structured prompt nodes and read-only archives keep their full-body
+    // treatment below.
+    const customUiLines = customUiActive ? this._renderCustomUi(w) : [];
     const chatChromeHidden = customUiActive || promptActive || readOnlyArchive;
     const pendingLines = chatChromeHidden ? [] : this.chatHost.renderPendingMessages(w);
     const workingLines = chatChromeHidden ? [] : this.chatHost.renderWorkingStatus(w);
@@ -594,27 +654,32 @@ export class StageChatView implements Component, Focusable {
       pendingRows: pendingLines.length,
       workingRows: workingLines.length,
       usageRows: usageLines.length,
-      editorRows: editorLines.length,
+      // The custom UI question takes the reserved bottom (composer) slot so the
+      // transcript above keeps as much room as possible and the question never
+      // clips below the overlay boundary.
+      editorRows: customUiActive ? customUiLines.length : editorLines.length,
       footerRows: footerLines.length,
     });
     const visiblePendingLines = pendingLines.slice(0, plan.pendingRows);
     const visibleWorkingLines = workingLines.slice(0, plan.workingRows);
     const visibleUsageLines = usageLines.slice(0, plan.usageRows);
-    const visibleEditorLines = editorLines.slice(0, plan.editorRows);
+    const visibleEditorLines = customUiActive
+      ? customUiLines.slice(0, plan.editorRows)
+      : editorLines.slice(0, plan.editorRows);
     const visibleFooterLines = footerLines.slice(0, plan.footerRows);
     const bodyBudget = plan.bodyRows;
     if (blocked) this.chatHost.scrollToBottom();
 
     let bodyLines: string[];
-    if (customUiActive) {
-      bodyLines = this._renderCustomUiBody(w, bodyBudget);
-    } else if (promptActive) {
+    if (promptActive) {
       bodyLines = this._renderPromptBody(w, bodyBudget);
     } else if (blocked) {
       bodyLines = this._renderBlockedBody(w, bodyBudget, stage);
     } else if (readOnlyArchive) {
       bodyLines = this._renderReadOnlyArchiveBody(w, bodyBudget, stage);
     } else {
+      // Live transcript. When a custom UI question is active it renders in the
+      // composer slot above; the transcript here stays visible and scrollable.
       bodyLines = this.chatHost.renderBody(w, bodyBudget);
     }
 
@@ -844,11 +909,13 @@ export class StageChatView implements Component, Focusable {
     return lines;
   }
 
-  private _renderCustomUiBody(width: number, budget: number): string[] {
+  // Natural-height render of the mounted custom UI (no body padding): it is
+  // placed in the composer slot so the transcript stays scrollable above it.
+  private _renderCustomUi(width: number): string[] {
     const component = this.mountedCustomUi?.component;
-    if (component) setComponentFocused(component, this.focused);
-    const lines = component ? component.render(width) : [];
-    return this._fitBodyLines(lines, width, budget);
+    if (!component) return [];
+    setComponentFocused(component, this.focused);
+    return component.render(width);
   }
 
   private _renderPromptBody(width: number, budget: number): string[] {
@@ -1041,14 +1108,28 @@ export class StageChatView implements Component, Focusable {
   handleInput(data: string): boolean {
     if (this.mountedCustomUi) {
       if (matchesKey(data, Key.ctrl("d"))) {
-        this._rejectMountedCustomUi("stage custom UI detached");
+        // Detach stops *viewing* the stage; it does not cancel a pending
+        // human-input request. Release the local display only — the request
+        // stays pending (the stage remains awaiting_input) and is re-displayed
+        // when the user re-attaches.
+        this._releaseMountedCustomUi();
         if (this._isPaused()) this.onClose();
         else this.onDetach();
         return true;
       }
       if (matchesKey(data, Key.ctrl("c"))) {
-        this._rejectMountedCustomUi("stage custom UI closed");
+        // Close hides the overlay; the background run — and its pending
+        // human-input request — keep living. Release the local display only.
+        this._releaseMountedCustomUi();
         this.onClose();
+        return true;
+      }
+      // Let scroll input (mouse wheel / pageUp / pageDown / home / end) reach
+      // the transcript so history stays scrollable while the question is shown,
+      // matching the standalone ask_user_question tool. Navigation keys
+      // (arrows / enter / typing) fall through to the question component.
+      if (this.chatHost.handleScrollInput(data)) {
+        this.requestRender?.();
         return true;
       }
       setComponentFocused(this.mountedCustomUi.component, this.focused);
@@ -1165,11 +1246,15 @@ export class StageChatView implements Component, Focusable {
   }
 
   dispose(): void {
+    if (this.focusHoldTimer !== undefined) {
+      clearInterval(this.focusHoldTimer);
+      this.focusHoldTimer = undefined;
+    }
     this._unsubscribeStore?.();
     this._unsubscribeStore = null;
     this._unsubscribeHandle?.();
     this._unsubscribeHandle = null;
-    this._rejectMountedCustomUi("stage chat view disposed");
+    this._releaseMountedCustomUi();
     this._disposePromptEditor();
     this._unregisterStageUiHost?.();
     this._unregisterStageUiHost = null;
@@ -1177,20 +1262,37 @@ export class StageChatView implements Component, Focusable {
   }
 
   private _hideMountedCustomUi(request: StageCustomUiRequest): void {
+    // Signal any in-flight `_showCustomUi` mount for this request to drop its
+    // component when it finishes — the broker is already tearing it down.
+    if (this.mountingRequestId === request.id) this.mountingRequestId = null;
     const mounted = this.mountedCustomUi;
     if (!mounted || mounted.request.id !== request.id) return;
     this.mountedCustomUi = null;
     mounted.component.dispose?.();
     this.chatHost.focused = this.focused;
     this.chatHost.scrollToBottom();
+    // Returning to the composer after a custom UI resolves (e.g. the readiness
+    // gate -> "stay") must re-assert overlay focus so the composer accepts
+    // input. Guarded for streaming so an answered mid-turn ask_user_question
+    // does not refocus during the agent's continuation (would stall it).
+    if (!this._isStreaming()) this.requestFocus?.();
     this.requestRender?.();
   }
 
-  private _rejectMountedCustomUi(message: string): void {
+  /**
+   * Stop displaying the mounted stage custom UI locally, WITHOUT settling its
+   * broker request. Detaching / closing / disposing the attached chat stops
+   * viewing the stage; it never cancels a pending human-input request. The
+   * request stays pending (the stage remains awaiting_input) so re-attaching
+   * re-displays it. The request is settled only by the user answering (broker
+   * resolve) or the run aborting (its AbortSignal -> broker reject) — those are
+   * the single chokepoints for ending a human-input request.
+   */
+  private _releaseMountedCustomUi(): void {
+    this.mountingRequestId = null;
     const mounted = this.mountedCustomUi;
     if (!mounted) return;
     this.mountedCustomUi = null;
-    this.stageUiBroker.reject(mounted.request, new Error(`pi-workflows: ${message}`));
     mounted.component.dispose?.();
   }
 

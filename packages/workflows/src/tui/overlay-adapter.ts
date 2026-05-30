@@ -217,6 +217,13 @@ export function buildGraphOverlayAdapter(
     if (mounted) {
       currentView?.retarget(runId, stageId);
       setMouseScrollTracking(currentView?.wantsMouseScrollTracking() ?? true);
+      // Restore keyboard focus to the visible overlay after retargeting.
+      // pi-tui dispatches key events only to the focused component, so a
+      // mounted-but-visible overlay that is retargeted (e.g. to a stage-scoped
+      // HIL prompt / readiness gate) would otherwise appear frozen — arrows,
+      // Enter, Ctrl+D and `q` all dead — if focus stayed on an underlying or
+      // previously-focused pane (issue #1120).
+      currentHandle?.focus();
       return;
     }
 
@@ -274,6 +281,21 @@ export function buildGraphOverlayAdapter(
         requestRender: () => {
           if (currentHandle?.isHidden() === true) return;
           tui.requestRender?.();
+        },
+        // Re-assert overlay keyboard focus on demand. The attached stage chat
+        // calls this when it shows a broker custom UI (e.g. the readiness gate)
+        // so the gate receives input even if focus drifted off the overlay
+        // while the agent's turn was streaming (#1120).
+        requestFocus: () => {
+          if (currentHandle?.isHidden() === true) return;
+          // Idempotent: only grab focus if the overlay does not already own it.
+          // A redundant focus() while already focused re-runs pi-tui's focus
+          // transition mid-stream and stalls the agent's continuation (#1120,
+          // the "ac" freeze). Skipping the no-op case lets callers ask for focus
+          // freely — e.g. when showing a mid-turn ask_user_question — without a
+          // fragile "only when not streaming" guard at every call site.
+          if (currentHandle?.isFocused() === true) return;
+          currentHandle?.focus();
         },
         setMouseScrollTracking,
       } as ConstructorParameters<typeof WorkflowAttachPane>[0] & {

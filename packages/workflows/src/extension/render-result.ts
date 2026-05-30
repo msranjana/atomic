@@ -11,7 +11,7 @@
  *  - pi-subagents src/extension/index.ts renderResult slot
  */
 
-import type { PendingPrompt, RunSnapshot, StageSnapshot, StageStatus } from "../shared/store-types.js";
+import type { PendingPrompt, RunSnapshot, StageInputRequest, StageSnapshot, StageStatus } from "../shared/store-types.js";
 import type { WorkflowDetails } from "../shared/types.js";
 import type { RunDetail } from "../runs/background/status.js";
 import { renderInputsSchema } from "../shared/render-inputs-schema.js";
@@ -107,6 +107,7 @@ type StageListItem = {
   error?: string;
   awaitingInputSince?: number;
   pendingPrompt?: PendingPrompt;
+  inputRequest?: StageInputRequest;
 };
 type StageListResult = { action: "stages"; runId: string; filter: string; stages: StageListItem[]; error?: string };
 type StageDetailResult = { action: "stage"; runId: string; stage?: StageSnapshot; error?: string };
@@ -221,6 +222,19 @@ function transcriptNoticeText(entries: readonly TranscriptEntry[]): string {
 export function renderResult(result: WorkflowToolResult, opts?: RenderResultOpts): string {
   const partial = opts?.isPartial === true;
   const themed = opts?.plain !== true;
+
+  // Runtime guard. The tool-result renderer passes `result.details`, which can
+  // be absent or not yet shaped during streaming/partial renders or on error
+  // paths that return content without a structured payload. Dereferencing a
+  // missing `action` here previously threw and crashed the TUI render loop, so
+  // degrade gracefully instead.
+  if (
+    result === null ||
+    typeof result !== "object" ||
+    typeof (result as { action?: unknown }).action !== "string"
+  ) {
+    return partial ? "" : renderNotice("WORKFLOW", "no result", opts, themed);
+  }
 
   switch (result.action) {
     case "list": {

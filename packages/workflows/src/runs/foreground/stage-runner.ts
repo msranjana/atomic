@@ -199,12 +199,59 @@ function extractMessageText(message: AgentSession["messages"][number]): string {
   return "";
 }
 
-function lastOutputTextFromMessages(messages: AgentSession["messages"]): string | undefined {
+function lastAssistantTextFromMessages(messages: AgentSession["messages"]): string | undefined {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
-    if (!message || (message.role !== "assistant" && message.role !== "toolResult")) continue;
+    // Only assistant prose is a valid non-terminating turn output. A tool
+    // result is the turn output ONLY when its tool terminated the turn, which
+    // is handled separately by `terminatingToolResultText`.
+    if (!message || message.role !== "assistant") continue;
     const text = extractMessageText(message).trim();
     if (text) return text;
+  }
+  return undefined;
+}
+
+/**
+ * When an agent turn ends on a tool that returned `terminate: true`, control
+ * returns with the tool result as the final conversational message and no
+ * trailing assistant response (see the structured-output contract in the
+ * Atomic extension docs). That tool result is the deterministic output of the
+ * turn, so it must win over any prose the model emitted *before* the tool call
+ * in the same assistant message (which `getLastAssistantText()` would otherwise
+ * surface). This keeps terminating structured-output tools such as the `goal`
+ * and `ralph` review gates' `review_decision` tool deterministic regardless of
+ * surrounding narration.
+ *
+ * Returns the trailing tool-result text ONLY when the most recent
+ * conversational message is a tool result whose tool call actually returned
+ * `terminate: true` (tracked at runtime from the session's tool_execution_end
+ * events — see `terminatingToolCallIds`). Returns `undefined` for a turn that
+ * ended on an assistant response, OR on a tool result from a non-terminating
+ * tool (e.g. a turn aborted/errored right after a tool call) — both fall back
+ * to the last assistant message.
+ */
+function terminatingToolResultText(
+  messages: AgentSession["messages"],
+  terminatingToolCallIds: ReadonlySet<string>,
+): string | undefined {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (!message) continue;
+    if (message.role === "toolResult") {
+      // The trailing message is a tool result. It is the deterministic turn
+      // output only if THIS tool call returned `terminate: true`; otherwise the
+      // turn ended on this tool for another reason (abort/error) and the last
+      // assistant message is the real output.
+      const toolCallId = (message as { toolCallId?: unknown }).toolCallId;
+      if (typeof toolCallId !== "string" || !terminatingToolCallIds.has(toolCallId)) {
+        return undefined;
+      }
+      const text = extractMessageText(message).trim();
+      return text.length > 0 ? text : undefined;
+    }
+    if (message.role === "assistant") return undefined;
+    // Skip non-conversational roles (system/user) while locating the tail.
   }
   return undefined;
 }
@@ -226,11 +273,21 @@ function asAgentSession(activeSession: StageSessionRuntime | undefined): AgentSe
 function lastAssistantTextFromSession(
   activeSession: StageSessionRuntime | undefined,
   fallback: string | undefined,
+  terminatingToolCallIds: ReadonlySet<string>,
 ): string | undefined {
   if (!activeSession) return fallback;
+  // A tool that returned `terminate: true` ends the turn with its tool result
+  // as the final message; that result is the deterministic stage output and
+  // wins over prose emitted before the terminating tool call. Detection is by
+  // the tool call's actual runtime terminate flag — NOT merely "the last
+  // message is a tool result".
+  const terminatingText = terminatingToolResultText(activeSession.messages, terminatingToolCallIds);
+  if (terminatingText !== undefined) return terminatingText;
+  // Otherwise the turn output is the last assistant message — never a tool
+  // result from a non-terminating tool.
   const direct = activeSession.getLastAssistantText?.();
   if (direct !== undefined && direct.trim()) return direct;
-  return lastOutputTextFromMessages(activeSession.messages) ?? direct ?? fallback;
+  return lastAssistantTextFromMessages(activeSession.messages) ?? direct ?? fallback;
 }
 
 const DEFAULT_MAX_OUTPUT_BYTES = 200 * 1024;
@@ -378,6 +435,26 @@ export function createStageContext(opts: StageRunnerOpts): InternalStageContext 
   let session: StageSessionRuntime | undefined;
   let sessionPromise: Promise<StageSessionRuntime> | undefined;
   let lastAssistantText: string | undefined;
+  // Tool-call ids whose tool returned `terminate: true` at runtime, observed
+  // from the session's `tool_execution_end` events. The SDK ends the turn on a
+  // terminating tool, so its tool result is the deterministic stage output; a
+  // trailing tool result from any other tool is NOT. See
+  // `lastAssistantTextFromSession`. The tool result *message* does not carry the
+  // terminate flag, so it must be tracked from the live event stream.
+  const terminatingToolCallIds = new Set<string>();
+  let unsubscribeTerminateWatcher: (() => void) | undefined;
+  const recordTerminatingToolCall = (event: unknown): void => {
+    if (event === null || typeof event !== "object") return;
+    const record = event as Record<string, unknown>;
+    if (record["type"] !== "tool_execution_end") return;
+    const result = record["result"];
+    if (result === null || typeof result !== "object") return;
+    if ((result as Record<string, unknown>)["terminate"] !== true) return;
+    const callId = record["toolCallId"];
+    if (typeof callId === "string" && callId.length > 0) {
+      terminatingToolCallIds.add(callId);
+    }
+  };
   let adapterMessages: AgentSession["messages"] = [];
   let disposed = false;
   let pendingThinkingLevel: Parameters<StageContext["setThinkingLevel"]>[0] | undefined;
@@ -463,6 +540,10 @@ export function createStageContext(opts: StageRunnerOpts): InternalStageContext 
     for (const listener of pendingListeners) {
       listenerUnsubscribes.set(listener, created.subscribe(listener));
     }
+    // Track terminating tool calls for this session so the stage result text is
+    // derived deterministically from a tool that actually ended the turn.
+    unsubscribeTerminateWatcher?.();
+    unsubscribeTerminateWatcher = created.subscribe((event) => recordTerminatingToolCall(event));
     return created;
   }
 
@@ -501,6 +582,9 @@ export function createStageContext(opts: StageRunnerOpts): InternalStageContext 
     sessionPromise = undefined;
     for (const unsubscribe of listenerUnsubscribes.values()) unsubscribe();
     listenerUnsubscribes.clear();
+    unsubscribeTerminateWatcher?.();
+    unsubscribeTerminateWatcher = undefined;
+    terminatingToolCallIds.clear();
     await current?.dispose();
   }
 
@@ -604,7 +688,7 @@ export function createStageContext(opts: StageRunnerOpts): InternalStageContext 
         return lastAssistantText;
       }
       await promptWithFallback(text, sdkOptions);
-      const rawText = lastAssistantTextFromSession(session, lastAssistantText) ?? "";
+      const rawText = lastAssistantTextFromSession(session, lastAssistantText, terminatingToolCallIds) ?? "";
       lastAssistantText = await finalizePromptOutput(rawText, outputOptions, runtimeCwd);
       return lastAssistantText;
     },
@@ -628,7 +712,7 @@ export function createStageContext(opts: StageRunnerOpts): InternalStageContext 
       // `ctx.complete()` can still use the stage AgentSession for simple text
       // completions. Completion-specific options require the dedicated adapter.
       await promptWithFallback(text, undefined, "complete");
-      lastAssistantText = lastAssistantTextFromSession(session, lastAssistantText) ?? "";
+      lastAssistantText = lastAssistantTextFromSession(session, lastAssistantText, terminatingToolCallIds) ?? "";
       return lastAssistantText;
     },
 
@@ -717,15 +801,18 @@ export function createStageContext(opts: StageRunnerOpts): InternalStageContext 
       for (const unsubscribe of listenerUnsubscribes.values()) unsubscribe();
       listenerUnsubscribes.clear();
       pendingListeners.clear();
+      unsubscribeTerminateWatcher?.();
+      unsubscribeTerminateWatcher = undefined;
+      terminatingToolCallIds.clear();
       await session?.dispose();
     },
 
     __getLastAssistantText() {
-      return lastAssistantTextFromSession(session, lastAssistantText);
+      return lastAssistantTextFromSession(session, lastAssistantText, terminatingToolCallIds);
     },
 
     getLastAssistantText() {
-      return lastAssistantTextFromSession(session, lastAssistantText);
+      return lastAssistantTextFromSession(session, lastAssistantText, terminatingToolCallIds);
     },
 
     async __ensureSession() {
