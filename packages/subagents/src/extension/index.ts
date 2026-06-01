@@ -23,7 +23,7 @@ import { discoverAgents } from "../agents/agents.ts";
 import { cleanupAllArtifactDirs, cleanupOldArtifacts, getArtifactsDir } from "../shared/artifacts.ts";
 import { resolveCurrentSessionId } from "../shared/session-identity.ts";
 import { cleanupOldChainDirs } from "../shared/settings.ts";
-import { renderSubagentResult, stopResultAnimations, stopWidgetAnimation, syncResultAnimation } from "../tui/render.ts";
+import { renderLiveSubagentResult, renderSubagentResult, stopResultAnimations, stopWidgetAnimation, type SubagentResultRenderState } from "../tui/render.ts";
 import { SubagentParams } from "./schemas.ts";
 import { createSubagentExecutor, type SubagentParamsLike } from "../runs/foreground/subagent-executor.ts";
 import { createAsyncJobTracker } from "../runs/background/async-job-tracker.ts";
@@ -117,10 +117,12 @@ function isStaleExtensionContextError(error: unknown): boolean {
 	return error instanceof Error && error.message.includes("Extension context no longer active");
 }
 
+type SubagentToolRenderState = SubagentResultRenderState;
+
 function rebuildSlashResultContainer(
 	container: Container,
 	result: AgentToolResult<Details>,
-	options: { expanded: boolean },
+	options: { expanded: boolean; now?: number },
 	theme: ExtensionContext["ui"]["theme"],
 ): void {
 	container.clear();
@@ -135,20 +137,17 @@ function createSlashResultComponent(
 	details: SlashMessageDetails,
 	options: { expanded: boolean },
 	theme: ExtensionContext["ui"]["theme"],
-	requestRender: () => void,
 ): Container {
 	const container = new Container();
-	const animationState: { subagentResultAnimationTimer?: ReturnType<typeof setInterval> } = {};
 	let lastVersion = -1;
+	let lastSnapshotNow = 0;
 	container.render = (width: number): string[] => {
 		const snapshot = getSlashRenderableSnapshot(details);
-		if (snapshot.version !== lastVersion || isSlashResultRunning(snapshot.result)) {
+		if (snapshot.version !== lastVersion) {
 			lastVersion = snapshot.version;
-			rebuildSlashResultContainer(container, snapshot.result, options, theme);
+			lastSnapshotNow = Date.now();
+			rebuildSlashResultContainer(container, snapshot.result, { ...options, now: lastSnapshotNow }, theme);
 		}
-		// Keep the live slash card's spinner animating by scheduling steady
-		// re-renders while it runs (and tearing the timer down once it settles).
-		syncResultAnimation(snapshot.result, { state: animationState, invalidate: requestRender });
 		return Container.prototype.render.call(container, width);
 	};
 	return container;
@@ -296,7 +295,7 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 	pi.registerMessageRenderer<SlashMessageDetails>(SLASH_RESULT_TYPE, (message, options, theme) => {
 		const details = resolveSlashMessageDetails(message.details);
 		if (!details) return undefined;
-		return createSlashResultComponent(details, options, theme, () => state.lastUiContext?.ui.requestRender?.());
+		return createSlashResultComponent(details, options, theme);
 	});
 
 	pi.registerMessageRenderer<SubagentNotifyDetails>("subagent-notify", (message, options, theme) => {
@@ -397,7 +396,7 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 		}, 0);
 	}
 
-	const tool: ToolDefinition<typeof SubagentParams, Details> = {
+	const tool: ToolDefinition<typeof SubagentParams, Details, SubagentToolRenderState> = {
 		name: "subagent",
 		label: "Subagent",
 		description: `Delegate to subagents or manage agent definitions.
@@ -468,10 +467,12 @@ DIAGNOSTICS:
 		},
 
 		renderResult(result, options, theme, context) {
-			// Animate the live subagent spinner by scheduling steady re-renders
-			// while the result is running; the timer stops once it settles.
-			syncResultAnimation(result, context);
-			return renderSubagentResult(result, options, theme);
+			// Tool-result rows live in chat scrollback. The host keeps context.state
+			// on the ToolExecutionComponent for this row, so foreground updates/ticks
+			// capture an explicit frame timestamp and arbitrary host re-renders reuse
+			// it. Running foreground rows intentionally advance via their own timer;
+			// completed scrollback remains a stable point-in-time snapshot.
+			return renderLiveSubagentResult(result, options, theme, context);
 		},
 
 	};
