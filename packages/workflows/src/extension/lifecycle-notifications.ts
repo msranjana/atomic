@@ -1,7 +1,7 @@
 import type {
   ExtensionAPI,
   PiMessageRenderComponent,
-  PiMessageRendererResult,
+  PiMessageRenderer,
 } from "./index.js";
 import type { Store } from "../shared/store.js";
 import type {
@@ -10,12 +10,12 @@ import type {
   RunSnapshot,
   RunStatus,
   StageInputKind,
-  StageInputRequest,
   StageSnapshot,
   StageStatus,
   StoreSnapshot,
 } from "../shared/store-types.js";
-import { wrapPlainText } from "../tui/text-helpers.js";
+import { deriveGraphThemeFromPiTheme, type GraphTheme } from "../tui/graph-theme.js";
+import { renderWorkflowNoticeCard, type WorkflowNoticeTone } from "../tui/workflow-notice-card.js";
 
 export const LIFECYCLE_NOTICE_CUSTOM_TYPE = "workflows:lifecycle-notice";
 export const LIFECYCLE_NOTICE_SNIPPET_LIMIT = 240;
@@ -66,7 +66,7 @@ export interface WorkflowLifecycleNotificationOptions {
   readonly seedExisting?: boolean;
 }
 
-type RawRenderer = (payload: unknown) => PiMessageRendererResult;
+type RawRenderer = PiMessageRenderer;
 
 // Process-lifetime registration dedupe: extension hosts are object identities
 // and may be garbage-collected, but renderer registrations are not unregistered.
@@ -208,8 +208,9 @@ export function installWorkflowLifecycleNotifications(
     if (state.deliveredInputPrompts.has(key)) return;
 
     state.deliveredInputPrompts.add(key);
-    if (state.suppressionDepth > 0) return;
-    emit(makeStageAwaitingInputNotice(run, stage));
+    // Awaiting-input states are tracked for dedupe/restore, but must not enqueue
+    // a main-chat steer turn. Waking the active agent with an actionable prompt
+    // can let the model answer workflow HIL without a deliberate user action.
   };
 
   const emitRunAwaitingInputNoticeOnce = (run: RunSnapshot): void => {
@@ -219,8 +220,8 @@ export function installWorkflowLifecycleNotifications(
     if (state.deliveredInputPrompts.has(key)) return;
 
     state.deliveredInputPrompts.add(key);
-    if (state.suppressionDepth > 0) return;
-    emit(makeRunAwaitingInputNotice(run, run.pendingPrompt));
+    // See stage-level awaiting-input handling above: prompt state remains visible
+    // through workflow status/connect surfaces instead of the main chat context.
   };
 
   const inspect = (snapshot: StoreSnapshot): void => {
@@ -248,10 +249,10 @@ export function registerLifecycleNoticeRenderer(
   const host = options.rendererHost ?? register;
   if (rendererRegisteredHosts.has(host)) return;
 
-  const renderer: RawRenderer = (raw) => {
+  const renderer: RawRenderer = (raw, _options, piTheme) => {
     const message = raw as { details?: WorkflowLifecycleNoticeDetails };
     if (!message.details) return undefined;
-    return makeNoticeComponent(message.details);
+    return makeNoticeComponent(message.details, themeFromRenderer(piTheme));
   };
 
   register(LIFECYCLE_NOTICE_CUSTOM_TYPE, renderer);
@@ -261,23 +262,23 @@ export function registerLifecycleNoticeRenderer(
 export function formatWorkflowLifecycleNoticeText(details: WorkflowLifecycleNoticeDetails): string {
   const workflowName = escapeQuotedText(details.workflowName);
   if (details.kind === "completed") {
-    return `✅ Workflow "${workflowName}" completed (run ${details.runId}). Inspect: /workflow status ${details.runId}`;
+    return `✓ Workflow "${workflowName}" completed (run ${details.runId}). Inspect: /workflow status ${details.runId}`;
   }
   if (details.kind === "failed") {
     const stage = details.stageName ?? details.failedStageId;
     const stageText = stage ? `, stage ${stage}` : "";
     const errorText = details.error ? `: ${details.error}` : "";
-    return `❌ Workflow "${workflowName}" failed (run ${details.runId}${stageText})${errorText}. Inspect: /workflow status ${details.runId}`;
+    return `✗ Workflow "${workflowName}" failed (run ${details.runId}${stageText})${errorText}. Inspect: /workflow status ${details.runId}`;
   }
   const prompt = details.promptMessage ? ` Prompt: ${details.promptMessage}` : "";
   if (details.scope === "run") {
-    return `❓ Workflow "${workflowName}" needs input (run ${details.runId}).${prompt} Respond: /workflow connect ${details.runId} to answer this run-level prompt.`;
+    return `？ Workflow "${workflowName}" needs input (run ${details.runId}).${prompt} Respond: /workflow connect ${details.runId} to answer this run-level prompt.`;
   }
   const stage = details.stageName ?? details.stageId ?? "unknown";
   const responseHint = details.stageId && details.promptId
     ? `/workflow connect ${details.runId} or workflow({ action: "send", runId: ${jsonString(details.runId)}, stageId: ${jsonString(details.stageId)}, promptId: ${jsonString(details.promptId)}, response: ... })`
     : `/workflow connect ${details.runId}`;
-  return `❓ Workflow "${workflowName}" needs input (run ${details.runId}, stage ${stage}).${prompt} Respond: ${responseHint}.`;
+  return `？ Workflow "${workflowName}" needs input (run ${details.runId}, stage ${stage}).${prompt} Respond: ${responseHint}.`;
 }
 
 function makeTerminalNotice(
@@ -302,35 +303,6 @@ function makeTerminalNotice(
   };
 }
 
-function makeStageAwaitingInputNotice(run: RunSnapshot, stage: StageSnapshot): WorkflowLifecycleNoticeDetails {
-  const prompt = stage.pendingPrompt;
-  const inputRequest = stage.inputRequest;
-  return {
-    kind: "awaiting_input",
-    scope: "stage",
-    runId: run.id,
-    workflowName: run.name,
-    status: stage.status,
-    stageId: stage.id,
-    stageName: stage.name,
-    ...(prompt ? promptFields(prompt) : inputRequest ? inputRequestFields(inputRequest) : {}),
-    // Normal store paths stamp awaitingInputSince; Date.now() is defensive for malformed restored snapshots.
-    createdAt: prompt?.createdAt ?? inputRequest?.createdAt ?? stage.awaitingInputSince ?? Date.now(),
-  };
-}
-
-function makeRunAwaitingInputNotice(run: RunSnapshot, prompt: PendingPrompt): WorkflowLifecycleNoticeDetails {
-  return {
-    kind: "awaiting_input",
-    scope: "run",
-    runId: run.id,
-    workflowName: run.name,
-    status: run.status,
-    ...promptFields(prompt),
-    createdAt: prompt.createdAt,
-  };
-}
-
 function warnLifecycleSendFailure(error: unknown): void {
   if (process.env.ATOMIC_WORKFLOW_DEBUG !== "1") return;
   const message = error instanceof Error ? error.message : String(error);
@@ -349,26 +321,6 @@ function terminalRunKey(kind: "completed" | "failed", runId: string): string {
   return `${kind}:${runId}`;
 }
 
-function promptFields(
-  prompt: PendingPrompt,
-): Pick<WorkflowLifecycleNoticeDetails, "promptId" | "promptKind" | "promptMessage"> {
-  return {
-    promptId: prompt.id,
-    promptKind: prompt.kind,
-    promptMessage: truncateSnippet(prompt.message),
-  };
-}
-
-function inputRequestFields(
-  request: StageInputRequest,
-): Pick<WorkflowLifecycleNoticeDetails, "promptId" | "promptKind" | "promptMessage"> {
-  return {
-    promptId: request.id,
-    promptKind: request.kind,
-    promptMessage: truncateSnippet(request.questions.map((question) => question.question).join(" | ")),
-  };
-}
-
 function awaitingInputKey(runId: string, stage: StageSnapshot): string {
   const promptId = stage.pendingPrompt?.id ?? stage.inputRequest?.id;
   if (promptId) return `awaiting_input:${runId}:stage:${stage.id}:${promptId}`;
@@ -385,20 +337,70 @@ function truncateSnippet(value: string): string {
   return `${normalized.slice(0, LIFECYCLE_NOTICE_SNIPPET_LIMIT - 1)}…`;
 }
 
-function makeNoticeComponent(details: WorkflowLifecycleNoticeDetails): PiMessageRenderComponent {
+function makeNoticeComponent(
+  details: WorkflowLifecycleNoticeDetails,
+  theme: GraphTheme | undefined,
+): PiMessageRenderComponent {
   const text = formatWorkflowLifecycleNoticeText(details);
   return {
     render(width: number): string[] {
-      // Wrap to the render width so a long run id / workflow name never emits a
-      // line wider than the terminal. pi-tui hard-throws ("Rendered line N
-      // exceeds terminal width") on any over-wide rendered line, which would
-      // crash the whole TUI on narrow terminals or after a resize (#1109).
-      // `wrapPlainText` hard-breaks long unbreakable tokens (e.g. UUIDs), so
-      // every returned line is guaranteed to fit within `width`.
-      return wrapPlainText(text, width);
+      // Width < 32 cannot carry rounded card chrome without exceeding the
+      // terminal, so the card helper falls back to wrapped plain text there.
+      return renderLifecycleNoticeCard(details, { width, theme, fallbackText: text });
     },
     invalidate() {
       /* stored lifecycle notices are immutable */
     },
   };
+}
+
+function renderLifecycleNoticeCard(
+  details: WorkflowLifecycleNoticeDetails,
+  opts: { width: number; theme?: GraphTheme; fallbackText: string },
+): string[] {
+  const tone: WorkflowNoticeTone = details.kind === "failed" ? "error" : details.kind === "awaiting_input" ? "warning" : "success";
+  const title = details.kind === "failed"
+    ? "WORKFLOW FAILED"
+    : details.kind === "awaiting_input"
+      ? "WORKFLOW INPUT"
+      : "WORKFLOW COMPLETE";
+  const glyph = details.kind === "failed" ? "✗" : details.kind === "awaiting_input" ? "？" : "✓";
+  const stage = details.stageName ?? details.failedStageId ?? details.stageId;
+  const headline = details.kind === "failed"
+    ? `Workflow "${details.workflowName}" failed`
+    : details.kind === "awaiting_input"
+      ? `Workflow "${details.workflowName}" needs input`
+      : `Workflow "${details.workflowName}" completed`;
+  return renderWorkflowNoticeCard({
+    title,
+    glyph,
+    headline,
+    tone,
+    fields: [
+      { label: "workflow", value: details.workflowName },
+      { label: "run", value: details.runId },
+      { label: "stage", value: stage },
+      { label: "prompt", value: details.promptMessage, tone: "muted" },
+      { label: "error", value: details.error, tone: "error" },
+      { label: "duration", value: formatDurationMs(details.durationMs), tone: "muted" },
+    ],
+    hints: [details.kind === "awaiting_input" ? `/workflow connect ${details.runId}` : `/workflow status ${details.runId}`],
+    fallbackText: opts.fallbackText,
+    width: opts.width,
+    ...(opts.theme ? { theme: opts.theme } : {}),
+  });
+}
+
+function formatDurationMs(durationMs: number | undefined): string | undefined {
+  if (durationMs === undefined) return undefined;
+  if (durationMs < 1000) return `${durationMs}ms`;
+  const seconds = durationMs / 1000;
+  if (seconds < 60) return `${seconds.toFixed(seconds < 10 ? 1 : 0)}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainder = Math.round(seconds % 60);
+  return `${minutes}m ${remainder}s`;
+}
+
+function themeFromRenderer(piTheme: unknown): GraphTheme | undefined {
+  return piTheme === undefined ? undefined : deriveGraphThemeFromPiTheme(piTheme);
 }
