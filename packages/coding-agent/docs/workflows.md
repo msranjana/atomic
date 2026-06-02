@@ -378,7 +378,7 @@ If the task is only deterministic TypeScript with no LLM/session stage, use a sc
 | Run, inspect, attach to, pause, interrupt, resume, or check status for an existing workflow | `/workflow ...` or `workflow({ action: ... })` |
 | Implement a small-to-medium scope change with an identifiable work surface, exact outcome, and named validation | `/workflow goal objective="..."` so Atomic keeps the run bounded, captures receipts in a goal ledger, gates completion through reviewers, and stops as `complete`, `blocked`, or `needs_human` |
 | Plan and execute a larger migration, broad refactor, multi-package change, or spec-to-PR effort | `/workflow ralph prompt="..."` so Atomic can plan the approach, delegate implementation through sub-agents, simplify, review, iterate, and prepare a pull-request report |
-| Create or edit reusable automation | a TypeScript workflow definition with `defineWorkflow(...).run(...).compile()` |
+| Create or edit reusable automation | a TypeScript workflow definition exported from `defineWorkflow(...).compile()` |
 | Track one-off work without saving a workflow file | direct `workflow({ task })`, `workflow({ tasks })`, or `workflow({ chain })` calls |
 | Make a workflow robust | design the stage graph, context handoffs, artifacts, validation gates, model fallbacks, and human approval points before coding |
 
@@ -482,7 +482,7 @@ Atomic packages can ship workflows through package metadata or conventional dire
 
 Paths are relative to the package root and may use glob patterns. Include `atomic-package` for Atomic package discovery and `pi-package` when you want compatibility with existing package-gallery tooling.
 
-For new Atomic package examples, prefer `atomic.workflows` and `atomic.extensions`. `pi.workflows` and `pi.extensions` remain supported for compatibility with existing packages. If no manifest declares workflows, a conventional `workflows/` directory is auto-discovered. Singular `workflow/` is accepted as an alias. App-level config prefers `atomicConfig` where available; legacy `piConfig` is still read as a shim.
+For new Atomic package examples, prefer `atomic.workflows` and `atomic.extensions`. `pi.workflows` and `pi.extensions` remain supported for compatibility with existing packages. Workflows can be declared with `atomic.workflows` or discovered from conventional `workflows/` / `workflow/` directories. Unlike other resource types, package workflows still fall back to conventional directories when a package manifest exists but omits the workflow key. App-level config prefers `atomicConfig` where available; legacy `piConfig` is still read as a shim.
 
 Convention directory example:
 
@@ -841,7 +841,7 @@ Builder basics:
 
 `prompt` and `task` are aliases for task text. Prefer `prompt` inside authored workflow files because it mirrors lower-level `stage.prompt(...)`; `task` remains useful in direct tool calls and chain examples.
 
-A valid workflow must create at least one tracked stage by calling `ctx.task()`, `ctx.chain()`, `ctx.parallel()`, `ctx.stage()`, or `ctx.workflow()` in its run body. A no-stage workflow is skipped during discovery because it has no graph node to inspect, attach to, interrupt, resume, or render.
+Author workflows to create at least one tracked stage by calling `ctx.task()`, `ctx.chain()`, `ctx.parallel()`, `ctx.stage()`, or `ctx.workflow()` in the run body so each run has graph nodes to inspect, attach to, interrupt, resume, and render.
 
 ### Inputs
 
@@ -1215,29 +1215,23 @@ For lower-level integrations, `@bastani/workflows` also exports `setupGitWorktre
 - `/workflow <name> key=value ...` for interactive named runs
 - `/workflow connect|attach|pause|interrupt|resume|status|inputs|reload` for live control, inspection, and rediscovery
 - the `workflow` tool for agent-initiated orchestration and direct one-off runs
-- `runWorkflow(definition)` for explicit library or script usage
+Workflow definition files must export definitions produced by `defineWorkflow(...).compile()`. The former imperative object-form runner is not part of the public SDK, and authored workflow files cannot import `runWorkflow` from `@bastani/workflows`.
 
-Programmatic runner example:
+Standalone TypeScript workflow packages can import the typed SDK directly, with no hand-authored `.d.ts` or `declare module` shim:
 
 ```ts
-import { runWorkflow, type WorkflowOptions } from "@bastani/workflows";
+import { defineWorkflow, Type } from "@bastani/workflows";
 
-const definition = {
-  mode: "workflow",
-  workflow: "deep-research-codebase",
-  inputs: {
-    prompt: "map workflow sdk",
-    max_partitions: 1,
-    max_concurrency: 4,
-  },
-} as const;
-
-const options: WorkflowOptions = {};
-
-await runWorkflow(definition, options);
+export default defineWorkflow("map-workflow-sdk")
+  .input("prompt", Type.String({ default: "map workflow sdk" }))
+  .run(async (ctx) => {
+    await ctx.task("map", { prompt: ctx.inputs.prompt });
+    return {};
+  })
+  .compile();
 ```
 
-The programmatic definition object mirrors the workflow tool for named runs (`mode: "workflow"` / `"named"`), direct single-task runs (`"single"`), parallel runs (`"parallel"`), and chain runs (`"chain"`). Direct chains support `chainName` for status/artifact grouping and `chainDir` as a shared directory for relative reads, outputs, and worktree diffs.
+The `workflow` tool still supports direct one-off `task`, `tasks`, and `chain` modes. Direct chains support `chainName` for status/artifact grouping and `chainDir` as a shared directory for relative reads, outputs, and worktree diffs.
 
 Use `createRegistry()` when code needs to group definitions explicitly:
 
