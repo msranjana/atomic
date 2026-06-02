@@ -10,6 +10,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Removed the imperative `runWorkflow` object-form API from `@bastani/workflows`; workflow authors must export definitions produced by `defineWorkflow(...).compile()`, and forged `__piWorkflow: true` objects are rejected by discovery and composition.
 
+### Added
+
+- Added suffix-first workflow reasoning levels for `model` and `fallbackModels` entries such as `openai/gpt-5:high`, plus `WorkflowModelAttempt.reasoningLevel` metadata and optional `fallbackThinkingLevels` compatibility mapping ([#1199](https://github.com/bastani-inc/atomic/issues/1199)).
+
+### Changed
+
+- Changed bundled workflows to encode their existing reasoning levels directly on model and fallback model strings ([#1199](https://github.com/bastani-inc/atomic/issues/1199)).
+- Documented the `model_name:thinking_effort` suffix syntax and `thinkingLevel` migration guidance in the workflows docs and package README ([#1199](https://github.com/bastani-inc/atomic/issues/1199)).
+
+### Deprecated
+
+- Deprecated workflow `thinkingLevel` stage options in favor of per-candidate `:off|minimal|low|medium|high|xhigh` model suffixes; removal is deferred ([#1199](https://github.com/bastani-inc/atomic/issues/1199)).
+
+### Fixed
+
+- Made workflow reasoning-suffix parsing lenient so it no longer rejects legitimate colon-tagged model ids (for example OpenRouter `:free`/`:exacto` variants and Ollama `llama3:latest`); only canonical `:off|minimal|low|medium|high|xhigh` suffixes are stripped as reasoning levels, and unknown ids still surface the generic catalog "not available" error ([#1199](https://github.com/bastani-inc/atomic/issues/1199)).
+
 ## [0.8.23] - 2026-06-02
 
 ### Changed
