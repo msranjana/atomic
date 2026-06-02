@@ -129,18 +129,23 @@ function shortRunId(runId: string): string {
 }
 
 function workflowChildSummaryText(stage: StageSnapshot): string {
-  const child = stage.workflowChild;
+  const child = stage.workflowChild ?? stage.workflowChildRun;
   if (child === undefined) return durationText(stage);
   return `↳ ${child.workflow}`;
 }
 
 function workflowChildMetaText(stage: StageSnapshot): string {
-  const child = stage.workflowChild;
-  if (child === undefined) return metaText(stage);
+  const completed = stage.workflowChild;
+  if (completed !== undefined) {
+    const outputCount = Object.keys(completed.outputs).length;
+    const outputs = outputCount === 1 ? "1 out" : `${outputCount} outs`;
+    return `run ${shortRunId(completed.runId)} · ${outputs}`;
+  }
 
-  const outputCount = Object.keys(child.outputs).length;
-  const outputs = outputCount === 1 ? "1 out" : `${outputCount} outs`;
-  return `run ${shortRunId(child.runId)} · ${outputs}`;
+  const live = stage.workflowChildRun;
+  if (live !== undefined) return `run ${shortRunId(live.runId)} · live`;
+
+  return metaText(stage);
 }
 
 function statusLabel(status: StageStatus): string {
@@ -267,7 +272,7 @@ export function renderNodeCard(stage: StageSnapshot, opts: NodeCardOpts): string
   const top = `${bg}${bc}╭${topMiddle}╮${RESET}`;
   const bottom = `${bg}${bc}╰${"─".repeat(innerWidth)}╯${RESET}`;
 
-  // Interior — compact status + duration. Imported workflow boundary
+  // Interior — compact status + duration. Child workflow boundary
   // stages otherwise look like empty completed nodes, so use the first
   // body row for the child workflow identity and the final row for a
   // terse child-run summary. This keeps the graph dense while making

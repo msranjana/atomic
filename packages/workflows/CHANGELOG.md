@@ -8,27 +8,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Breaking Changes
 
-- Removed legacy workflow import declarations by registered workflow name or path object. Workflows must now use normal TypeScript imports and pass compiled workflow definitions to `.import(workflow, { as? })`.
+- Removed the unshipped `.import(...)` workflow builder API and string-alias child workflow calls. Workflows now compose children by importing compiled workflow definitions with TypeScript imports and passing those definitions directly to `ctx.workflow(workflowDefinition, options)`.
+- Removed parent-side child output selection/renaming from `ctx.workflow(...)`. Parent workflows now receive the child's declared `.output(...)` contract as `child.outputs`.
+- Made workflow outputs fully explicit so a workflow's input/output contract is the stable, self-documenting surface other workflows compose against. A workflow now exposes exactly the outputs it declares with `.output(...)`, and a `.run()` return that contains a key the workflow did not declare fails the run with `atomic-workflows: ... returned undeclared output "<key>"`. The implicit string `result` output and the `child.rawOutput` escape hatch were removed: declare `.output("result", schema)` and return `{ result }` if you want a `result` output, and declare every other field a parent should read.
+- Changed default transcript inspection from inlining about 50 recent entries to a reference-first 5-entry preview with `sessionFile`/`transcriptPath`; pass explicit `tail` or `limit` to override the preview size.
+- Removed the obsolete `.humanInTheLoop(...)` workflow builder API and its declaration-time interaction metadata; workflows should use runtime `ctx.ui.*` calls directly when they need human input.
 
 ### Added
 
-- Added TypeScript module-style workflow imports: `.import(compiledWorkflow, { as? })` registers the imported workflow's name for `ctx.workflow(...)`, while the bundled `deep-research-codebase`, `goal`, and `ralph` workflows are reusable from `@bastani/workflows/builtin` or individual builtin module paths.
-- Added first-class workflow imports for composition: workflows can declare `.import()` dependencies, child workflows can declare `.output()` contracts, discovery validates unresolved/circular/invalid import graphs, and `ctx.workflow()` runs imported workflows as nested runs with input validation, output selection/mapping, and a visible parent boundary stage ([#1071](https://github.com/bastani-inc/atomic/issues/1071)).
-- Added explicit workflow interaction metadata through `defineWorkflow(...).humanInTheLoop(reason?)` and a runtime execution policy that distinguishes interactive from non-interactive workflow runs ([#1123](https://github.com/bastani-inc/atomic/issues/1123)).
+- Added TypeScript module-style workflow composition: parent workflows can pass compiled child workflow definitions directly to `ctx.workflow(compiledWorkflow, options)`. The bundled `deep-research-codebase`, `goal`, `ralph`, and `open-claude-design` workflows are reusable from `@bastani/workflows/builtin` or individual builtin module paths.
+- Added first-class workflow composition: child workflows can declare `.output()` contracts, and `ctx.workflow()` runs compiled child workflow definitions as nested runs with input validation, schema-validated declared outputs, and a visible parent boundary stage ([#1071](https://github.com/bastani-inc/atomic/issues/1071)).
 
 ### Changed
 
+- Raised the bundled `deep-research-codebase` default `max_concurrency` from 4 to 100 so partitioned research stages fan out in parallel by default; lower it via the `max_concurrency` input on rate-limited or cost-sensitive setups (with `max_partitions` up to 100 and one locator/pattern-finder/analyzer/online-researcher specialist per partition, a single run can otherwise spawn many concurrent stage sessions).
+- Declared explicit output contracts for the bundled `deep-research-codebase`, `goal`, `ralph`, and `open-claude-design` workflows so parent workflows receive schema-validated child outputs.
+- Renamed workflow runtime error prefixes from `pi-workflows:` to `atomic-workflows:`.
 - Render workflow stage notices, lifecycle notices, and HiL answer notices as compact emoji-free TUI cards instead of plain wrapped rows, matching the debugger warning card treatment.
 - Updated the registered `workflow` tool description so agent-facing metadata covers named and direct runs, discovery, inspection, prompt answering/steering, run control, and reload ([#1151](https://github.com/bastani-inc/atomic/issues/1151)).
 
 ### Fixed
 
+- Fixed the programmatic named-workflow runner (`runWorkflow`) to resolve declared input defaults before validating, so an input declared with both `required: true` and a `default` is no longer rejected as missing when omitted, matching the resolve-then-validate order used by the other dispatch paths.
+- Fixed slow workflow discovery outside the compiled binary by always resolving the `@bastani/workflows` SDK (and its builtin submodules) to in-memory virtual modules in the jiti loader instead of aliasing to the on-disk package. The alias path re-evaluated the entire SDK module graph once per workflow file (the loader keeps `moduleCache: false` so edits stay observable), so projects with many workflow files saw multi-second discovery and timing-sensitive workflow tests flaked at the default test timeout; workflow files are still evaluated fresh from disk, so `/workflow reload` keeps observing edits.
 - Fixed headless workflow shutdown so completed stage chat handles are disposed on CLI quit, allowing successful non-interactive `/workflow` runs to return to the shell prompt ([#1167](https://github.com/bastani-inc/atomic/issues/1167)).
 - Fixed bundled workflow modules so they import the leaf `defineWorkflow` authoring API instead of the public package entrypoint, avoiding an ESM initialization cycle during builtin workflow discovery.
 - Fixed workflow HIL prompts so awaiting-input and answered-prompt notices no longer wake the main chat agent, answer notices stay out of LLM context and explicitly forbid auto-answering later HIL prompts, and stale Enter input from graph/connect focus transitions is quarantined when prompts appear after the attach pane is already open, covering input, confirm, select, and editor prompts ([#1163](https://github.com/bastani-inc/atomic/issues/1163)).
 - Fixed workflow run widgets so store changes and elapsed-time ticks repaint through a long-lived reactive widget instead of waiting for unrelated chat input or remounting the widget ([#1150](https://github.com/bastani-inc/atomic/issues/1150)).
 - Fixed `/workflow reload` and `workflow({ action: "reload" })` so newly added package-manifest workflow entries are rediscovered in-process without requiring top-level `/reload` or restart ([#1155](https://github.com/bastani-inc/atomic/issues/1155)).
-- Fixed completed imported workflow boundary stages rendering as empty graph nodes by showing the child workflow name, child run id prefix, and selected output count in the node card.
+- Fixed completed child workflow boundary stages rendering as empty graph nodes by showing the child workflow name, child run id prefix, and output count in the node card.
 - Fixed the bundled deep-research workflow line-count heuristic hanging Windows CI by replacing its POSIX `wc` subprocess with portable in-process line counting.
 - Kept workflow stage model metadata as the raw model id while surfacing Codex fast mode as a separate visible `fast` marker on workflow node cards, including stages that use the default Atomic SDK adapter settings manager.
 - Show workflow Codex fast-mode metadata on running workflow nodes as soon as the stage session starts, including explicit-model stages, catalog-resolved bare model aliases, and custom resource-loader stages whose settings manager is created by the Atomic SDK.

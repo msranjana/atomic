@@ -63,6 +63,7 @@ async function flushMicrotasks(): Promise<void> {
 describe("runtime tunables — maxDepth", () => {
   test("depth === maxDepth returns failed with exact message", async () => {
     const wf = defineWorkflow("rt-max-depth-eq")
+      .output("ok", { type: "unknown" })
       .run(async () => ({ ok: true }))
       .compile();
 
@@ -73,12 +74,13 @@ describe("runtime tunables — maxDepth", () => {
     });
 
     assert.equal(result.status, "failed");
-    assert.equal(result.error, "pi-workflows: maxDepth exceeded (max 3)");
+    assert.equal(result.error, "atomic-workflows: maxDepth exceeded (max 3)");
     assert.equal(result.stages.length, 0);
   });
 
   test("depth > maxDepth returns failed with max in message", async () => {
     const wf = defineWorkflow("rt-max-depth-gt")
+      .output("ok", { type: "unknown" })
       .run(async () => ({ ok: true }))
       .compile();
 
@@ -89,11 +91,12 @@ describe("runtime tunables — maxDepth", () => {
     });
 
     assert.equal(result.status, "failed");
-    assert.equal(result.error, "pi-workflows: maxDepth exceeded (max 2)");
+    assert.equal(result.error, "atomic-workflows: maxDepth exceeded (max 2)");
   });
 
   test("depth < maxDepth executes normally", async () => {
     const wf = defineWorkflow("rt-below-max-depth")
+      .output("ran", { type: "unknown" })
       .run(async (ctx) => {
         await ctx.task("depth-check", { prompt: "depth check" });
         return { ran: true };
@@ -113,6 +116,7 @@ describe("runtime tunables — maxDepth", () => {
 
   test("no config uses default maxDepth", async () => {
     const wf = defineWorkflow("rt-no-config")
+      .output("ok", { type: "unknown" })
       .run(async () => ({ ok: true }))
       .compile();
 
@@ -123,7 +127,7 @@ describe("runtime tunables — maxDepth", () => {
     });
 
     assert.equal(result.status, "failed");
-    assert.equal(result.error, "pi-workflows: maxDepth exceeded (max 4)");
+    assert.equal(result.error, "atomic-workflows: maxDepth exceeded (max 4)");
   });
 
   test("failed result carries non-empty runId", async () => {
@@ -170,6 +174,9 @@ describe("runtime tunables — defaultConcurrency", () => {
     let maxActive = 0;
 
     const wf = defineWorkflow("rt-conc-serial")
+      .output("a", { type: "unknown" })
+      .output("b", { type: "unknown" })
+      .output("c", { type: "unknown" })
       .run(async (ctx) => {
         const [a, b, c] = await Promise.all([
           ctx.stage("s1").prompt("s1"),
@@ -205,6 +212,7 @@ describe("runtime tunables — defaultConcurrency", () => {
     const completed: string[] = [];
 
     const wf = defineWorkflow("rt-conc-serial-all")
+      .output("count", { type: "unknown" })
       .run(async (ctx) => {
         await Promise.all([
           ctx.stage("alpha").prompt("alpha"),
@@ -381,6 +389,8 @@ describe("runtime tunables — defaultConcurrency", () => {
     const promptCalls: string[] = [];
 
     const wf = defineWorkflow("rt-conc-queued-pause")
+      .output("first", { type: "unknown" })
+      .output("second", { type: "unknown" })
       .run(async (ctx) => {
         const [first, second] = await Promise.all([
           ctx.stage("first").prompt("first"),

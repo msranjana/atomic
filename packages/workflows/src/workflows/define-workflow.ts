@@ -10,13 +10,12 @@
 
 import type {
   WorkflowDefinition,
-  WorkflowImportDeclaration,
-  WorkflowImportOptions,
   WorkflowInputBindings,
   WorkflowInputSchema,
-  WorkflowInteractionMetadata,
+  WorkflowInputValues,
   WorkflowOutputSchema,
   WorkflowRunFn,
+  WorkflowSerializableValue,
   WorkflowWorktreeInputBinding,
 } from "../shared/types.js";
 import { normalizeWorkflowName } from "./identity.js";
@@ -25,14 +24,26 @@ import { normalizeWorkflowName } from "./identity.js";
 // Internal builder state (plain data, never mutated after creation)
 // ---------------------------------------------------------------------------
 
-interface BuilderState<TInputs extends Record<string, unknown>> {
+type WorkflowInputValueForSchema<TSchema extends WorkflowInputSchema> =
+  TSchema["type"] extends "number"
+    ? number
+    : TSchema["type"] extends "boolean"
+      ? boolean
+      : TSchema extends { type: "select"; choices: readonly (infer TChoice extends string)[] }
+        ? TChoice
+        : string;
+
+type WorkflowInputPresenceForSchema<TSchema extends WorkflowInputSchema> =
+  TSchema extends { required: true } | { default: WorkflowSerializableValue }
+    ? WorkflowInputValueForSchema<TSchema>
+    : WorkflowInputValueForSchema<TSchema> | undefined;
+
+interface BuilderState<TInputs extends WorkflowInputValues> {
   readonly name: string;
   readonly description: string;
   readonly inputs: Readonly<Record<string, WorkflowInputSchema>>;
   readonly outputs: Readonly<Record<string, WorkflowOutputSchema>>;
-  readonly imports: Readonly<Record<string, WorkflowImportDeclaration>>;
   readonly inputBindings: WorkflowInputBindings;
-  readonly interaction: WorkflowInteractionMetadata;
   readonly runFn: WorkflowRunFn<TInputs> | undefined;
 }
 
@@ -45,28 +56,24 @@ interface BuilderState<TInputs extends Record<string, unknown>> {
  * Allows chaining .description() and .input() in any order; .run() seals
  * the run function and returns a CompletedWorkflowBuilder.
  *
- * TInputs defaults to Record<string, unknown> so that compile() produces a
- * definition compatible with the type-erased registry without casts.
+ * TInputs defaults to serializable input values so compiled definitions stay
+ * compatible with the type-erased registry without casts.
  */
-export interface WorkflowBuilder<TInputs extends Record<string, unknown> = Record<string, unknown>> {
+export interface WorkflowBuilder<TInputs extends WorkflowInputValues = WorkflowInputValues> {
   /** Set (or replace) the human-readable description. Returns a new builder. */
   description(text: string): WorkflowBuilder<TInputs>;
   /**
    * Declare a typed input.  Returns a new builder whose TInputs grows with
    * the new key (typed as the schema's default value type).
    */
-  input<K extends string>(
+  input<K extends string, TSchema extends WorkflowInputSchema>(
     key: K,
-    schema: WorkflowInputSchema,
-  ): WorkflowBuilder<TInputs & Record<K, unknown>>;
-  /** Declare a workflow import that can be executed with ctx.workflow(alias). */
-  import<TChildInputs extends Record<string, unknown>>(definition: WorkflowDefinition<TChildInputs>, options?: WorkflowImportOptions): WorkflowBuilder<TInputs>;
+    schema: TSchema,
+  ): WorkflowBuilder<TInputs & Record<K, WorkflowInputPresenceForSchema<TSchema>>>;
   /** Declare an output contract for parent workflows selecting child outputs. */
   output(key: string, schema?: WorkflowOutputSchema): WorkflowBuilder<TInputs>;
   /** Bind workflow inputs to reusable git worktree runtime defaults. */
   worktreeFromInputs(binding: WorkflowWorktreeInputBinding): WorkflowBuilder<TInputs>;
-  /** Mark this workflow as requiring human interaction when it runs. */
-  humanInTheLoop(reason?: string): WorkflowBuilder<TInputs>;
   /** Seal the run function.  Returns a builder on which .compile() is available. */
   run(fn: WorkflowRunFn<TInputs>): CompletedWorkflowBuilder<TInputs>;
 }
@@ -75,16 +82,14 @@ export interface WorkflowBuilder<TInputs extends Record<string, unknown> = Recor
  * Builder returned after .run() is called.
  * Still allows chaining .description() and .input(); .compile() is now available.
  */
-export interface CompletedWorkflowBuilder<TInputs extends Record<string, unknown>> {
+export interface CompletedWorkflowBuilder<TInputs extends WorkflowInputValues> {
   description(text: string): CompletedWorkflowBuilder<TInputs>;
-  input<K extends string>(
+  input<K extends string, TSchema extends WorkflowInputSchema>(
     key: K,
-    schema: WorkflowInputSchema,
-  ): CompletedWorkflowBuilder<TInputs & Record<K, unknown>>;
-  import<TChildInputs extends Record<string, unknown>>(definition: WorkflowDefinition<TChildInputs>, options?: WorkflowImportOptions): CompletedWorkflowBuilder<TInputs>;
+    schema: TSchema,
+  ): CompletedWorkflowBuilder<TInputs & Record<K, WorkflowInputPresenceForSchema<TSchema>>>;
   output(key: string, schema?: WorkflowOutputSchema): CompletedWorkflowBuilder<TInputs>;
   worktreeFromInputs(binding: WorkflowWorktreeInputBinding): CompletedWorkflowBuilder<TInputs>;
-  humanInTheLoop(reason?: string): CompletedWorkflowBuilder<TInputs>;
   run(fn: WorkflowRunFn<TInputs>): CompletedWorkflowBuilder<TInputs>;
   /** Freeze and return the completed WorkflowDefinition. */
   compile(): WorkflowDefinition<TInputs>;
@@ -100,70 +105,6 @@ function requireNonEmptyString(value: string, label: string): void {
   }
 }
 
-function isWorkflowDefinition(value: unknown): value is WorkflowDefinition {
-  if (value === null || typeof value !== "object") return false;
-  const record = value as Partial<WorkflowDefinition>;
-  return record.__piWorkflow === true &&
-    typeof record.name === "string" &&
-    record.name.trim().length > 0 &&
-    typeof record.normalizedName === "string" &&
-    record.normalizedName.trim().length > 0 &&
-    typeof record.run === "function";
-}
-
-function cloneImportOptions(options: WorkflowImportOptions | undefined): WorkflowImportOptions {
-  if (options === undefined) return Object.freeze({});
-  if (options === null || typeof options !== "object") {
-    throw new TypeError("defineWorkflow: import options must be an object when provided");
-  }
-  if (options.description !== undefined && typeof options.description !== "string") {
-    throw new TypeError("defineWorkflow: import options.description must be a string when provided");
-  }
-  if (options.as !== undefined) {
-    if (typeof options.as !== "string") {
-      throw new TypeError("defineWorkflow: import options.as must be a non-empty string when provided");
-    }
-    requireNonEmptyString(options.as, "import options.as");
-  }
-  return Object.freeze({
-    ...(options.description !== undefined ? { description: options.description } : {}),
-    ...(options.as !== undefined ? { as: options.as } : {}),
-  });
-}
-
-function normalizeImportArgs<TChildInputs extends Record<string, unknown>>(
-  definition: WorkflowDefinition<TChildInputs>,
-  optionsInput?: WorkflowImportOptions,
-): { alias: string; declaration: WorkflowImportDeclaration } {
-  if (!isWorkflowDefinition(definition)) {
-    throw new TypeError("defineWorkflow: import definition must be a compiled workflow definition");
-  }
-  const options = cloneImportOptions(optionsInput);
-  const alias = options.as ?? definition.normalizedName;
-  requireNonEmptyString(alias, "import alias");
-  return {
-    alias,
-    declaration: {
-      definition: definition as WorkflowDefinition,
-      ...(options.description !== undefined ? { description: options.description } : {}),
-    },
-  };
-}
-
-function freezeImports(
-  imports: Readonly<Record<string, WorkflowImportDeclaration>>,
-): Readonly<Record<string, WorkflowImportDeclaration>> {
-  return Object.freeze(Object.fromEntries(
-    Object.entries(imports).map(([alias, declaration]) => [
-      alias,
-      Object.freeze({
-        definition: declaration.definition,
-        ...(declaration.description !== undefined ? { description: declaration.description } : {}),
-      }),
-    ]),
-  ));
-}
-
 function freezeOutputs(
   outputs: Readonly<Record<string, WorkflowOutputSchema>>,
 ): Readonly<Record<string, WorkflowOutputSchema>> {
@@ -172,7 +113,18 @@ function freezeOutputs(
   ));
 }
 
-function makeBuilder<TInputs extends Record<string, unknown>>(
+// Symmetric with freezeOutputs: freeze the map AND each schema object so a
+// compiled definition is a tamper-proof contract. Without this, mutating
+// `def.inputs.someKey.required` after compile would silently change validation.
+function freezeInputs(
+  inputs: Readonly<Record<string, WorkflowInputSchema>>,
+): Readonly<Record<string, WorkflowInputSchema>> {
+  return Object.freeze(Object.fromEntries(
+    Object.entries(inputs).map(([key, schema]) => [key, Object.freeze({ ...schema })]),
+  ));
+}
+
+function makeBuilder<TInputs extends WorkflowInputValues>(
   state: BuilderState<TInputs>,
 ): WorkflowBuilder<TInputs> & CompletedWorkflowBuilder<TInputs> {
   return {
@@ -180,19 +132,11 @@ function makeBuilder<TInputs extends Record<string, unknown>>(
       return makeBuilder<TInputs>({ ...state, description: text });
     },
 
-    input<K extends string>(key: K, schema: WorkflowInputSchema) {
-      return makeBuilder<TInputs & Record<K, unknown>>({
+    input<K extends string, TSchema extends WorkflowInputSchema>(key: K, schema: TSchema) {
+      return makeBuilder<TInputs & Record<K, WorkflowInputPresenceForSchema<TSchema>>>({
         ...state,
         inputs: { ...state.inputs, [key]: schema },
-      } as BuilderState<TInputs & Record<K, unknown>>);
-    },
-
-    import<TChildInputs extends Record<string, unknown>>(definition: WorkflowDefinition<TChildInputs>, options?: WorkflowImportOptions) {
-      const { alias, declaration } = normalizeImportArgs(definition, options);
-      return makeBuilder<TInputs>({
-        ...state,
-        imports: { ...state.imports, [alias]: declaration },
-      });
+      } as BuilderState<TInputs & Record<K, WorkflowInputPresenceForSchema<TSchema>>>);
     },
 
     output(key: string, schema: WorkflowOutputSchema = {}) {
@@ -213,16 +157,6 @@ function makeBuilder<TInputs extends Record<string, unknown>>(
       });
     },
 
-    humanInTheLoop(reason?: string) {
-      return makeBuilder<TInputs>({
-        ...state,
-        interaction: Object.freeze({
-          humanInput: "required" as const,
-          ...(reason !== undefined ? { reason } : {}),
-        }),
-      });
-    },
-
     run(fn: WorkflowRunFn<TInputs>) {
       return makeBuilder<TInputs>({ ...state, runFn: fn });
     },
@@ -237,16 +171,14 @@ function makeBuilder<TInputs extends Record<string, unknown>>(
       const normalizedName = normalizeWorkflowName(state.name);
 
       // Deep-freeze nested maps first, then the top-level definition.
-      const frozenInputs = Object.freeze({ ...state.inputs });
+      const frozenInputs = freezeInputs(state.inputs);
       const frozenOutputs = freezeOutputs(state.outputs);
-      const frozenImports = freezeImports(state.imports);
       const inputBindings = Object.freeze({
         ...state.inputBindings,
         ...(state.inputBindings.worktree !== undefined
           ? { worktree: Object.freeze({ ...state.inputBindings.worktree }) }
           : {}),
       });
-      const interaction = Object.freeze({ ...state.interaction });
 
       const definition: WorkflowDefinition<TInputs> = {
         __piWorkflow: true,
@@ -255,9 +187,7 @@ function makeBuilder<TInputs extends Record<string, unknown>>(
         description: state.description,
         inputs: frozenInputs,
         ...(Object.keys(frozenOutputs).length > 0 ? { outputs: frozenOutputs } : {}),
-        ...(Object.keys(frozenImports).length > 0 ? { imports: frozenImports } : {}),
         ...(Object.keys(inputBindings).length > 0 ? { inputBindings } : {}),
-        interaction,
         run: state.runFn,
       };
 
@@ -292,14 +222,12 @@ export function defineWorkflow(name: string): WorkflowBuilder {
     throw new TypeError("defineWorkflow: name must be a non-empty string");
   }
 
-  const initialState: BuilderState<Record<string, unknown>> = {
+  const initialState: BuilderState<WorkflowInputValues> = {
     name,
     description: "",
     inputs: {},
     outputs: {},
-    imports: {},
     inputBindings: {},
-    interaction: Object.freeze({ humanInput: "none" }),
     runFn: undefined,
   };
 

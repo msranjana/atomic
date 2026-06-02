@@ -3,6 +3,7 @@
  * cross-ref: spec §5.5
  */
 
+import type { WorkflowOutputValues } from "./types.js";
 import type {
   PendingPrompt,
   PromptKind,
@@ -16,8 +17,10 @@ import type {
   StageStatus,
   WorkflowFailureKind,
   WorkflowNotice,
+  WorkflowChildRunRef,
 } from "./store-types.js";
 import { accumulatePausedDurationMs, elapsedRunMs } from "./timing.js";
+import { isTopLevelWorkflowRun } from "./run-visibility.js";
 
 /** Statuses that represent a terminal run state — cannot be overwritten. */
 const TERMINAL_STATUSES: ReadonlySet<RunStatus> = new Set(["completed", "failed", "killed"]);
@@ -73,6 +76,8 @@ export interface Store {
   activeRunId(): string | null;
   recordRunStart(run: RunSnapshot): void;
   recordStageStart(runId: string, stage: StageSnapshot): void;
+  /** Link a workflow boundary stage to its live child run before that child completes. */
+  recordStageWorkflowChildRun(runId: string, stageId: string, ref: WorkflowChildRunRef): boolean;
   recordToolStart(runId: string, stageId: string, evt: ToolEvent): void;
   recordToolEnd(runId: string, stageId: string, evt: ToolEvent): void;
   recordStageEnd(runId: string, stage: StageSnapshot): void;
@@ -86,7 +91,7 @@ export interface Store {
   recordRunEnd(
     runId: string,
     status: RunStatus,
-    result?: Record<string, unknown>,
+    result?: WorkflowOutputValues,
     error?: string,
     metadata?: RunEndMetadata,
   ): boolean;
@@ -303,7 +308,19 @@ export function createStore(): Store {
     },
 
     activeRunId(): string | null {
-      // Most recently started run that hasn't ended
+      // Most recently started top-level run that hasn't ended. Nested
+      // workflow runs stay in the store for live control/expanded graph
+      // rendering, but should not steal the active top-level workflow slot.
+      for (let i = _runs.length - 1; i >= 0; i--) {
+        const run = _runs[i];
+        if (run && isTopLevelWorkflowRun(run) && run.endedAt === undefined) {
+          return run.id;
+        }
+      }
+      // Fallback for the degraded "orphaned-nested-only" state: a child run is in
+      // flight but no top-level run is. This normally cannot happen (a parent
+      // stays in flight while awaiting `ctx.workflow(...)`), so callers that rely
+      // on a top-level id should treat a returned nested id as best-effort.
       for (let i = _runs.length - 1; i >= 0; i--) {
         const run = _runs[i];
         if (run && run.endedAt === undefined) {
@@ -328,6 +345,24 @@ export function createStore(): Store {
       }
       _version++;
       notify();
+    },
+
+    recordStageWorkflowChildRun(runId: string, stageId: string, ref: WorkflowChildRunRef): boolean {
+      const run = findRun(runId);
+      if (!run) return false;
+      const stage = findStage(run, stageId);
+      if (!stage) return false;
+      if (
+        stage.workflowChildRun?.runId === ref.runId &&
+        stage.workflowChildRun.alias === ref.alias &&
+        stage.workflowChildRun.workflow === ref.workflow
+      ) {
+        return false;
+      }
+      stage.workflowChildRun = { ...ref };
+      _version++;
+      notify();
+      return true;
     },
 
     recordToolStart(runId: string, stageId: string, evt: ToolEvent): void {
@@ -388,9 +423,11 @@ export function createStore(): Store {
       if (stage.promptAnswerState !== undefined) existing.promptAnswerState = stage.promptAnswerState;
       if (stage.replayedFromStageId !== undefined) existing.replayedFromStageId = stage.replayedFromStageId;
       if (stage.replayed !== undefined) existing.replayed = stage.replayed;
+      if (stage.workflowChildRun !== undefined) existing.workflowChildRun = { ...stage.workflowChildRun };
+      if (stage.workflowChild !== undefined) existing.workflowChild = structuredClone(stage.workflowChild);
       delete existing.awaitingInputSince;
       delete existing.inputRequest;
-      rejectStagePrompt(existing, `pi-workflows: stage ${stage.id} ended before prompt resolved`);
+      rejectStagePrompt(existing, `atomic-workflows: stage ${stage.id} ended before prompt resolved`);
       _version++;
       notify();
     },
@@ -398,7 +435,7 @@ export function createStore(): Store {
     recordRunEnd(
       runId: string,
       status: RunStatus,
-      result?: Record<string, unknown>,
+      result?: WorkflowOutputValues,
       error?: string,
       metadata?: RunEndMetadata,
     ): boolean {
@@ -435,9 +472,9 @@ export function createStore(): Store {
       const pending = run.pendingPrompt;
       if (pending) {
         run.pendingPrompt = undefined;
-        rejectPrompt(pending.id, `pi-workflows: run ${runId} ended before prompt resolved`);
+        rejectPrompt(pending.id, `atomic-workflows: run ${runId} ended before prompt resolved`);
       }
-      rejectAllStagePrompts(run, `pi-workflows: run ${runId} ended before prompt resolved`);
+      rejectAllStagePrompts(run, `atomic-workflows: run ${runId} ended before prompt resolved`);
       _version++;
       notify();
       return true;
@@ -449,9 +486,9 @@ export function createStore(): Store {
       const run = _runs[index]!;
       const pending = run.pendingPrompt;
       if (pending) {
-        rejectPrompt(pending.id, `pi-workflows: run ${runId} was removed before prompt resolved`);
+        rejectPrompt(pending.id, `atomic-workflows: run ${runId} was removed before prompt resolved`);
       }
-      rejectAllStagePrompts(run, `pi-workflows: run ${runId} was removed before prompt resolved`);
+      rejectAllStagePrompts(run, `atomic-workflows: run ${runId} was removed before prompt resolved`);
       for (const stage of run.stages) {
         _stagePromptAnswers.delete(stagePromptAnswerKey(runId, stage.id));
       }
@@ -516,14 +553,14 @@ export function createStore(): Store {
       return new Promise<unknown>((resolve, reject) => {
         const run = findRun(runId);
         if (!run) {
-          reject(new Error(`pi-workflows: run "${runId}" not found`));
+          reject(new Error(`atomic-workflows: run "${runId}" not found`));
           return;
         }
         const pending = run.pendingPrompt;
         if (!pending || pending.id !== promptId) {
           reject(
             new Error(
-              `pi-workflows: pending prompt "${promptId}" not registered on run "${runId}"`,
+              `atomic-workflows: pending prompt "${promptId}" not registered on run "${runId}"`,
             ),
           );
           return;
@@ -596,19 +633,19 @@ export function createStore(): Store {
       return new Promise<unknown>((resolve, reject) => {
         const run = findRun(runId);
         if (!run) {
-          reject(new Error(`pi-workflows: run "${runId}" not found`));
+          reject(new Error(`atomic-workflows: run "${runId}" not found`));
           return;
         }
         const stage = findStage(run, stageId);
         if (!stage) {
-          reject(new Error(`pi-workflows: stage "${stageId}" not found on run "${runId}"`));
+          reject(new Error(`atomic-workflows: stage "${stageId}" not found on run "${runId}"`));
           return;
         }
         const pending = stage.pendingPrompt;
         if (!pending || pending.id !== promptId) {
           reject(
             new Error(
-              `pi-workflows: pending prompt "${promptId}" not registered on stage "${stageId}" in run "${runId}"`,
+              `atomic-workflows: pending prompt "${promptId}" not registered on stage "${stageId}" in run "${runId}"`,
             ),
           );
           return;
@@ -866,7 +903,7 @@ export function createStore(): Store {
       // instead of leaking. The error message is intentionally generic — the
       // caller already issued a session boundary, exact cause isn't needed.
       for (const entry of _resolvers.values()) {
-        entry.reject(new Error("pi-workflows: store cleared"));
+        entry.reject(new Error("atomic-workflows: store cleared"));
       }
       _resolvers.clear();
       _stagePromptAnswers.clear();

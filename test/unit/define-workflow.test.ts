@@ -8,7 +8,8 @@ describe("defineWorkflow builder", () => {
       .description("test workflow")
       .input("prompt", { type: "text", required: true, description: "task" })
       .run(async (ctx) => {
-        const result = await ctx.stage("step1").prompt(ctx.inputs.prompt as string);
+        const prompt: string = ctx.inputs.prompt;
+        const result = await ctx.stage("step1").prompt(prompt);
         return { result };
       })
       .compile();
@@ -40,11 +41,15 @@ describe("defineWorkflow builder", () => {
     });
   });
 
-  test("multiple inputs accumulate", () => {
+  test("multiple inputs accumulate with inferred serializable input types", () => {
     const def = defineWorkflow("multi-input")
       .input("a", { type: "text" })
       .input("b", { type: "number", default: 4 })
-      .run(async () => ({}))
+      .run(async (ctx) => {
+        const a: string | undefined = ctx.inputs.a;
+        const b: number = ctx.inputs.b;
+        return { a: a ?? "", b };
+      })
       .compile();
 
     assert.deepEqual(Object.keys(def.inputs), ["a", "b"]);
@@ -65,61 +70,14 @@ describe("defineWorkflow builder", () => {
     });
   });
 
-  test("omitted interaction metadata defaults to non-HIL", () => {
-    const def = defineWorkflow("non-hil-default")
+  test("input() records immutable workflow input metadata", () => {
+    const def = defineWorkflow("child")
+      .input("topic", { type: "text", required: true, description: "Topic" })
       .run(async () => ({}))
       .compile();
 
-    assert.deepEqual(def.interaction, { humanInput: "none" });
-    assert.equal(Object.isFrozen(def.interaction), true);
-  });
-
-  test("humanInTheLoop records frozen interaction metadata", () => {
-    const def = defineWorkflow("approval-flow")
-      .humanInTheLoop("Requires ctx.ui.confirm approval")
-      .run(async () => ({}))
-      .compile();
-
-    assert.deepEqual(def.interaction, {
-      humanInput: "required",
-      reason: "Requires ctx.ui.confirm approval",
-    });
-    assert.equal(Object.isFrozen(def.interaction), true);
-  });
-
-  test("import() can register a compiled workflow definition by workflow name", () => {
-    const child = defineWorkflow("Shared Child")
-      .run(async (ctx) => {
-        await ctx.task("child", { prompt: "child" });
-        return { ok: true };
-      })
-      .compile();
-    const def = defineWorkflow("parent")
-      .import(child, { description: "Static TS module import" })
-      .run(async () => ({}))
-      .compile();
-
-    assert.deepEqual(Object.keys(def.imports ?? {}), ["shared-child"]);
-    assert.equal(def.imports!["shared-child"]!.definition, child);
-    assert.equal(def.imports?.["shared-child"]?.description, "Static TS module import");
-    assert.equal(Object.isFrozen(def.imports), true);
-    assert.equal(Object.isFrozen(def.imports?.["shared-child"]), true);
-  });
-
-  test("import() can alias a compiled workflow definition", () => {
-    const child = defineWorkflow("shared-child")
-      .run(async (ctx) => {
-        await ctx.task("child", { prompt: "child" });
-        return { ok: true };
-      })
-      .compile();
-    const def = defineWorkflow("parent")
-      .import(child, { as: "research" })
-      .run(async () => ({}))
-      .compile();
-
-    assert.equal(def.imports!["research"]!.definition, child);
-    assert.equal(def.imports?.["shared-child"], undefined);
+    assert.equal(Object.isFrozen(def.inputs), true);
+    assert.equal(Object.isFrozen(def.inputs["topic"]), true);
   });
 
   test("output() records immutable workflow output metadata", () => {

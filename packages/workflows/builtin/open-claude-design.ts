@@ -140,7 +140,7 @@ function prepareArtifactDir(cwd = process.cwd()): {
   }
   // Last-resort: synthesize paths even if mkdir failed; downstream agents will
   // recreate parents using their Write tool.
-  const fallback = join(tmpdir(), "pi-open-claude-design", runId);
+  const fallback = join(tmpdir(), "open-claude-design", runId);
   return {
     runId,
     artifactDir: fallback,
@@ -203,6 +203,58 @@ export default defineWorkflow("open-claude-design")
     type: "number",
     default: DEFAULT_MAX_REFINEMENTS,
     description: `Maximum critique/apply refinement iterations (default ${DEFAULT_MAX_REFINEMENTS}).`,
+  })
+  .output("output_type", {
+    type: "string",
+    description: "Kind of design artifact produced.",
+  })
+  .output("design_system", {
+    type: "text",
+    description: "Design system source used for generation: supplied input or project-derived design system.",
+  })
+  .output("artifact", {
+    type: "text",
+    description: "Latest final design summary from the approved preview artifact.",
+  })
+  .output("handoff", {
+    type: "text",
+    description: "Final rich HTML spec and implementation handoff summary.",
+  })
+  .output("approved_for_export", {
+    type: "boolean",
+    description: "Whether refinement completed before the final export gate.",
+  })
+  .output("refinements_completed", {
+    type: "number",
+    description: "Number of refinement iterations completed.",
+  })
+  .output("import_context", {
+    type: "text",
+    description: "Reference-import context used during generation.",
+  })
+  .output("run_id", {
+    type: "string",
+    description: "Per-run design workflow artifact identifier.",
+  })
+  .output("artifact_dir", {
+    type: "string",
+    description: "Directory containing preview and spec artifacts.",
+  })
+  .output("preview_path", {
+    type: "string",
+    description: "Absolute path to the generated preview.html file.",
+  })
+  .output("preview_file_url", {
+    type: "string",
+    description: "file:// URL for the generated preview.html file.",
+  })
+  .output("spec_path", {
+    type: "string",
+    description: "Absolute path to the generated spec.html file.",
+  })
+  .output("spec_file_url", {
+    type: "string",
+    description: "file:// URL for the generated spec.html file.",
   })
   .run(async (ctx) => {
     const inputs = ctx.inputs as {

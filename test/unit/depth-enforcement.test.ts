@@ -2,7 +2,7 @@
  * MaxDepth enforcement tests for the sync executor.
  *
  * Verifies:
- * - run() returns status:"failed" with "pi-workflows: maxDepth exceeded (max N)"
+ * - run() returns status:"failed" with "atomic-workflows: maxDepth exceeded (max N)"
  *   when depth >= config.maxDepth
  * - run() executes normally when depth < maxDepth
  * - run() without config enforces the default maxDepth
@@ -24,6 +24,7 @@ import type { WorkflowDefinition } from "../../packages/workflows/src/shared/typ
 
 function makeWf(name = "depth-test-wf"): WorkflowDefinition {
   return defineWorkflow(name)
+    .output("ok", { type: "unknown" })
     .run(async (ctx) => {
       await ctx.task("depth-check", { prompt: "depth check" });
       return { ok: true };
@@ -55,7 +56,7 @@ describe("maxDepth enforcement — executor.run", () => {
     });
 
     assert.equal(result.status, "failed");
-    assert.equal(result.error, "pi-workflows: maxDepth exceeded (max 2)");
+    assert.equal(result.error, "atomic-workflows: maxDepth exceeded (max 2)");
     assert.equal(result.stages.length, 0);
   });
 
@@ -68,7 +69,7 @@ describe("maxDepth enforcement — executor.run", () => {
     });
 
     assert.equal(result.status, "failed");
-    assert.equal(result.error, "pi-workflows: maxDepth exceeded (max 2)");
+    assert.equal(result.error, "atomic-workflows: maxDepth exceeded (max 2)");
   });
 
   test("depth < maxDepth executes normally", async () => {
@@ -104,7 +105,7 @@ describe("maxDepth enforcement — executor.run", () => {
     });
 
     assert.equal(result.status, "failed");
-    assert.equal(result.error, "pi-workflows: maxDepth exceeded (max 4)");
+    assert.equal(result.error, "atomic-workflows: maxDepth exceeded (max 4)");
   });
 
   test("failed runId is non-empty string", async () => {
@@ -143,7 +144,7 @@ describe("maxDepth enforcement — executor.run", () => {
 
     const depthOne = await run(wf, {}, { store: createStore(), config, depth: 1 });
     assert.equal(depthOne.status, "failed");
-    assert.equal(depthOne.error, "pi-workflows: maxDepth exceeded (max 1)");
+    assert.equal(depthOne.error, "atomic-workflows: maxDepth exceeded (max 1)");
   });
 
   test("maxDepth 4 (default value) allows depth 3, blocks depth 4", async () => {
@@ -155,7 +156,7 @@ describe("maxDepth enforcement — executor.run", () => {
 
     const exceeded = await run(wf, {}, { store: createStore(), config, depth: 4 });
     assert.equal(exceeded.status, "failed");
-    assert.equal(exceeded.error, "pi-workflows: maxDepth exceeded (max 4)");
+    assert.equal(exceeded.error, "atomic-workflows: maxDepth exceeded (max 4)");
   });
 
   test("error message includes the configured max value", async () => {
@@ -163,6 +164,6 @@ describe("maxDepth enforcement — executor.run", () => {
     const wf = makeWf("msg-wf");
 
     const result = await run(wf, {}, { store: createStore(), config, depth: 7 });
-    assert.equal(result.error, "pi-workflows: maxDepth exceeded (max 7)");
+    assert.equal(result.error, "atomic-workflows: maxDepth exceeded (max 7)");
   });
 });

@@ -289,46 +289,45 @@ describe("programmatic workflow runner", () => {
         );
     });
 
-    test("fails fast for invalid named workflow import graphs", async () => {
-        const dir = mkdtempSync(join(tmpdir(), "workflow-runner-import-fail-"));
-        try {
-            const workflowDir = join(dir, ".atomic", "workflows");
-            mkdirSync(workflowDir, { recursive: true });
-            writeFileSync(
-                join(workflowDir, "parent.ts"),
-                [
-                    `export default {`,
-                    `  __piWorkflow: true,`,
-                    `  name: "runner-import-parent",`,
-                    `  normalizedName: "runner-import-parent",`,
-                    `  description: "",`,
-                    `  inputs: {},`,
-                    `  imports: { missing: { definition: { not: "a workflow" } } },`,
-                    `  run: async (ctx) => {`,
-                    `    await ctx.task("should-not-run", { prompt: "no" });`,
-                    `    return {};`,
-                    `  },`,
-                    `};`,
-                ].join("\n"),
-                "utf8",
-            );
-            const prompts: string[] = [];
+    test("applies schema defaults before validating required-with-default inputs", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "atomic-required-default-"));
+        mkdirSync(join(dir, ".atomic", "workflows"), { recursive: true });
+        writeFileSync(
+            join(dir, ".atomic", "workflows", "required-default-input.ts"),
+            `import { defineWorkflow } from "@bastani/workflows";
 
-            await assert.rejects(
-                runWorkflow(
-                    { mode: "workflow", workflow: "runner-import-parent" },
-                    {
-                        cwd: dir,
-                        adapterOptions: {
-                            createAgentSession: makeSessionFactory(prompts),
-                        },
-                    },
-                ),
-                /Invalid workflow imports[\s\S]*IMPORT_INVALID[\s\S]*definition must be a compiled workflow definition/,
+export default defineWorkflow("required-default-input")
+  .description("Required input that also declares a default; omitting it must use the default.")
+  .input("label", {
+    type: "text",
+    required: true,
+    default: "fallback-label",
+    description: "Required but defaulted text input.",
+  })
+  .output("result", { type: "text", required: true, description: "Echoes the resolved label." })
+  .run(async (ctx) => {
+    await ctx.stage("marker", { noTools: "all" }).prompt("Reply exactly: OK");
+    return { result: \`label=\${ctx.inputs.label}\` };
+  })
+  .compile();
+`,
+            "utf8",
+        );
+
+        try {
+            // Omit the required-with-default input entirely: the resolve step must
+            // populate the default before validation, so the run completes.
+            const result = await runWorkflow(
+                { mode: "workflow", workflow: "required-default-input" },
+                { cwd: dir, stubAgent: true },
             );
-            assert.deepEqual(prompts, []);
+
+            assert.equal(result.mode, "named");
+            assert.equal(result.status, "completed");
+            assert.equal(result.output?.["result"], "label=fallback-label");
         } finally {
             rmSync(dir, { recursive: true, force: true });
         }
     });
+
 });

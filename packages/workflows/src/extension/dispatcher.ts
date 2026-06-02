@@ -12,8 +12,7 @@ import type { StageAdapters } from "../runs/foreground/stage-runner.js";
 import { store as defaultStore, type Store } from "../shared/store.js";
 import type { CancellationRegistry } from "../runs/background/cancellation-registry.js";
 import { jobTracker as defaultJobTracker, type JobTracker } from "../runs/background/job-tracker.js";
-import { resolveInputs } from "../runs/foreground/executor.js";
-import { formatWorkflowImportDiagnostics, validateWorkflowImportGraph, type WorkflowSourceReference } from "../workflows/import-resolver.js";
+import { resolveAndValidateInputs } from "../runs/foreground/executor.js";
 import { runDetached } from "../runs/background/runner.js";
 import type { WorkflowToolResult, WorkflowInputEntry } from "./render-result.js";
 import type { WorkflowToolArgs } from "./index.js";
@@ -69,8 +68,6 @@ export interface DispatcherOpts {
   policy?: WorkflowExecutionPolicy;
   /** Invocation cwd used for workflow execution. */
   cwd?: string;
-  /** Discovery source metadata for workflow resources. */
-  workflowSources?: readonly WorkflowSourceReference[];
 }
 
 // ---------------------------------------------------------------------------
@@ -157,21 +154,13 @@ export async function dispatch(
       }
 
       const policy = opts.policy ?? INTERACTIVE_WORKFLOW_POLICY;
-      if (!policy.allowHumanInput && def.interaction?.humanInput === "required") {
-        const reason = def.interaction.reason ? ` Reason: ${def.interaction.reason}` : "";
-        return failedRunResult(
-          def.name,
-          "",
-          `Workflow "${def.name}" requires human input and cannot run in non-interactive mode. Run Atomic interactively or choose a non-HiL workflow.${reason}`,
-        );
-      }
 
       // Pre-validate inputs against the workflow's declared schema. The
       // executor would otherwise throw the same TypeError deep inside the
       // background promise — silently from the caller's perspective. Catch
       // it here so the dispatch result names what's missing.
       try {
-        resolveInputs(def.inputs, inputs);
+        resolveAndValidateInputs(def.inputs, inputs, `workflow "${def.name}"`);
       } catch (err) {
         return failedRunResult(
           def.name,
@@ -180,26 +169,8 @@ export async function dispatch(
         );
       }
 
-      const importDiagnostics = validateWorkflowImportGraph({
-        registry: opts.registry,
-        cwd: opts.cwd ?? process.cwd(),
-        ...(opts.workflowSources !== undefined ? { sources: opts.workflowSources } : {}),
-        roots: [def],
-      });
-      if (importDiagnostics.length > 0) {
-        return {
-          action: "run",
-          name: def.name,
-          runId: "",
-          status: "failed",
-          error: `Invalid workflow imports for "${def.name}":\n${formatWorkflowImportDiagnostics(importDiagnostics)}`,
-          stages: [],
-        };
-      }
-
       const accepted = runDetached(def, inputs, {
         registry: opts.registry,
-        ...(opts.workflowSources !== undefined ? { workflowSources: opts.workflowSources } : {}),
         adapters: opts.adapters,
         store: opts.store,
         cancellation: opts.cancellation,

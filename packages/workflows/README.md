@@ -40,7 +40,7 @@ Workflow lifecycle notices are enabled by default. They send steer prompts into 
 }
 ```
 
-Set `enabled` to `false` to disable all lifecycle notices, or narrow `notifyOn` to a non-empty list of selected events. Completion and failure lifecycle notices use steer delivery and wake an idle model so the lifecycle update enters the model context when it happens. Awaiting-input states are tracked for dedupe/restore, but workflows do not enqueue main-chat `/workflow connect` cards for them; prompt state remains visible through workflow status/connect surfaces, avoiding stale actionable cards if a prompt resolves while the main chat is streaming.
+Set `enabled` to `false` to disable all lifecycle notices, or narrow `notifyOn` to a non-empty list of selected events. Completion and failure lifecycle notices are emitted for top-level workflow runs, use steer delivery, and wake an idle model so the lifecycle update enters the model context when it happens. Nested child workflow completion/failure is reflected inside the expanded parent graph instead of producing separate top-level completion cards. Awaiting-input states are tracked for dedupe/restore, but workflows do not enqueue main-chat `/workflow connect` cards for them; prompt state remains visible through workflow status/connect surfaces, avoiding stale actionable cards if a prompt resolves while the main chat is streaming.
 
 When a stage human-in-the-loop prompt is answered from the workflow TUI/stage chat, workflows also emits a separate display-only `workflows:hil-answer-notice` custom message. It records the answer for user-visible audit, but it does not wake the main agent, enter LLM context, or authorize answering later workflow prompts. Answers sent by the main-chat `workflow` tool do not emit this notice because the tool result already tells the main agent what happened.
 
@@ -59,6 +59,11 @@ export default defineWorkflow("summarize-pr")
     type: "text",
     required: true,
     description: "URL of the pull request to summarize.",
+  })
+  .output("summary", {
+    type: "text",
+    required: true,
+    description: "One-task summary of the pull request.",
   })
   .run(async (ctx) => {
     const summary = await ctx.task("summarize", {
@@ -79,8 +84,13 @@ import { defineWorkflow } from "@bastani/workflows";
 export default defineWorkflow("parallel-research")
   .description("Scout → three parallel specialists → aggregator.")
   .input("topic", { type: "text", required: true, description: "Research topic." })
+  .output("summary", {
+    type: "text",
+    required: true,
+    description: "Synthesized summary of the specialist reports.",
+  })
   .run(async (ctx) => {
-    const { topic } = ctx.inputs as { topic: string };
+    const topic = ctx.inputs.topic;
 
     const reports = await ctx.parallel([
       { name: "auth-specialist", task: `Research authentication patterns for: ${topic}` },
@@ -105,7 +115,14 @@ import { defineWorkflow } from "@bastani/workflows";
 export default defineWorkflow("review-and-merge")
   .description("Plan a change, ask for human approval, then execute.")
   .input("task", { type: "text", required: true, description: "What to implement." })
-  .humanInTheLoop("Requires approval through ctx.ui.confirm")
+  .output("status", {
+    type: "text",
+    description: "Set to \"cancelled\" when the human rejects the plan.",
+  })
+  .output("result", {
+    type: "text",
+    description: "Implementation result when the plan is approved.",
+  })
   .run(async (ctx) => {
     const plan = await ctx.task("planner", {
       prompt: `Create a concise implementation plan for: ${String(ctx.inputs.task)}`,
@@ -123,9 +140,11 @@ export default defineWorkflow("review-and-merge")
   .compile();
 ```
 
-### Example 4 — Compose workflows with imports
+Human input is runtime-only: call `ctx.ui.input`, `ctx.ui.confirm`, `ctx.ui.select`, or `ctx.ui.editor` at the point where the workflow actually needs a decision. No builder-level declaration is required or supported.
 
-Prefer regular TypeScript module imports for reusable child workflows: import the compiled workflow definition, pass it to `.import(...)`, then execute it with `ctx.workflow(childWorkflowName)`. Direct definition imports register the child's normalized workflow name as the default alias; pass `{ as: "alias" }` when the parent wants a shorter local name.
+### Example 4 — Compose workflows
+
+Prefer regular TypeScript module imports for reusable child workflows: import the compiled workflow definition, then pass it directly to `ctx.workflow(workflowDefinition, options)`.
 
 ```typescript
 import { defineWorkflow } from "@bastani/workflows";
@@ -134,23 +153,33 @@ import sharedResearch from "./shared-research.js";
 
 export default defineWorkflow("research-and-synthesize")
   .input("topic", { type: "text", required: true })
-  .import(sharedResearch) // registers ctx.workflow("shared-research")
-  .import(goal, { as: "implementation-goal" })
+  .output("final", {
+    type: "text",
+    required: true,
+    description: "Synthesis of the child research and implementation.",
+  })
   .run(async (ctx) => {
-    const child = await ctx.workflow("shared-research", {
+    const child = await ctx.workflow(sharedResearch, {
       inputs: { topic: ctx.inputs.topic },
-      outputs: { summary: "research_summary" },
+    });
+
+    const implementation = await ctx.workflow(goal, {
+      inputs: { objective: `Implement improvements based on: ${String(child.outputs.summary)}` },
     });
 
     const final = await ctx.task("synthesize", {
-      prompt: `Synthesize this research:\n\n${String(child.outputs.research_summary)}`,
+      prompt: `Synthesize this research and implementation:\n\n${String(child.outputs.summary)}\n\n${String(implementation.outputs.result)}`,
     });
     return { final: final.text };
   })
   .compile();
 ```
 
-The child runs as its own nested workflow run behind a parent boundary stage named `import:<alias>` by default. Inputs are validated against the child workflow before it starts, and selected outputs can be renamed for downstream parent stages.
+The child executes as a nested workflow behind a parent boundary stage named `workflow:<workflow-name>` by default, but user-facing status and graph views flatten it into the parent run. In practice it should feel like inlining the child workflow code: child stages, HIL prompt nodes, and deeper imported children appear in one expanded parent graph, while implementation-owned child run ids stay hidden from top-level `/workflow status` lists. The child still has a run id internally so the graph can attach to, pause, interrupt, resume, or kill live child stages correctly. Inputs are strictly validated against the child workflow before it starts: unknown keys, missing required values, type mismatches, and invalid `select` choices fail before the child body runs. The parent receives the child's declared `.output(...)` outputs on `child.outputs` after those outputs pass their declared runtime type checks.
+
+For workflows intended to be called as children, declare `.output(...)` for every non-default field a parent should rely on. `.output(...)` is only the schema/contract: use normal TypeScript in `.run()` to gather values from any stage/task/child workflow and return those keys.
+
+**Return convention:** child outputs are return-object keys. Atomic never infers child workflow outputs from stage names, stage order, or the final assistant message. If a parent should read `child.outputs.summary`, the child workflow's `.run()` must both declare `.output("summary", schema)` and return `{ summary }`. `result` is not special and is never added for you: to expose `result`, declare `.output("result", schema)` and return `{ result }` like any other output. Returning a key that is not declared with `.output(...)` fails the run with `atomic-workflows: workflow "<name>" returned undeclared output "<key>"; declare it with .output("<key>", { type: ... }) or remove it from the .run() return` (the child-call variant reports `... child "<alias>" returned undeclared output "<key>" from "<childName>"`).
 
 A reusable child module can simply default-export a compiled workflow:
 
@@ -169,14 +198,15 @@ export default defineWorkflow("shared-research")
   .compile();
 ```
 
-Builtin workflows are also importable as modules for reuse:
+Builtin workflows are also callable as modules for reuse:
 
 ```typescript
-import { deepResearchCodebase, goal, ralph } from "@bastani/workflows/builtin";
+import { deepResearchCodebase, goal, openClaudeDesign, ralph } from "@bastani/workflows/builtin";
 import goalWorkflow from "@bastani/workflows/builtin/goal";
+import openClaudeDesignWorkflow from "@bastani/workflows/builtin/open-claude-design";
 ```
 
-Only compiled workflow definitions can be passed to `.import(...)`; registry-name and path-object import declarations are intentionally not supported. Missing or invalid module imports fail when the workflow file itself is loaded, and Atomic validates circular or invalid compiled-definition import graphs before runs start.
+Only compiled workflow definitions can be passed to `ctx.workflow(...)`; registry names, strings, and path objects are intentionally not supported for child workflow calls. Missing or invalid module imports fail when the workflow file itself is loaded. A parent receives the child's declared `.output(...)` outputs from the child `.run()` return object. Missing required outputs, schema type mismatches, returning an undeclared output, and non-JSON-serializable returned child values fail the child call before the parent continues.
 
 ### Reusable Git worktrees
 
@@ -193,6 +223,11 @@ export default defineWorkflow("safe-implementation")
   .worktreeFromInputs({
     gitWorktreeDir: "worktree",
     baseBranch: "base_branch",
+  })
+  .output("result", {
+    type: "text",
+    required: true,
+    description: "Implementation result text.",
   })
   .run(async (ctx) => {
     const result = await ctx.task("implement", {
@@ -238,7 +273,7 @@ For advanced integrations, the SDK also exports `setupGitWorktree(options)`, whi
 
 ### Model fallbacks
 
-Stages and high-level task helpers can retry transient provider/model failures with an ordered `fallbackModels` list. The primary `model` is tried first, then each fallback, and finally the current pi-selected model when available. Fallbacks are only used for retryable model/provider failures such as rate limits, quota/auth/provider outages, unavailable models, network timeouts, and 5xx errors — ordinary tool, shell, validation, cancellation, and workflow-code failures are not retried.
+Stages and high-level task helpers can retry transient provider/model failures with an ordered `fallbackModels` list. The primary `model` is tried first, then each fallback, and finally the current Atomic-selected model when available. Fallbacks are only used for retryable model/provider failures such as rate limits, quota/auth/provider outages, unavailable models, network timeouts, and 5xx errors — ordinary tool, shell, validation, cancellation, and workflow-code failures are not retried.
 
 ```typescript
 import { defineWorkflow } from "@bastani/workflows";
@@ -246,6 +281,26 @@ import { defineWorkflow } from "@bastani/workflows";
 export default defineWorkflow("fallback-review")
   .description("Review with a model fallback chain.")
   .input("topic", { type: "text", required: true })
+  .output("review", {
+    type: "text",
+    required: true,
+    description: "Reviewer output text.",
+  })
+  .output("model", {
+    type: "text",
+    required: true,
+    description: "Model that produced the review.",
+  })
+  .output("attemptedModels", {
+    type: "array",
+    required: true,
+    description: "Models tried, in fallback order.",
+  })
+  .output("modelAttempts", {
+    type: "array",
+    required: true,
+    description: "Per-attempt model fallback details.",
+  })
   .run(async (ctx) => {
     const review = await ctx.task("reviewer", {
       prompt: `Review this topic: ${String(ctx.inputs.topic)}`,
@@ -281,9 +336,9 @@ When pi exposes its model registry, workflow runs validate user-specified `model
 ```typescript
 import { createRegistry, defineWorkflow } from "@bastani/workflows";
 
-const alpha = defineWorkflow("alpha").run(async () => {}).compile();
-const beta  = defineWorkflow("beta").run(async () => {}).compile();
-const gamma = defineWorkflow("gamma").run(async () => {}).compile();
+const alpha = defineWorkflow("alpha").run(async () => ({})).compile();
+const beta  = defineWorkflow("beta").run(async () => ({})).compile();
+const gamma = defineWorkflow("gamma").run(async () => ({})).compile();
 
 const registry = createRegistry()
   .register(alpha)
@@ -304,6 +359,25 @@ registry.get("alpha"); // compiled workflow definition | undefined
 | `number`  | Numeric value      | `default`, `required`                      |
 | `boolean` | True/false toggle  | `default`, `required`                      |
 | `select`  | Enumerated choices | `choices: string[]`, `default`, `required` |
+
+Input validation is strict for named workflow runs and `ctx.workflow(...)` child calls. Atomic rejects unknown keys, missing required values, values whose runtime type does not match the declared schema, and `select` values outside `choices`. It does not coerce strings like `"3"` into numbers; pass JSON numbers (`count=3`) for `type: "number"`. In TypeScript workflow files, `.input(...)` also narrows `ctx.inputs` for better intellisense: required/defaulted text inputs are `string`, numbers are `number`, booleans are `boolean`, selects are strings, and optional inputs include `undefined`.
+
+### Output types
+
+Declare outputs with `.output(key, schema?)` when a workflow result should be part of its runtime contract, especially when another workflow will call it as a child.
+
+| Type      | Runtime value accepted                    |
+| --------- | ----------------------------------------- |
+| `text`    | string                                    |
+| `string`  | string                                    |
+| `number`  | number other than `NaN`                   |
+| `boolean` | boolean                                   |
+| `select`  | string                                    |
+| `object`  | non-null object that is not an array      |
+| `array`   | array                                     |
+| `unknown` or omitted | any JSON-serializable value     |
+
+`.run()` must return a JSON-serializable object. Primitives, arrays, `null`, functions, symbols, `undefined` properties, `NaN`, and infinite numbers fail validation. Declared outputs are type-checked before a workflow is marked completed. `required: true` means the returned object must contain that key (a missing required output fails with `missing output "<key>"`, and a type mismatch fails with `output "<key>" expected <type>, got <actual>`). A workflow exposes exactly the outputs it declares with `.output(...)`: there is no automatic `result` output, and returning a key that was not declared fails the run with `atomic-workflows: workflow "<name>" returned undeclared output "<key>"; declare it with .output("<key>", { type: ... }) or remove it from the .run() return`. To expose `result`, declare `.output("result", schema)` and return `{ result }`. Child output replay still performs a structured-clone safety check after JSON validation so completed child boundaries can be replayed.
 
 ---
 
@@ -326,11 +400,11 @@ registry.get("alpha"); // compiled workflow definition | undefined
 | `/workflow reload`                    | Reload discovered workflow resources and package-manifest entries in-process |
 | `/workflow inputs <name>`             | Print the input schema for a workflow                    |
 
-Input overrides are bare `key=value` tokens (no leading `--`). Values are JSON-parsed when possible, so numbers, booleans, and quoted strings work as expected (e.g. `count=3`, `flag=true`, `prompt="multi word value"`). A whole-object override can be passed as a single JSON token (e.g. `{"prompt":"...","count":3}`).
+Input overrides are bare `key=value` tokens (no leading `--`). Values are JSON-parsed when possible, so numbers, booleans, and quoted strings work as expected (e.g. `count=3`, `flag=true`, `prompt="multi word value"`). A whole-object override can be passed as a single JSON token (e.g. `{"prompt":"...","count":3}`). Runtime validation is strict: unknown input keys, missing required values, type mismatches, and invalid `select` choices fail before a named workflow run starts.
 
-Workflows always run as **background tasks** in interactive sessions — the chat editor stays free while a run executes. Press **F2** (or `/workflow connect <run-id>`) to attach to the live graph viewer; HIL prompts (`ctx.ui.input/confirm/select/editor`) appear as awaiting-input graph nodes. Press Enter on the node to answer locally, never as a modal dialog over the chat.
+Workflows always run as **background tasks** in interactive sessions — the chat editor stays free while a run executes. Press **F2** (or `/workflow connect <run-id>`) to attach to the live graph viewer; HIL prompts (`ctx.ui.input/confirm/select/editor`) appear as awaiting-input graph nodes. Press Enter on the node to answer locally, never as a modal dialog over the chat. Human input is detected when those runtime `ctx.ui.*` calls execute; workflows no longer have a declaration-time HIL flag.
 
-Workflows that require a human decision should declare it with `.humanInTheLoop(reason?)`. Headless/non-interactive sessions reject those workflows before execution, because no prompt node, picker, or `ask_user_question` UI can be answered by a user.
+Nested `ctx.workflow(...)` calls are displayed as an expanded graph within the top-level run. `/workflow status` and run pickers list only top-level user-launched workflows, not implementation-owned child runs. `/workflow stages`, `/workflow stage`, `/workflow transcript`, `send`, `pause`, `interrupt`, and `resume` can still target visible child stage ids, prefixes, or names from the expanded graph; Atomic routes the control action to the owning nested run internally.
 
 Prompt answer replay is live-memory only. `StageSnapshot.promptAnswerState` reports whether continuation can replay a prompt answer (`available`), must ask again because the private ledger entry is gone (`unavailable`), or must ask again because multiple matching prompt nodes are ambiguous (`ambiguous`). Raw answers stay in a private `PromptAnswerRecord` ledger, are never serialized to snapshots or persistence, and remain resident in memory until the answer is cleared, the run is removed, or the store is cleared. Replay keys include prompt kind, message text, select choices, input/editor initial value, and hashed author callsite, so changing any of those inputs may intentionally re-ask on continuation. Empty `ctx.ui.select(..., [])` calls throw before creating a prompt node.
 
@@ -341,7 +415,7 @@ Prompt answer replay is live-memory only. `StageSnapshot.promptAnswerState` repo
 ```json
 {
   "name": "workflow",
-  "description": "Run named workflows or direct one-off task/tasks/chain workflows; discover with list/get/inputs, inspect status/stages/stage details/transcripts, send prompt answers or steering, pause/resume/interrupt/kill runs, and reload workflow resources.",
+  "description": "Run named workflows or direct one-off task/tasks/chain workflows; discover with list/get/inputs, inspect status/stages/stage details, send prompt answers or steering, pause/resume/interrupt/kill runs, and reload workflow resources. For transcripts, prefer status/stages/stage to get sessionFile/transcriptPath, quote the exact path without rewriting separators (Windows backslashes are valid), search it with rg/grep, and read small ranges; transcript defaults to at most 5 recent entries and explicit tail/limit overrides that preview.",
   "parameters": {
     "workflow": "string (optional) — workflow ID or normalized name",
     "inputs": "object (optional) — key/value map of workflow inputs",
@@ -350,9 +424,9 @@ Prompt answer replay is live-memory only. `StageSnapshot.promptAnswerState` repo
     "stageId": "optional stage id, prefix, or name for stage-scoped actions; cannot be combined with all:true",
     "statusFilter": "optional stages filter: pending/running/awaiting_input/paused/blocked/completed/failed/skipped/all",
     "format": "optional agent-facing output format: text or json",
-    "limit": "transcript-only maximum number of most recent entries; default 50",
-    "tail": "transcript-only last-N entry count; overrides limit",
-    "includeToolOutput": "transcript-only flag for snapshot tool-event output; live transcripts may not expose tool output",
+    "limit": "transcript-only explicit maximum number of recent entries; omitted with tail omitted uses the default 5-entry preview plus metadata/path",
+    "tail": "transcript-only explicit last-N entry count; overrides limit for quick recent-context checks",
+    "includeToolOutput": "transcript-only flag for explicit snapshot tool-event output; prefer rg/grep on the exact quoted sessionFile/transcriptPath for large outputs",
     "text": "optional string payload for send/resume; explicit empty text answers pending prompts",
     "response": "optional structured payload for answering pending prompts; explicit empty response is valid",
     "message": "optional string payload for send/resume when text is not provided",
@@ -367,7 +441,7 @@ Prompt answer replay is live-memory only. `StageSnapshot.promptAnswerState` repo
 
 - **`renderCall`** — renders a compact workflow call summary in the chat scroll.
 - **`renderResult`** — renders the result or dispatch banner; live progress continues through the widget and graph viewer. Named workflow runs are background-oriented.
-- **`transcript`** — uses a registered live stage handle when one exists, even before live messages arrive; otherwise it falls back to stored stage snapshots. Snapshot entries are ordered chronologically before `tail`/`limit` is applied, with terminal result/error entries kept after tool entries when timestamps are missing or tied. `includeToolOutput` applies to snapshot tool events; live session transcripts may not expose tool output.
+- **`transcript`** — reference-first with a small preview by default: use `status`, `stages`, or `stage` to identify the stage and its `sessionFile`/`transcriptPath`, quote the exact path without changing platform separators (for example, preserve Windows backslashes), then search that file with `rg`/`grep` for targeted terms and read only small surrounding ranges. Text results include JSON-escaped `sessionFileJson`/`transcriptPathJson` lines for copy-safe path literals plus up to 5 recent entries by default. Passing explicit `tail` or `limit` overrides that preview for quick context checks. A registered live stage handle is used when one exists, even before live messages arrive; otherwise the action falls back to stored stage snapshots. Snapshot entries are ordered chronologically before `tail`/`limit` is applied, with terminal result/error entries kept after tool entries when timestamps are missing or tied. `includeToolOutput` applies to snapshot tool-event results; live session transcripts may not expose tool output.
 - **`send`** — answers pending stage prompts only when `text`, `response`, or `message` is present; an explicit empty string is a valid answer, while an omitted payload is a no-op. `delivery: "auto"` answers pending prompts first, then resumes paused stages, steers streaming stages, or queues a follow-up.
 - **`reload`** — refreshes workflow resources directly in-process instead of queuing a literal `/workflow reload` chat follow-up.
 
@@ -379,7 +453,11 @@ Press **F2** while a workflow is running to open the DAG overlay for the active 
 
 `@bastani/workflows` follows pi's package/extension model: pi loads `src/extension/index.ts` from the package `pi.extensions` manifest, then the extension registers the `workflow` tool, `/workflow` slash command, renderers, widget, and lifecycle hooks in-process.
 
-For interactive use, run workflows through `/workflow <name> [key=value ...]` or let the LLM call the `workflow` tool. In non-interactive (`-p` / `--print` / `--mode json`) sessions, `/workflow <name> key=value` and LLM calls to the `workflow` tool remain available for deterministic non-HIL workflows. The input picker and graph picker are disabled, declared `.humanInTheLoop()` workflows are rejected, top-level `ctx.ui.*` is unavailable, and stage child sessions exclude `ask_user_question`. Named workflow dispatch waits for the terminal run snapshot before returning. For library or scripted use, you can also call the explicit programmatic runner:
+For interactive use, run workflows through `/workflow <name> [key=value ...]` or let the LLM call the `workflow` tool. In non-interactive (`-p` / `--print` / `--mode json`) sessions, `/workflow <name> key=value` and LLM calls to the `workflow` tool remain available for deterministic workflows. The input picker and graph picker are disabled, top-level `ctx.ui.*` is unavailable, and stage child sessions exclude `ask_user_question`. Named workflow dispatch waits for the terminal run snapshot before returning.
+
+Because human input is runtime-only and workflows no longer carry a declaration-time HIL marker, headless dispatch does not reject a workflow just because its source contains `ctx.ui.*`. If you copy the HIL example above into a non-interactive session, it can pass dispatch and then fail when execution reaches the prompt with an error such as `atomic-workflows: HIL ctx.ui.confirm is unavailable because Atomic runtime did not provide a UI adapter` (the primitive name varies). Run those workflows interactively, or guard/remove runtime `ctx.ui.*` calls before using headless mode.
+
+For library or scripted use, you can also call the explicit programmatic runner:
 
 ```ts
 import { runWorkflow, type WorkflowOptions } from "@bastani/workflows";
@@ -437,9 +515,11 @@ Scout + research-history chain → two parallel specialist waves → aggregator.
 | ----------------- | -------- | -------- | ------- | --------------------------------------------------------- |
 | `prompt`          | `text`   | ✓        | —       | Research question or topic to investigate.                |
 | `max_partitions`  | `number` | —        | `100`   | Maximum number of codebase partitions to explore.         |
-| `max_concurrency` | `number` | —        | `4`     | Maximum number of workflow stages to run concurrently.    |
+| `max_concurrency` | `number` | —        | `100`   | Maximum number of workflow stages to run concurrently.    |
 
 Final Markdown research documents are written to dated `research/` paths relative to the current working directory, with a numeric suffix if needed to avoid overwriting an existing document. Hidden run artifacts are written under `research/.deep-research-<run-id>/`.
+
+Child workflow outputs: `result`, `findings`, `research_doc_path`, `artifact_dir`, `manifest_path`, `partitions`, `explorer_count`, `specialist_count`, `max_concurrency`, and `history`.
 
 ### `goal`
 
@@ -457,6 +537,8 @@ Goal Runner workflow: initialize a persisted goal ledger with a per-run goal id 
 
 `goal` defaults to 10 worker/review turns. Reviewer quorum is fixed internally at 2 reviewer `complete` votes. The repeated-blocker threshold defaults to 3 consecutive same-blocker turns and is clamped to `max_turns` when you run fewer than 3 turns.
 
+Child workflow outputs: `result`, `status`, `approved`, `goal_id`, `objective`, `ledger_path`, `turns_completed`, `iterations_completed`, `receipts`, `remaining_work`, and `review_report`.
+
 ### `ralph`
 
 Plan → orchestrate → simplify → discover → review → PR-handoff workflow: write an RFC-style technical design document under `specs/`, delegate implementation through sub-agents, simplify recent changes, discover review infrastructure, run parallel reviewers, iterate until approval or the loop limit, then prepare a pull-request report.
@@ -471,6 +553,8 @@ Plan → orchestrate → simplify → discover → review → PR-handoff workflo
 | `max_loops`        | `number` | —        | `10`          | Maximum plan/orchestrate/review iterations before PR handoff. |
 | `base_branch`      | `string` | —        | `origin/main` | Branch reviewers and PR-prep compare the current delta with; also used to create a missing worktree. |
 | `git_worktree_dir` | `string` | —        | `""`          | Optional reusable Git worktree root. Empty runs in the invoking checkout; non-empty values run Ralph stages in the created/reused worktree. |
+
+Child workflow outputs: `result`, `plan`, `plan_path`, `implementation_notes_path`, `pr_report`, `approved`, `iterations_completed`, and `review_report`.
 
 ### `open-claude-design`
 
@@ -487,6 +571,8 @@ Design-system onboarding → reference import → generation → refinement → 
 | `output_type`     | `select` | —        | `prototype` | `prototype`, `wireframe`, `page`, `component`, `theme`, or `tokens`. |
 | `design_system`   | `text`   | —        | —           | Existing design-system reference / Design.md path.                   |
 | `max_refinements` | `number` | —        | `3`         | Maximum critique/apply refinement iterations.                        |
+
+Child workflow outputs: `output_type`, `design_system`, `artifact`, `handoff`, `approved_for_export`, `refinements_completed`, `import_context`, `run_id`, `artifact_dir`, `preview_path`, `preview_file_url`, `spec_path`, and `spec_file_url`. `open-claude-design` has no `result` output; it exposes only the declared fields listed here.
 
 ---
 

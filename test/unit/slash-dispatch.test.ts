@@ -90,7 +90,6 @@ async function writeWorkflowFixture(
   __piWorkflow: true,
   name: ${encodedName},
   normalizedName: ${encodedName},
-  interaction: Object.freeze({ humanInput: "none" }),
   async run() {
     return { ok: true };
   },
@@ -349,6 +348,8 @@ async function runFactory(pi: ExtensionAPI): Promise<void> {
 describe("slash /workflow <name> dispatch", () => {
     test("/workflow <known-name> dispatches run, not unknown subcommand", async () => {
         const wf = defineWorkflow("test-wf")
+            .input("prompt", { type: "text" })
+            .output("done", { type: "unknown" })
             .run(async (_ctx) => ({ done: true }))
             .compile() as WorkflowDefinition;
 
@@ -1524,32 +1525,6 @@ describe("tool run-control actions", () => {
         assertWorkflowToolBlocked(result, wasDispatched);
     });
 
-    test("makeExecuteWorkflowTool passes non-interactive policy to named workflow dispatch", async () => {
-        const wf = defineWorkflow("tool-hil")
-            .humanInTheLoop("needs approval")
-            .run(async () => ({ ok: true }))
-            .compile() as WorkflowDefinition;
-        const runtime = createExtensionRuntime({
-            registry: createRegistry([wf]),
-        });
-        const handler = makeExecuteWorkflowTool(
-            runtime,
-            () => undefined,
-            () => undefined,
-        );
-
-        const result = await handler(
-            { action: "run", workflow: "tool-hil", inputs: {} },
-            { hasUI: false },
-        );
-
-        assert.equal(result.action, "run");
-        const run = result as Extract<WorkflowToolResult, { action: "run" }>;
-        assert.equal(run.status, "failed");
-        assert.equal(run.runId, "");
-        assert.match(run.error ?? "", /requires human input/i);
-    });
-
     test("makeExecuteWorkflowTool blocks workflow tool execution from env workflow-stage guard", async () => {
         const previousGuard = process.env[WORKFLOW_STAGE_SUBAGENT_GUARD_ENV];
         const { handler, wasDispatched } =
@@ -1575,6 +1550,8 @@ describe("tool run-control actions", () => {
 
 export default defineWorkflow("tool-headless-lifecycle")
   .description("Completes under the registered workflow tool")
+  .output("ok", { type: "unknown" })
+  .output("source", { type: "unknown" })
   .run(async (ctx) => {
     await ctx.stage("terminal-stage").prompt("finish");
     return { ok: true, source: "tool" };
@@ -1777,6 +1754,7 @@ export default defineWorkflow("tool-headless-lifecycle")
 
     test("workflow tool answers ctx.ui.input prompts on running workflows", async () => {
         const def = defineWorkflow("tool-answers-ctx-ui-input")
+            .output("answer", { type: "unknown" })
             .run(async (ctx) => {
                 const answer = await ctx.ui.input("Value?");
                 return { answer };
@@ -1845,9 +1823,10 @@ export default defineWorkflow("tool-headless-lifecycle")
         assert.deepEqual(completed?.result, { answer: "from workflow tool" });
     });
 
-    test("registered workflow tool content preserves full transcript text and supports JSON format", async () => {
+    test("registered workflow tool content is reference-first with default preview and supports explicit transcript entries", async () => {
         const runId = `tool-content-transcript-${Date.now()}`;
         const longText = `start-${"x".repeat(180)}-sentinel-end`;
+        const sessionFile = "C:\\Users\\atomic runner\\tool-content.jsonl";
         store.recordRunStart(makeInflightRun(runId));
         store.recordStageStart(runId, {
             id: "stage-tool-content-1",
@@ -1857,7 +1836,7 @@ export default defineWorkflow("tool-headless-lifecycle")
             toolEvents: [],
             result: longText,
             sessionId: "session-tool-content",
-            sessionFile: "/tmp/tool-content.jsonl",
+            sessionFile,
         });
         const tool = await makeRegisteredWorkflowTool();
 
@@ -1871,14 +1850,72 @@ export default defineWorkflow("tool-headless-lifecycle")
         const textBlock = textResult.content[0];
         assert.equal(textBlock?.type, "text");
         const textContent = textBlock.type === "text" ? textBlock.text : "";
-        assert.ok(
+        assert.equal(
             textContent.includes(longText),
-            "plain tool content should include the full transcript entry",
+            true,
+            "default tool content should inline the small recent-entry preview",
         );
+        assert.ok(textContent.includes(`sessionFile: ${sessionFile}`));
+        assert.ok(textContent.includes(`sessionFileJson: ${JSON.stringify(sessionFile)}`));
+        assert.ok(textContent.includes(`transcriptPath: ${sessionFile}`));
+        assert.ok(textContent.includes(`transcriptPathJson: ${JSON.stringify(sessionFile)}`));
+        assert.ok(textContent.includes("entries:"));
+        assert.equal(textContent.includes("do not rewrite Windows backslashes"), false);
         assert.equal(
             textContent.includes("╭"),
             false,
             "tool content should not use clipped UI chrome",
+        );
+        const referenceDetails = textResult.details as Extract<
+            WorkflowToolResult,
+            { action: "transcript" }
+        >;
+        assert.equal(referenceDetails.entries.length, 1);
+        assert.equal(referenceDetails.entryCount, 1);
+        assert.equal(referenceDetails.entryLimit, 5);
+        assert.equal(referenceDetails.transcriptPath, sessionFile);
+
+        const explicitTextResult = await tool.execute(
+            "tool-content-text-tail",
+            { action: "transcript", runId, stageId: "summarize", tail: 1 },
+            undefined,
+            undefined,
+            {} as never,
+        );
+        const explicitTextBlock = explicitTextResult.content[0];
+        assert.equal(explicitTextBlock?.type, "text");
+        const explicitTextContent = explicitTextBlock.type === "text"
+            ? explicitTextBlock.text
+            : "";
+        assert.ok(
+            explicitTextContent.includes(longText),
+            "explicit tail should inline the requested transcript entry",
+        );
+
+        const defaultJsonResult = await tool.execute(
+            "tool-content-json-default",
+            {
+                action: "transcript",
+                runId,
+                stageId: "summarize",
+                format: "json",
+            },
+            undefined,
+            undefined,
+            {} as never,
+        );
+        const defaultJsonBlock = defaultJsonResult.content[0];
+        assert.equal(defaultJsonBlock?.type, "text");
+        const defaultParsed = JSON.parse(
+            defaultJsonBlock.type === "text" ? defaultJsonBlock.text : "{}",
+        );
+        assert.equal(defaultParsed.entries.length, 1);
+        assert.equal(defaultParsed.entryCount, 1);
+        assert.equal(defaultParsed.entryLimit, 5);
+        assert.equal(defaultParsed.transcriptPath, sessionFile);
+        assert.equal(
+            (defaultJsonBlock.type === "text" ? defaultJsonBlock.text : "").includes(longText),
+            true,
         );
 
         const jsonResult = await tool.execute(
@@ -1887,6 +1924,7 @@ export default defineWorkflow("tool-headless-lifecycle")
                 action: "transcript",
                 runId,
                 stageId: "summarize",
+                tail: 1,
                 format: "json",
             },
             undefined,
@@ -1899,6 +1937,7 @@ export default defineWorkflow("tool-headless-lifecycle")
             jsonBlock.type === "text" ? jsonBlock.text : "{}",
         );
         assert.equal(parsed.entries[0].text, longText);
+        assert.equal(parsed.entryLimit, 1);
     });
 
     test("registered workflow tool content elides empty send targets", async () => {
@@ -2102,6 +2141,7 @@ export default defineWorkflow("tool-headless-lifecycle")
             status: "running",
             parentIds: [],
             toolEvents: [],
+            sessionFile: "/tmp/scan-session.jsonl",
         });
         store.recordStageStart(runId, {
             id: "stage-failed-1",
@@ -2110,6 +2150,7 @@ export default defineWorkflow("tool-headless-lifecycle")
             parentIds: [],
             toolEvents: [],
             error: "boom",
+            sessionFile: "/tmp/review-session.jsonl",
         });
         const handler = makeToolHandler();
 
@@ -2120,13 +2161,21 @@ export default defineWorkflow("tool-headless-lifecycle")
         assert.equal(listResult.action, "stages");
         const list = listResult as {
             action: string;
-            stages: Array<{ name: string; status: string; error?: string }>;
+            stages: Array<{
+                name: string;
+                status: string;
+                error?: string;
+                sessionFile?: string;
+                transcriptPath?: string;
+            }>;
         };
         assert.deepEqual(
             list.stages.map((stage) => stage.name),
             ["review"],
         );
         assert.equal(list.stages[0]!.status, "failed");
+        assert.equal(list.stages[0]!.sessionFile, "/tmp/review-session.jsonl");
+        assert.equal(list.stages[0]!.transcriptPath, "/tmp/review-session.jsonl");
 
         const detailResult = await handler(
             { action: "stage", runId, stageId: "scan" },
@@ -2135,10 +2184,18 @@ export default defineWorkflow("tool-headless-lifecycle")
         assert.equal(detailResult.action, "stage");
         const detail = detailResult as {
             action: string;
-            stage?: { id: string; name: string; status: string };
+            stage?: {
+                id: string;
+                name: string;
+                status: string;
+                sessionFile?: string;
+                transcriptPath?: string;
+            };
         };
         assert.equal(detail.stage?.id, "stage-running-1");
         assert.equal(detail.stage?.status, "running");
+        assert.equal(detail.stage?.sessionFile, "/tmp/scan-session.jsonl");
+        assert.equal(detail.stage?.transcriptPath, "/tmp/scan-session.jsonl");
     });
 
     test("makeExecuteWorkflowTool stages clones pending prompts", async () => {
@@ -2316,9 +2373,11 @@ export default defineWorkflow("tool-headless-lifecycle")
             entries: Array<{ role: string; text?: string; output?: string }>;
             truncated: boolean;
             sessionFile?: string;
+            transcriptPath?: string;
         };
         assert.equal(transcript.source, "snapshot");
         assert.equal(transcript.sessionFile, "/tmp/session.jsonl");
+        assert.equal(transcript.transcriptPath, "/tmp/session.jsonl");
         assert.equal(transcript.truncated, true);
         assert.deepEqual(transcript.entries, [
             { role: "assistant", text: "done" },
@@ -2400,6 +2459,8 @@ export default defineWorkflow("tool-headless-lifecycle")
             parentIds: [],
             toolEvents: [],
             result: "snapshot-result",
+            sessionId: "snapshot-session",
+            sessionFile: "/tmp/live-empty-snapshot.jsonl",
         });
         const { dispose } = registerLiveStageHandle(
             runId,
@@ -2419,10 +2480,20 @@ export default defineWorkflow("tool-headless-lifecycle")
                 source: string;
                 entries: unknown[];
                 truncated: boolean;
+                sessionId?: string;
+                sessionFile?: string;
+                transcriptPath?: string;
             };
             assert.equal(transcript.source, "live");
             assert.equal(transcript.truncated, false);
             assert.deepEqual(transcript.entries, []);
+            assert.equal(
+                (transcript as { entryLimit?: number }).entryLimit,
+                5,
+            );
+            assert.equal(transcript.sessionId, "snapshot-session");
+            assert.equal(transcript.sessionFile, "/tmp/live-empty-snapshot.jsonl");
+            assert.equal(transcript.transcriptPath, "/tmp/live-empty-snapshot.jsonl");
         } finally {
             dispose();
         }
@@ -2473,7 +2544,7 @@ export default defineWorkflow("tool-headless-lifecycle")
 
         try {
             const result = await handler(
-                { action: "transcript", runId, stageId: "live-empty" },
+                { action: "transcript", runId, stageId: "live-empty", tail: 1 },
                 {} as never,
             );
 
@@ -2522,7 +2593,7 @@ export default defineWorkflow("tool-headless-lifecycle")
 
         try {
             const result = await handler(
-                { action: "transcript", runId, stageId: "live-non-text" },
+                { action: "transcript", runId, stageId: "live-non-text", tail: 1 },
                 {} as never,
             );
 
@@ -3566,6 +3637,8 @@ export default defineWorkflow("tool-headless-lifecycle")
     test("makeExecuteWorkflowTool resume starts linked continuation for failed resumable workflow", async () => {
         const sourceRunId = `resume-tool-source-${Date.now()}`;
         const def = defineWorkflow("tool-resume-wf")
+            .output("first", { type: "unknown" })
+            .output("second", { type: "unknown" })
             .run(async (ctx) => {
                 const first = await ctx.stage("first").prompt("first");
                 const second = await ctx
@@ -4193,29 +4266,6 @@ describe("/workflow command in non-interactive (-p) mode (#1156 regressions)", (
         );
     });
 
-    test("/workflow rejects declared HiL workflows in headless mode with a visible command error", async () => {
-        const resource = await registerWorkflowCommandWithResource(
-            "approval-required.ts",
-            `import { defineWorkflow } from "@bastani/workflows";
-
-export default defineWorkflow("approval-required")
-  .description("Requires an approval prompt")
-  .humanInTheLoop("requires approval")
-  .run(async () => ({ ok: true }))
-  .compile();
-`,
-        );
-
-        try {
-            await assertRejectsHeadlessCommand(
-                () => resource.handler("approval-required", headlessNoOpCtx()),
-                /requires human input/i,
-            );
-        } finally {
-            await resource.cleanup();
-        }
-    }, 15_000);
-
     test("issue #1156: headless terminal workflow failure throws a command-visible error", async () => {
         const resource = await registerWorkflowCommandWithResource(
             "terminal-failure.ts",
@@ -4247,6 +4297,8 @@ export default defineWorkflow("terminal-failure")
 
 export default defineWorkflow("headless-terminal-success")
   .description("Completes without user input")
+  .output("ok", { type: "unknown" })
+  .output("value", { type: "unknown" })
   .run(async (ctx) => {
     await ctx.stage("terminal-stage").prompt("finish");
     return { ok: true, value: "terminal" };
@@ -4338,42 +4390,6 @@ export default defineWorkflow("headless-terminal-success")
         );
         assert.match(error.message, /Workflow not found: ghost-workflow/);
     });
-
-    test("/workflow declared HiL workflows still run through the interactive dispatch path", async () => {
-        const resource = await registerWorkflowCommandWithResource(
-            "interactive-approval.ts",
-            `import { defineWorkflow } from "@bastani/workflows";
-
-export default defineWorkflow("interactive-approval")
-  .description("Allowed when UI is available")
-  .humanInTheLoop("interactive approval")
-  .run(async () => ({ ok: true }))
-  .compile();
-`,
-        );
-        const { ctx, notifications } = commandCtx(true);
-
-        try {
-            await assert.doesNotReject(async () => {
-                await resource.handler("interactive-approval", ctx);
-            });
-            assert.equal(
-                notifications.some((entry) => entry.type === "error"),
-                false,
-                "interactive HiL dispatch should not be rejected before execution",
-            );
-            assert.ok(
-                resource.sent.some(
-                    (message) =>
-                        (message.details as { kind?: string } | undefined)
-                            ?.kind === "dispatch",
-                ),
-                "expected interactive HiL dispatch to emit the normal dispatch chat surface",
-            );
-        } finally {
-            await resource.cleanup();
-        }
-    }, 15_000);
 
     test("/workflow still uses picker-capable path when a UI is available", async () => {
         const { handler } = await registerWorkflowCommand();
