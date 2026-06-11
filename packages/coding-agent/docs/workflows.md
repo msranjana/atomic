@@ -588,6 +588,41 @@ Atomic discovers workflow definitions in this order:
 
 A workflow module may export one default workflow definition and/or named workflow definitions. Discovery checks the default export first, then named exports.
 
+Every runtime export of a discovered workflow file is validated as a workflow definition. A named export that is not a compiled definition — a widget factory, shared constant, or utility function — is rejected with an `INVALID_DEFINITION` discovery diagnostic (`export is not an object`), even when the module also has a valid default export (the valid workflow still loads; the diagnostic flags the extra export as skipped). Type-only exports (`export type` / `export interface`) are erased at runtime and never flagged.
+
+To co-locate reusable helpers with your workflows — for example a `ctx.ui.custom<T>` widget factory you want to import in tests without running the workflow — put them in a subdirectory and import them from the workflow file. Discovery scans only the top level of each workflow directory, so subdirectories such as `.atomic/workflows/lib/` are never treated as workflow modules:
+
+```text
+.atomic/workflows/
+  release-picker.ts      # only runtime export: defineWorkflow(...).compile()
+  lib/
+    table-selector.ts    # widget factory + helpers; not scanned by discovery
+```
+
+```ts
+// .atomic/workflows/release-picker.ts
+import { defineWorkflow, Type } from "@bastani/workflows";
+import { tableSelectorFactory } from "./lib/table-selector.js";
+```
+
+```ts
+// .atomic/workflows/lib/table-selector.ts
+import type { WorkflowCustomUiFactory } from "@bastani/workflows";
+
+export const tableSelectorFactory: WorkflowCustomUiFactory<{ id: string; name: string }> = (
+  tui,
+  theme,
+  _keybindings,
+  done,
+) => ({
+  render: (width) => ["..."],
+  invalidate: () => {},
+  handleInput: (data) => {
+    /* ... done({ id, name }) on Enter ... */
+  },
+});
+```
+
 Workflow files are loaded via [jiti](https://github.com/unjs/jiti), so TypeScript works without compilation.
 
 ## Workflow Configuration
@@ -765,7 +800,7 @@ Input overrides are bare `key=value` tokens. Values are JSON-parsed when possibl
 
 In the TUI, `/workflow <name>` opens an input picker when the workflow declares inputs and either no arguments were supplied or required inputs are missing. Supplied values seed the picker. Pass `--no-picker` to skip that interactive flow.
 
-In non-interactive (`-p`, `--print`, or `--mode json`) sessions, named workflow dispatch waits for the terminal run snapshot and skips pickers. Because human input is runtime-only and workflows no longer carry a declaration-time HIL marker, headless dispatch does not reject a workflow just because its source contains `ctx.ui.*`. If you copy a HIL workflow example into a headless session, it can pass dispatch and then fail when execution reaches the prompt with an error such as `atomic-workflows: HIL ctx.ui.confirm is unavailable because Atomic runtime did not provide a UI adapter` (the primitive name varies, including `ctx.ui.custom`). Run those workflows interactively, or guard/remove runtime `ctx.ui.*` calls before using headless mode.
+In non-interactive (`-p`, `--print`, or `--mode json`) sessions, named workflow dispatch waits for the terminal run snapshot and skips pickers. Because human input is runtime-only and workflows no longer carry a declaration-time HIL marker, headless dispatch does not reject a workflow just because its source contains `ctx.ui.*`. If you copy a HIL workflow example into a headless session, it can pass dispatch and then fail when execution reaches the prompt with an error such as `atomic-workflows: interactive ctx.ui.confirm is unavailable in headless (non-interactive) mode; run the workflow in interactive mode or remove the interactive prompt from this stage` (the primitive name varies, including `ctx.ui.custom`). Run those workflows interactively, or guard/remove runtime `ctx.ui.*` calls before using headless mode.
 
 <p align="center"><img src="images/workflow-input-picker.png" alt="Workflow Input Picker" width="600" /></p>
 
@@ -1515,7 +1550,7 @@ This applies everywhere a stage accepts a model: direct `ctx.task`/`ctx.chain`/`
 - `/workflow <name> key=value ...` for interactive named runs
 - `/workflow connect|attach|pause|interrupt|resume|status|inputs|reload` for live control, inspection, and rediscovery
 - the `workflow` tool for agent-initiated orchestration and direct one-off runs
-Workflow definition files must export definitions produced by `defineWorkflow(...).compile()`. The former imperative object-form runner is not part of the public SDK, and authored workflow files cannot import `runWorkflow` from `@bastani/workflows`.
+Workflow definition files must export definitions produced by `defineWorkflow(...).compile()`. Keep non-workflow runtime helpers (widget factories, shared utilities) in a subdirectory the discovery scan ignores, such as `.atomic/workflows/lib/` — see [Workflow Locations](#workflow-locations). The former imperative object-form runner is not part of the public SDK, and authored workflow files cannot import `runWorkflow` from `@bastani/workflows`.
 
 Standalone TypeScript workflow packages type-check the SDK import with no hand-authored `.d.ts`, no `declare module` shim, and no `tsconfig` `paths` alias. The SDK types ship with `@bastani/atomic`, so a workflow package depends only on `@bastani/atomic` (plus a `typebox` peer):
 
