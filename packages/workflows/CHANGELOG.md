@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the workflow graph overlay remaining interactive when the parent/main-chat agent opens `ask_user_question`: the graph keeps focus, the parent question stays pending behind it with a clear “Main chat needs input — exit graph to answer.” status hint, hiding/exiting the graph focuses the pending question, and host custom-UI state changes no longer hide, restore, remount, or repaint the overlay ([#1353](https://github.com/bastani-inc/atomic/issues/1353)).
+
 ## [0.8.28] - 2026-06-11
 
 ### Added
