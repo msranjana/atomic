@@ -160,6 +160,17 @@ import { CustomMessageComponent } from "./components/custom-message.ts";
 import { DaxnutsComponent } from "./components/daxnuts.ts";
 import { renderAtomicAnsiBanner } from "./components/atomic-banner.ts";
 import { DynamicBorder } from "./components/dynamic-border.ts";
+import { ContextWindowSelectorComponent } from "./components/context-window-selector.ts";
+import { formatContextWindow } from "../../core/context-window.ts";
+import {
+  copilotApiBaseUrlFromToken,
+  copilotCatalogCacheHost,
+  copilotCatalogCachePath,
+  fetchCopilotModelCatalog,
+  readCopilotCatalogCache,
+  setActiveCopilotModelCatalog,
+  writeCopilotCatalogCache,
+} from "../../core/copilot-model-catalog.ts";
 import { EarendilAnnouncementComponent } from "./components/earendil-announcement.ts";
 import { ExtensionEditorComponent } from "./components/extension-editor.ts";
 import { ExtensionInputComponent } from "./components/extension-input.ts";
@@ -372,6 +383,9 @@ export class InteractiveMode {
   private keybindings: KeybindingsManager;
   private version: string;
   private isInitialized = false;
+  // GitHub Copilot CAPI context-window catalog load state (gated on the Copilot provider).
+  private copilotCatalogApplied = false;
+  private copilotCatalogInFlight?: Promise<void>;
   private onInputCallback?: (text: string) => void;
   private pendingUserInputs: string[] = [];
   private loadingAnimation: Loader | undefined = undefined;
@@ -918,6 +932,10 @@ export class InteractiveMode {
    */
   async run(): Promise<void> {
     await this.init();
+
+    // Load GitHub Copilot context-window tiers from CAPI early (gated on the Copilot provider) so
+    // the footer and /model picker reflect GitHub's real windows. Best-effort, never blocks startup.
+    void this.refreshCopilotModelCatalog();
 
     // Start version check asynchronously
     checkForNewPiVersion(this.version).then((newVersion) => {
@@ -3606,6 +3624,12 @@ export class InteractiveMode {
         this.updateEditorBorderColor();
         break;
 
+      case "context_window_changed":
+        this.footer.invalidate();
+        this.usageMeter.invalidate();
+        this.ui.requestRender();
+        break;
+
       case "message_start":
         if (event.message.role === "custom") {
           this.addMessageToChat(event.message);
@@ -5089,11 +5113,54 @@ export class InteractiveMode {
       return this.session.scopedModels.map((scoped) => scoped.model);
     }
 
+    await this.refreshCopilotModelCatalog();
     this.session.modelRegistry.refresh();
     try {
       return await this.session.modelRegistry.getAvailable();
     } catch {
       return [];
+    }
+  }
+
+  /**
+   * Load GitHub Copilot's context-window tiers from the live CAPI catalog, but only when the user
+   * actually has the GitHub Copilot provider authenticated. Cache-first (30-min TTL); on a
+   * successful load the model registry is refreshed so the /model context-window picker reflects
+   * GitHub's real tiers (e.g. gpt-5.5 1.05m, Claude/Gemini 1m). Best-effort and gated: offline,
+   * unauthenticated, or non-Copilot sessions silently keep no long-context options.
+   */
+  private async refreshCopilotModelCatalog(): Promise<void> {
+    if (this.copilotCatalogApplied) return;
+    if (!this.copilotCatalogInFlight) {
+      this.copilotCatalogInFlight = this.loadCopilotModelCatalog();
+    }
+    try {
+      await this.copilotCatalogInFlight;
+    } finally {
+      this.copilotCatalogInFlight = undefined;
+    }
+  }
+
+  private async loadCopilotModelCatalog(): Promise<void> {
+    const registry = this.session.modelRegistry;
+    const cred = registry.authStorage.get("github-copilot");
+    // Gate: do nothing unless the user has the GitHub Copilot provider.
+    if (!cred || cred.type !== "oauth") return;
+    try {
+      const token = await registry.getApiKeyForProvider("github-copilot");
+      if (!token) return;
+      const baseUrl = copilotApiBaseUrlFromToken(token);
+      const cachePath = copilotCatalogCachePath(getAgentDir());
+      let catalog = readCopilotCatalogCache(cachePath, { host: copilotCatalogCacheHost(baseUrl) });
+      if (!catalog) {
+        catalog = await fetchCopilotModelCatalog({ token, baseUrl });
+        writeCopilotCatalogCache(cachePath, baseUrl, catalog);
+      }
+      setActiveCopilotModelCatalog(catalog);
+      registry.refresh();
+      this.copilotCatalogApplied = true;
+    } catch {
+      // Best-effort: leave the active catalog as-is on any failure (offline, auth, parse).
     }
   }
 
@@ -5153,9 +5220,13 @@ export class InteractiveMode {
             this.footer.invalidate();
             this.updateEditorBorderColor();
             done();
-            this.showStatus(`Model: ${model.id}`);
             void this.maybeWarnAboutAnthropicSubscriptionAuth(model);
             this.checkDaxnutsEasterEgg(model);
+            if (this.session.supportsContextWindowSelection()) {
+              this.showContextWindowSelector(model);
+            } else {
+              this.showStatus(`Model: ${model.id}`);
+            }
           } catch (error) {
             done();
             this.showError(
@@ -5168,6 +5239,43 @@ export class InteractiveMode {
           this.ui.requestRender();
         },
         initialSearchInput,
+      );
+      return { component: selector, focus: selector };
+    });
+  }
+
+  private showContextWindowSelector(model: Model<Api>): void {
+    const availableContextWindows = this.session.getAvailableContextWindows();
+    const currentContextWindow =
+      this.session.model?.contextWindow ?? availableContextWindows[0] ?? 0;
+    this.showSelector((done) => {
+      const selector = new ContextWindowSelectorComponent(
+        model.name ?? model.id,
+        availableContextWindows,
+        currentContextWindow,
+        (contextWindow) => {
+          try {
+            this.session.setContextWindow(contextWindow, {
+              persistDefault: true,
+            });
+            this.footer.invalidate();
+            this.usageMeter.invalidate();
+            this.updateEditorBorderColor();
+            done();
+            this.showStatus(
+              `Model: ${model.id} \u00b7 ${formatContextWindow(contextWindow)} context`,
+            );
+          } catch (error) {
+            done();
+            this.showError(
+              error instanceof Error ? error.message : String(error),
+            );
+          }
+        },
+        () => {
+          done();
+          this.showStatus(`Model: ${model.id}`);
+        },
       );
       return { component: selector, focus: selector };
     });
