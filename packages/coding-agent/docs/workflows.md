@@ -86,7 +86,7 @@ Return structured output with `consolidated_review` and `decision` fields.
 Atomic will:
 
 - ask clarifying questions when stage purpose, inputs, models, or handoffs are ambiguous,
-- write a `.atomic/workflows/<name>.ts` file using `defineWorkflow(...).input(...).run(...).compile()`,
+- write a `.atomic/workflows/<name>.ts` file using `workflow({...})`,
 - pick `ctx.task` / `ctx.chain` / `ctx.parallel` / `ctx.ui` per the [primitives](#workflow-primitives) and [task options](#task-and-stage-options) reference, and
 - run `/workflow reload` so Atomic rediscovers the workflow resource and you can launch it immediately.
 
@@ -109,26 +109,29 @@ Named workflow runs are background-oriented. After launch, expect a run id and m
 Workflow files are plain TypeScript modules. Create `.atomic/workflows/explain-file.ts`:
 
 ```ts
-import { defineWorkflow, Type } from "@bastani/workflows";
+import { workflow } from "@bastani/workflows";
+import { Type } from "typebox";
 
-export default defineWorkflow("explain-file")
-  .description("Explain a file with tracked workflow stages.")
-  .input("path", Type.String({ description: "File path to explain." }))
-  .output(
-    "explanation",
-    Type.String({
+export default workflow({
+  name: "explain-file",
+  description: "Explain a file with tracked workflow stages.",
+  inputs: {
+    path: Type.String({ description: "File path to explain." }),
+  },
+  outputs: {
+    explanation: Type.String({
       description: "Explanation of the file's purpose, risks, and key symbols.",
     }),
-  )
-  .run(async (ctx) => {
+  },
+  run: async (ctx) => {
     const explanation = await ctx.task("explain", {
       prompt: `Read ${String(ctx.inputs.path)} and explain purpose, risks, and key symbols.`,
       context: "fresh",
     });
 
     return { explanation: explanation.text };
-  })
-  .compile();
+  },
+});
 ```
 
 Run `/workflow reload` or restart Atomic, then list and run it:
@@ -139,15 +142,15 @@ Run `/workflow reload` or restart Atomic, then list and run it:
 /workflow explain-file path="src/index.ts"
 ```
 
-See [Writing a Workflow](#writing-a-workflow) for the full builder API and [Workflow Primitives](#workflow-primitives) for `ctx.task` / `ctx.chain` / `ctx.parallel` / `ctx.stage` / `ctx.ui`.
+See [Writing a Workflow](#writing-a-workflow) for the full `workflow({...})` API and [Workflow Primitives](#workflow-primitives) for `ctx.task` / `ctx.chain` / `ctx.parallel` / `ctx.stage` / `ctx.ui`.
 
 ## Built-in Workflows
 
 Atomic bundles four workflows that cover the most common multi-stage jobs. They are available in every session — no install step required. Use `/workflow list` to confirm they are loaded, and `/workflow inputs <name>` to see the exact inputs in your environment.
 
-These same builtin workflows are also available to workflow authors as compiled definitions. Import them from `@bastani/workflows/builtin` and pass the definition directly to `ctx.workflow(...)` when one workflow should call `deep-research-codebase`, `goal`, `ralph`, `open-claude-design`, or another builtin as a nested child workflow. See [Workflow Composition](#workflow-composition) for full examples alongside user-defined child workflows.
+These same builtin workflows are also available to workflow authors as workflow definitions. Import them from `@bastani/workflows/builtin` and pass the definition directly to `ctx.workflow(...)` when one workflow should call `deep-research-codebase`, `goal`, `ralph`, `open-claude-design`, or another builtin as a nested child workflow. See [Workflow Composition](#workflow-composition) for full examples alongside user-defined child workflows.
 
-For the builtin result tables below, `deep-research-codebase`, `goal`, and `ralph` explicitly declare `.output("result", Type.String(...))` and return a `result` key from `.run()`, so `result` is part of their declared output contract. Every output a workflow exposes — including `result` — must be both declared with `.output(...)` and returned from `.run()`; Atomic no longer adds any automatic `result` output.
+For the builtin result tables below, `deep-research-codebase`, `goal`, and `ralph` explicitly declare `outputs: { result: Type.String(...) }` and return a `result` key from `run`, so `result` is part of their declared output contract. Every output a workflow exposes — including `result` — must be declared in `outputs` and returned from `run` or supplied to `ctx.exit({ outputs })`; Atomic no longer adds any automatic `result` output.
 
 | Workflow | What it does | When to use |
 |---|---|---|
@@ -388,7 +391,7 @@ If the task is only deterministic TypeScript with no LLM/session stage, use a sc
 | Run, inspect, attach to, pause, interrupt, resume, or check status for an existing workflow | `/workflow ...` or `workflow({ action: ... })` |
 | Implement a small-to-medium scope change with an identifiable work surface, exact outcome, and named validation | `/workflow goal objective="..."` so Atomic keeps the run bounded, captures receipts in a goal ledger, gates completion through reviewers, and stops as `complete`, `blocked`, or `needs_human` |
 | Research and execute a larger migration, broad refactor, or multi-package change | `/workflow ralph prompt="..."` so Atomic can transform the prompt into a research question, research the codebase first, delegate implementation through sub-agents, review, and iterate; prompt text alone does not opt in to PR creation, so add `create_pr=true` only when you want the final `pull-request` stage and `pr_report` |
-| Create or edit reusable automation | a TypeScript workflow definition exported from `defineWorkflow(...).compile()` |
+| Create or edit reusable automation | a TypeScript workflow definition exported from `workflow({...})` |
 | Track one-off work without saving a workflow file | direct `workflow({ task })`, `workflow({ tasks })`, or `workflow({ chain })` calls |
 | Make a workflow robust | design the stage graph, context handoffs, artifacts, validation gates, model fallbacks, and human approval points before coding |
 
@@ -594,20 +597,21 @@ Atomic discovers workflow definitions in this order:
 
 A workflow module may export one default workflow definition and/or named workflow definitions. Discovery checks the default export first, then named exports.
 
-Every runtime export of a discovered workflow file is validated as a workflow definition. A named export that is not a compiled definition — a widget factory, shared constant, or utility function — is rejected with an `INVALID_DEFINITION` discovery diagnostic (`export is not an object`), even when the module also has a valid default export (the valid workflow still loads; the diagnostic flags the extra export as skipped). Type-only exports (`export type` / `export interface`) are erased at runtime and never flagged.
+Every runtime export of a discovered workflow file is validated as a workflow definition. A named export that is not a workflow definition — a widget factory, shared constant, or utility function — is rejected with an `INVALID_DEFINITION` discovery diagnostic (`export is not an object`), even when the module also has a valid default export (the valid workflow still loads; the diagnostic flags the extra export as skipped). Type-only exports (`export type` / `export interface`) are erased at runtime and never flagged.
 
 To co-locate reusable helpers with your workflows — for example a `ctx.ui.custom<T>` widget factory you want to import in tests without running the workflow — put them in a subdirectory and import them from the workflow file. Discovery scans only the top level of each workflow directory, so subdirectories such as `.atomic/workflows/lib/` are never treated as workflow modules:
 
 ```text
 .atomic/workflows/
-  release-picker.ts      # only runtime export: defineWorkflow(...).compile()
+  release-picker.ts      # only runtime export: workflow({...})
   lib/
     table-selector.ts    # widget factory + helpers; not scanned by discovery
 ```
 
 ```ts
 // .atomic/workflows/release-picker.ts
-import { defineWorkflow, Type } from "@bastani/workflows";
+import { workflow } from "@bastani/workflows";
+import { Type } from "typebox";
 import { tableSelectorFactory } from "./lib/table-selector.js";
 ```
 
@@ -991,17 +995,23 @@ Enable workflow fast mode deliberately for broad workflows: parallel fan-out and
 
 ## Writing a Workflow
 
-Workflow files are TypeScript modules that export a compiled definition:
+Workflow files are TypeScript modules that export a workflow definition:
 
 ```ts
-import { defineWorkflow, Type } from "@bastani/workflows";
+import { workflow } from "@bastani/workflows";
+import { Type } from "typebox";
 
-export default defineWorkflow("my-workflow")
-  .description("Short description shown in workflow listings.")
-  .input("prompt", Type.String({ description: "Task or question for the workflow." }))
-  .output("summary", Type.String({ description: "Synthesized findings and recommended next steps." }))
-  .output("reviewer_count", Type.Number({ description: "Number of parallel reviewers that ran." }))
-  .run(async (ctx) => {
+export default workflow({
+  name: "my-workflow",
+  description: "Short description shown in workflow listings.",
+  inputs: {
+    prompt: Type.String({ description: "Task or question for the workflow." }),
+  },
+  outputs: {
+    summary: Type.String({ description: "Synthesized findings and recommended next steps." }),
+    reviewer_count: Type.Number({ description: "Number of parallel reviewers that ran." }),
+  },
+  run: async (ctx) => {
     const prompt = String(ctx.inputs.prompt);
 
     const scoutPath = ".atomic/workflows/runs/my-workflow/scout.md";
@@ -1047,20 +1057,41 @@ export default defineWorkflow("my-workflow")
     });
 
     return { summary: final.text, reviewer_count: reviews.length };
-  })
-  .compile();
+  },
+});
 ```
 
-Builder basics:
+Authoring basics:
 
-- `defineWorkflow("name")` starts a builder; the name must be non-empty.
+- `workflow({ ... })` returns the workflow definition directly for discovery; there is no builder terminal step.
 - Workflow names normalize for lookup: trim, lowercase, convert whitespace/underscore to hyphen, remove other punctuation, and collapse hyphens.
-- `.description(text)` sets the listing text.
-- `.input(key, schema)` declares typed user inputs.
-- `.worktreeFromInputs({ gitWorktreeDir, baseBranch })` optionally maps input names to workflow-wide reusable Git worktree defaults.
-- `.output(key, schema)` declares typed outputs that parent workflows receive from `ctx.workflow(childWorkflow, ...)`.
-- `.run(async (ctx) => { ... })` defines the workflow body.
-- `.compile()` returns the workflow definition for discovery.
+- `description` sets the listing text.
+- `inputs` declares typed user inputs.
+- `worktreeFromInputs` optionally maps input names to workflow-wide reusable Git worktree defaults.
+- `outputs` declares typed outputs that parent workflows receive from `ctx.workflow(childWorkflow, ...)`.
+- `run: async (ctx) => { ... }` defines the workflow body.
+
+Codemod-style migration from the removed builder API:
+
+```diff
+-import { defineWorkflow, Type } from "@bastani/workflows";
++import { workflow } from "@bastani/workflows";
++import { Type } from "typebox";
+
+-export default defineWorkflow("review-changes")
+-  .description("Run two reviewers and synthesize findings.")
+-  .input("target", Type.String())
+-  .output("decision", Type.String())
+-  .run(async (ctx) => ({ decision: await review(ctx) }))
+-  .compile();
++export default workflow({
++  name: "review-changes",
++  description: "Run two reviewers and synthesize findings.",
++  inputs: { target: Type.String() },
++  outputs: { decision: Type.String() },
++  run: async (ctx) => ({ decision: await review(ctx) }),
++});
+```
 
 `prompt` and `task` are aliases for task text. Prefer `prompt` inside authored workflow files because it mirrors lower-level `stage.prompt(...)`; `task` remains useful in direct tool calls and chain examples.
 
@@ -1068,12 +1099,17 @@ Author workflows to create at least one tracked stage by calling `ctx.task()`, `
 
 ### Early exit with `ctx.exit()`
 
-Use `ctx.exit(options?)` when workflow code intentionally stops the current run from a helper, branch, loop, or precondition guard without classifying the run as failed. `ctx.exit()` throws an executor-owned control signal and is typed as `never`, so code after it is unreachable. In async `.run()` bodies, prefer `return ctx.exit(...)` when the exit is the only path so TypeScript can see the non-returning branch.
+Use `ctx.exit(options?)` when workflow code intentionally stops the current run from a helper, branch, loop, or precondition guard without classifying the run as failed. `ctx.exit()` throws an executor-owned control signal and is typed as `never`, so code after it is unreachable. In async `run` bodies, prefer `return ctx.exit(...)` when the exit is the only path so TypeScript can see the non-returning branch.
 
 ```ts
-export default defineWorkflow("guarded-import")
-  .output("scanned", Type.Number())
-  .run(async (ctx) => {
+export default workflow({
+  name: "guarded-import",
+  description: "",
+  inputs: {},
+  outputs: {
+    scanned: Type.Number(),
+  },
+  run: async (ctx) => {
     const files = await findCandidateFiles(ctx.cwd);
     if (files.length === 0) {
       return ctx.exit({
@@ -1085,11 +1121,11 @@ export default defineWorkflow("guarded-import")
 
     const review = await ctx.task("review", { prompt: `Review ${files.join(", ")}` });
     return { scanned: files.length };
-  })
-  .compile();
+  },
+});
 ```
 
-`ctx.exit()` accepts `status: "completed" | "skipped" | "cancelled" | "blocked"`; it never accepts `"failed"` or `"killed"` because thrown errors and external run-control keep those meanings. `status` defaults to `"completed"`. `reason` is persisted and shown in status surfaces, including the default `/workflow status` list and `/workflow status <runId>` detail, so do not put secrets in it. `outputs` may contain a partial subset of declared outputs; provided keys still must be declared with `.output(...)`, match their TypeBox schema, and be JSON-serializable. Missing required outputs are allowed only on the `ctx.exit(...)` path. Exited runs are terminal and not resumable; external `kill`, `pause`, and `interrupt` keep their existing behavior.
+`ctx.exit()` accepts `status: "completed" | "skipped" | "cancelled" | "blocked"`; it never accepts `"failed"` or `"killed"` because thrown errors and external run-control keep those meanings. `status` defaults to `"completed"`. `reason` is persisted and shown in status surfaces, including the default `/workflow status` list and `/workflow status <runId>` detail, so do not put secrets in it. `outputs` may contain a partial subset of declared outputs; provided keys still must be declared in the workflow's `outputs` object, match their TypeBox schema, and be JSON-serializable. Missing required outputs are allowed only on the `ctx.exit(...)` path. Exited runs are terminal and not resumable; external `kill`, `pause`, and `interrupt` keep their existing behavior.
 
 The first selected `ctx.exit({ outputs })` snapshots its output payload synchronously by value before JavaScript `finally` blocks or cleanup callbacks can mutate the caller-owned object. The snapshot preserves undeclared keys and invalid values until post-cleanup validation, so deleting an undeclared key or changing an invalid value after `ctx.exit(...)` does not change the terminal validation result. If reading `status`, `reason`, or `outputs` options, or enumerating/copying the output snapshot itself, throws, Atomic still selects the exit signal, runs workflow-exit cleanup when feasible, and then records a terminal non-resumable authoring failure (`resumable: false`) if no external terminal control won first.
 
@@ -1122,7 +1158,7 @@ Workflow guidance should also cover the context passed between stages:
 
 ### Inputs
 
-Inputs are declared with TypeBox `Type.*` schemas passed to `.input(key, schema)`. `Type` is re-exported from `@bastani/workflows` (along with the `Static` and `TSchema` type helpers), so you do not import from `typebox` directly in workflow files. Workflow packages still declare `typebox` as a peer dependency so the SDK's shipped types resolve under `tsc` — see [Programmatic Usage](#programmatic-usage). Common input schemas map to picker kinds and accepted runtime values:
+Inputs are declared with TypeBox `Type.*` schemas in the `inputs` object. Import `Type` from `typebox` directly in workflow files. Workflow packages still declare `typebox` as a peer dependency so TypeBox schemas resolve under `tsc` — see [Programmatic Usage](#programmatic-usage). Common input schemas map to picker kinds and accepted runtime values:
 
 | TypeBox schema | Picker kind | Accepted runtime value |
 |---|---|---|
@@ -1136,21 +1172,26 @@ A `Type.Union([Type.Literal(...)])` of string literals is how a 'select' is expr
 
 Prefer explicit descriptions because `/workflow inputs <name>`, `/workflow <name> --help`, and the input picker show them to the user. Runtime validation uses TypeBox `Value` and is strict for both top-level named runs and `ctx.workflow(...)` child calls: Atomic rejects unknown keys, missing required values, type mismatches, non-JSON-serializable values, and union/literal values outside the declared choices before the workflow body starts. It does not coerce strings like `"3"` to numbers; pass `count=3` or JSON numbers when a schema declares `Type.Number()`.
 
-In TypeScript workflow files, `.input(...)` also narrows `ctx.inputs` for better intellisense: required/defaulted `Type.String()` inputs are `string`, `Type.Number()` is `number`, `Type.Boolean()` is `boolean`, a `Type.Union([Type.Literal(...)])` select is the literal string union, and `Type.Optional(...)` inputs include `undefined`. Use `Static<typeof schema>` when you need the inferred TypeScript type of a schema directly.
+In TypeScript workflow files, entries in `inputs` also narrow `ctx.inputs` for better intellisense: required/defaulted `Type.String()` inputs are `string`, `Type.Number()` is `number`, `Type.Boolean()` is `boolean`, a `Type.Union([Type.Literal(...)])` select is the literal string union, and `Type.Optional(...)` inputs include `undefined`. Use `Static<typeof schema>` when you need the inferred TypeScript type of a schema directly.
 
 ### Outputs
 
-Workflow outputs are runtime contracts for completed workflow runs and for parent workflows that call a child with `ctx.workflow(childWorkflow, ...)`. A workflow normally returns a JSON-serializable object from `.run()`, and `.output(key, schema)` documents, validates, and exposes keys from that returned object. `ctx.exit({ outputs })` can expose a partial subset of the same declared output contract when the run intentionally stops early. Primitives, arrays, `null`, functions, symbols, `undefined` properties, `NaN`, and infinite numbers fail validation.
+Workflow outputs are runtime contracts for completed workflow runs and for parent workflows that call a child with `ctx.workflow(childWorkflow, ...)`. A workflow normally returns a JSON-serializable object from `run`, and entries in the `outputs` object document, validate, and expose keys from that returned object. `ctx.exit({ outputs })` can expose a partial subset of the same declared output contract when the run intentionally stops early. Primitives, arrays, `null`, functions, symbols, `undefined` properties, `NaN`, and infinite numbers fail validation.
 
-**Return convention:** outputs are return-object keys. Atomic never infers child workflow outputs from stage names, stage order, or the final assistant message. If a parent should read `child.outputs.foo`, the child workflow's `.run()` must both declare `.output("foo", schema)` and return `{ foo: value }`. `result` is not special and is never added for you: to expose `result`, declare `.output("result", schema)` and return `{ result }` exactly like any other output. Returning a key that is not declared with `.output(...)` fails the run with `atomic-workflows: workflow "<name>" returned undeclared output "<key>"; declare it with .output("<key>", Type....) or remove it from the .run() return`.
+**Return convention:** outputs are return-object keys. Atomic never infers child workflow outputs from stage names, stage order, or the final assistant message. If a parent should read `child.outputs.foo`, the child workflow's `run` must both declare `outputs: { foo: schema }` and return `{ foo: value }`. `result` is not special and is never added for you: to expose `result`, declare it in `outputs` and return `{ result }` exactly like any other output. Returning a key that is not declared in `outputs` fails the run with `atomic-workflows: workflow "<name>" returned undeclared output "<key>"; declare it in outputs or remove it from the run return`.
 
-`.output(...)` is a schema contract, not an automatic stage selector. To expose values from any stage, capture the stage/task/child result in normal TypeScript and return it from `.run()` under the desired key:
+The `outputs` object is a schema contract, not an automatic stage selector. To expose values from any stage, capture the stage/task/child result in normal TypeScript and return it from `run` under the desired key:
 
 ```ts
-export default defineWorkflow("review-with-summary")
-  .output("research_artifact", Type.String())
-  .output("review", Type.String())
-  .run(async (ctx) => {
+export default workflow({
+  name: "review-with-summary",
+  description: "Review with returned artifacts.",
+  inputs: {},
+  outputs: {
+    research_artifact: Type.String(),
+    review: Type.String(),
+  },
+  run: async (ctx) => {
     const researchPath = ".atomic/workflows/runs/review-with-summary/research.md";
     await ctx.task("research", {
       prompt: "Research the target.",
@@ -1166,13 +1207,13 @@ export default defineWorkflow("review-with-summary")
       research_artifact: researchPath,
       review: review.text,
     };
-  })
-  .compile();
+  },
+});
 ```
 
-There is no automatic `result` output. A workflow exposes exactly the keys it declares with `.output(...)` and returns from `.run()` — nothing more. To expose `result`, declare `.output("result", schema)` and return `{ result }` like any other output. If `.run()` returns a key that was never declared with `.output(...)`, the run fails with `atomic-workflows: workflow "<name>" returned undeclared output "<key>"; declare it with .output("<key>", Type....) or remove it from the .run() return` (for a child workflow call, `<name>` is the child's own name, and the parent surfaces the failure through the child-failure wrapper `atomic-workflows: child workflow "<childName>" (<displayName>) failed with status failed: ...`).
+There is no automatic `result` output. A workflow exposes exactly the keys it declares in `outputs` and returns from `run` — nothing more. To expose `result`, declare `outputs: { result: schema }` and return `{ result }` like any other output. If `run` returns a key that was never declared in `outputs`, the run fails with `atomic-workflows: workflow "<name>" returned undeclared output "<key>"; declare it in outputs or remove it from the run return` (for a child workflow call, `<name>` is the child's own name, and the parent surfaces the failure through the child-failure wrapper `atomic-workflows: child workflow "<childName>" (<displayName>) failed with status failed: ...`).
 
-Outputs are declared with TypeBox `Type.*` schemas passed to `.output(key, schema)`. **Prefer precise schemas.** A precise schema gives a precise `Static<>` type for the `.run()` return and for any parent reading `child.outputs`, and it makes runtime validation enforce the real shape instead of waving values through. Reach for `Type.Unknown()`, `Type.Any()`, `Type.Array(Type.Unknown())`, or `Type.Object({}, { additionalProperties: true })` only for genuinely dynamic data whose shape you cannot know ahead of time.
+Outputs are declared with TypeBox `Type.*` schemas in the `outputs` object. **Prefer precise schemas.** A precise schema gives a precise `Static<>` type for the `run` return and for any parent reading `child.outputs`, and it makes runtime validation enforce the real shape instead of waving values through. Reach for `Type.Unknown()`, `Type.Any()`, `Type.Array(Type.Unknown())`, or `Type.Object({}, { additionalProperties: true })` only for genuinely dynamic data whose shape you cannot know ahead of time.
 
 | TypeBox schema | Static type | Accepted runtime value |
 |---|---|---|
@@ -1188,36 +1229,38 @@ Outputs are declared with TypeBox `Type.*` schemas passed to `.output(key, schem
 | `Type.Object({}, { additionalProperties: true })` | `Record<string, unknown>` | any JSON object (last resort, dynamic only) |
 | `Type.Unknown()` / `Type.Any()` | `unknown` / `any` | any JSON-serializable value (last resort) |
 
-Output schemas carry `description` in their options object. A declared output is required when its schema is **not** wrapped in `Type.Optional(...)`; wrap outputs that may be absent in `Type.Optional(...)`. A required output means the workflow `.run()` return object must contain that output before the run can complete; a missing required output fails with `missing output "<key>"`, and a declared value whose runtime type does not match the schema fails with `output "<key>" expected <type>, got <actual>`. For child workflow calls, the parent boundary fails before the parent continues. Declared outputs are validated against the declared schema with TypeBox `Value` on completion, and every returned/exposed value is recursively validated as JSON-serializable. Child output replay still performs a structured-clone safety check after JSON validation so continuation can restore completed child workflow boundaries.
+Output schemas carry `description` in their options object. A declared output is required when its schema is **not** wrapped in `Type.Optional(...)`; wrap outputs that may be absent in `Type.Optional(...)`. A required output means the workflow `run` return object must contain that output before the run can complete; a missing required output fails with `missing output "<key>"`, and a declared value whose runtime type does not match the schema fails with `output "<key>" expected <type>, got <actual>`. For child workflow calls, the parent boundary fails before the parent continues. Declared outputs are validated against the declared schema with TypeBox `Value` on completion, and every returned/exposed value is recursively validated as JSON-serializable. Child output replay still performs a structured-clone safety check after JSON validation so continuation can restore completed child workflow boundaries.
 
 #### Prefer precise schemas
 
-A loose output like `Type.Unknown()` or `Type.Object({}, { additionalProperties: true })` types the `.run()` return and `child.outputs.x` as `unknown`/`Record<string, unknown>`, so every consumer must cast or guard before using the value, and runtime validation only checks "is this JSON?" instead of the real shape. Declaring the shape fixes both at once:
+A loose output like `Type.Unknown()` or `Type.Object({}, { additionalProperties: true })` types the `run` return and `child.outputs.x` as `unknown`/`Record<string, unknown>`, so every consumer must cast or guard before using the value, and runtime validation only checks "is this JSON?" instead of the real shape. Declaring the shape fixes both at once:
 
 ```ts
 // ❌ Loose: child.outputs.report is `unknown`; nothing checks the shape at runtime.
-.output("report", Type.Unknown())
+outputs: {
+  report: Type.Unknown(),
+}
 
 // ✅ Precise: child.outputs.report is `{ topic: string; score: number; tags: string[] }`,
 //    and TypeBox rejects a returned value missing `score` or with a non-number `score`.
-.output(
-  "report",
-  Type.Object({
+outputs: {
+  report: Type.Object({
     topic: Type.String(),
     score: Type.Number(),
     tags: Type.Array(Type.String()),
   }),
-)
+}
 ```
 
-The same rule applies to inputs: `.input("counts", Type.Array(Type.Number()))` makes `ctx.inputs.counts` a `number[]`, while `Type.Array(Type.Unknown())` only gives you `unknown[]`.
+The same rule applies to inputs: `inputs: { counts: Type.Array(Type.Number()) }` makes `ctx.inputs.counts` a `number[]`, while `Type.Array(Type.Unknown())` only gives you `unknown[]`.
 
 #### `Type.Unsafe<T>()` escape hatch for deeply-nested values
 
-When you already have a precise TypeScript type for a deeply-nested serializable value and don't want to hand-write the equivalent TypeBox schema, wrap a permissive runtime schema with `Type.Unsafe<MyType>(...)`. The **static** type becomes exactly `MyType` (so `ctx.inputs`, the `.run()` return, and `child.outputs` stay precise), while the **runtime** check stays as lenient as the wrapped schema. Use a `type` alias rather than an `interface` for the wrapped type — an `interface` has no implicit index signature, so it does not satisfy the serializable-output constraint:
+When you already have a precise TypeScript type for a deeply-nested serializable value and don't want to hand-write the equivalent TypeBox schema, wrap a permissive runtime schema with `Type.Unsafe<MyType>(...)`. The **static** type becomes exactly `MyType` (so `ctx.inputs`, the `run` return, and `child.outputs` stay precise), while the **runtime** check stays as lenient as the wrapped schema. Use a `type` alias rather than an `interface` for the wrapped type — an `interface` has no implicit index signature, so it does not satisfy the serializable-output constraint:
 
 ```ts
-import { defineWorkflow, Type } from "@bastani/workflows";
+import { workflow } from "@bastani/workflows";
+import { Type } from "typebox";
 
 type ResearchPacket = {
   readonly topic: string;
@@ -1225,65 +1268,83 @@ type ResearchPacket = {
   readonly sections: readonly { readonly heading: string; readonly body: string }[];
 };
 
-export default defineWorkflow("research-packet")
-  .input("topic", Type.String())
-  // Static type = ResearchPacket; runtime only checks "is a JSON object".
-  .output("packet", Type.Unsafe<ResearchPacket>(Type.Object({}, { additionalProperties: true })))
-  .run(async (ctx) => {
+export default workflow({
+  name: "research-packet",
+  description: "",
+  inputs: {
+    topic: Type.String(),
+  },
+  outputs: {
+    packet: Type.Unsafe<ResearchPacket>(Type.Object({}, { additionalProperties: true })),
+  },
+  run: async (ctx) => {
     const packet: ResearchPacket = {
       topic: ctx.inputs.topic,
       score: 1,
       sections: [{ heading: "overview", body: "…" }],
     };
     return { packet }; // statically checked against ResearchPacket
-  })
-  .compile();
+  },
+});
 ```
 
 Tradeoff: `Type.Unsafe<T>()` does not deeply validate at runtime — it trusts that the produced value matches `T`. Use it when the producing code already guarantees the shape (the `contract-complex-leaf` contract workflow does exactly this, wrapping `Type.Unsafe<ComplexPacket>(...)` and `Type.Unsafe<readonly ComplexRecord[]>(...)` around permissive runtime schemas). When you can express the shape directly, prefer a real `Type.Object(...)`/`Type.Array(...)` so runtime validation also catches drift. Keep bare `Type.Unknown()` and `Type.Object({}, { additionalProperties: true })` for the rare cases where the value is genuinely dynamic.
 
 #### How types flow
 
-- `ctx.inputs.x` is `Static<inputSchema>` for the input you declared with `.input("x", schema)` — required and defaulted schemas are always present, and `Type.Optional(...)` adds `| undefined`.
-- The `.run()` return is checked against your declared outputs at **compile time** (a missing required output or a wrong value type is a TypeScript error) and at **runtime** via TypeBox `Value` (undeclared keys are rejected and the declared shape is enforced recursively).
-- `ctx.workflow(child)` returns a discriminated child result. When `child.exited === false`, `child.outputs` is the child's full declared `.output(...)` contract; when `child.exited === true`, `child.outputs` is `Partial<TOutputs>` because child `ctx.exit({ outputs })` may intentionally provide only a subset.
+- `ctx.inputs.x` is `Static<inputSchema>` for the input you declared as `inputs: { x: schema }` — required and defaulted schemas are always present, and `Type.Optional(...)` adds `| undefined`.
+- The `run` return is checked against your declared outputs at **compile time** (a missing required output or a wrong value type is a TypeScript error) and at **runtime** via TypeBox `Value` (undeclared keys are rejected and the declared shape is enforced recursively).
+- `ctx.workflow(child)` returns a discriminated child result. When `child.exited === false`, `child.outputs` is the child's full declared `outputs` contract; when `child.exited === true`, `child.outputs` is `Partial<TOutputs>` because child `ctx.exit({ outputs })` may intentionally provide only a subset.
 
 Use `Static<typeof schema>` (both `Static` and `TSchema` are re-exported from `@bastani/workflows`) when you need the inferred TypeScript type of a schema directly — for example to type a helper that builds an output value.
 
 ### Workflow Composition
 
-Use workflow composition when one workflow should call another reusable workflow and consume its outputs as a tracked boundary stage. The child can be a user-defined workflow from your project/package or a bundled builtin workflow. In both cases, use normal TypeScript imports: import the compiled child workflow definition, then pass that definition directly to `ctx.workflow(workflowDefinition, options)`. Registry names, path objects, and string aliases are not accepted by `ctx.workflow(...)`.
+Use workflow composition when one workflow should call another reusable workflow and consume its outputs as a tracked boundary stage. The child can be a user-defined workflow from your project/package or a bundled builtin workflow. In both cases, use normal TypeScript imports: import the child workflow definition, then pass that definition directly to `ctx.workflow(workflowDefinition, options)`. Registry names, path objects, and string aliases are not accepted by `ctx.workflow(...)`.
 
-For workflows intended to be called by parent workflows, declare `.output(...)` for every field a parent should rely on, including `result`. No output exists without declaration: a child exposes exactly its declared outputs, and returning an undeclared key fails the child call.
+For workflows intended to be called by parent workflows, declare every field a parent should rely on in the child workflow's `outputs` object, including `result`. No output exists without declaration: a child exposes exactly its declared outputs, and returning an undeclared key fails the child call.
 
 #### Compose with a user-defined workflow
 
-User-defined workflows are ordinary TypeScript modules. Import the compiled definition with a relative module specifier and call it directly from the parent workflow:
+User-defined workflows are ordinary TypeScript modules. Import the workflow definition with a relative module specifier and call it directly from the parent workflow:
 
 ```ts
 // .atomic/workflows/shared-research.ts
-import { defineWorkflow, Type } from "@bastani/workflows";
+import { workflow } from "@bastani/workflows";
+import { Type } from "typebox";
 
-export default defineWorkflow("shared-research")
-  .input("topic", Type.String())
-  .output("summary", Type.String({ description: "Research summary markdown." }))
-  // Precise element type: child.outputs.sources is `string[] | undefined`, not `unknown[]`.
-  .output("sources", Type.Optional(Type.Array(Type.String(), { description: "Source URLs and file references." })))
-  .run(async (ctx) => {
+export default workflow({
+  name: "shared-research",
+  description: "",
+  inputs: {
+    topic: Type.String(),
+  },
+  outputs: {
+    summary: Type.String({ description: "Research summary markdown." }),
+    sources: Type.Optional(Type.Array(Type.String(), { description: "Source URLs and file references." })),
+  },
+  run: async (ctx) => {
     const result = await ctx.task("research", { prompt: `Research ${String(ctx.inputs.topic)}` });
     return { summary: result.text, sources: [] };
-  })
-  .compile();
+  },
+});
 
 // .atomic/workflows/research-and-synthesize.ts
-import { defineWorkflow, Type } from "@bastani/workflows";
+import { workflow } from "@bastani/workflows";
+import { Type } from "typebox";
 import sharedResearch from "./shared-research.js";
 
-export default defineWorkflow("research-and-synthesize")
-  .input("topic", Type.String())
-  .output("final", Type.String({ description: "Synthesis built from the child research summary." }))
-  .output("child_run_id", Type.String({ description: "Run id of the nested shared-research child." }))
-  .run(async (ctx) => {
+export default workflow({
+  name: "research-and-synthesize",
+  description: "Run shared research and synthesize it.",
+  inputs: {
+    topic: Type.String(),
+  },
+  outputs: {
+    final: Type.String({ description: "Synthesis built from the child research summary." }),
+    child_run_id: Type.String({ description: "Run id of the nested shared-research child." }),
+  },
+  run: async (ctx) => {
     const child = await ctx.workflow(sharedResearch, {
       inputs: { topic: ctx.inputs.topic },
       stageName: "run shared research",
@@ -1296,13 +1357,13 @@ export default defineWorkflow("research-and-synthesize")
       prompt: `Synthesize:\n\n${String(child.outputs.summary)}`,
     });
     return { final: final.text, child_run_id: child.runId };
-  })
-  .compile();
+  },
+});
 ```
 
 #### Compose with builtin workflows
 
-Builtin workflows are also exported as compiled workflow definitions, so parent workflows can call them exactly like user-defined workflows. Use the barrel export when you want several builtins:
+Builtin workflows are also exported as workflow definitions, so parent workflows can call them exactly like user-defined workflows. Use the barrel export when you want several builtins:
 
 ```ts
 import { deepResearchCodebase, goal, openClaudeDesign, ralph } from "@bastani/workflows/builtin";
@@ -1329,25 +1390,29 @@ Common builtin import targets:
 Example parent workflow that runs builtin deep research, then chooses either `goal` or `ralph` as the nested implementation runner:
 
 ```ts
-import { defineWorkflow, Type } from "@bastani/workflows";
+import { workflow } from "@bastani/workflows";
+import { Type } from "typebox";
 import { deepResearchCodebase, goal, ralph } from "@bastani/workflows/builtin";
 
-export default defineWorkflow("research-then-implement")
-  .input("topic", Type.String())
-  .input(
-    "runner",
-    Type.Union([Type.Literal("goal"), Type.Literal("ralph")], {
+export default workflow({
+  name: "research-then-implement",
+  description: "Run deep research, then dispatch to goal or Ralph.",
+  inputs: {
+    topic: Type.String(),
+    runner: Type.Union([Type.Literal("goal"), Type.Literal("ralph")], {
       default: "goal",
       description: "Use goal for bounded changes or Ralph for broad research-first implementation work.",
     }),
-  )
-  .output("research_doc_path", Type.Optional(Type.String({ description: "Path to the deep-research document used for implementation." })))
-  .output("runner", Type.String({ description: "Which nested runner executed: \"goal\" or \"ralph\"." }))
-  // Genuinely dynamic: the nested runner (goal vs ralph) is chosen at runtime and
-  // each exposes a different declared output shape, so a loose object is appropriate here.
-  // When a child's outputs are known and fixed, declare the precise shape instead.
-  .output("implementation", Type.Object({}, { additionalProperties: true, description: "Declared outputs from the nested implementation workflow." }))
-  .run(async (ctx) => {
+  },
+  outputs: {
+    research_doc_path: Type.Optional(Type.String({ description: "Path to the deep-research document used for implementation." })),
+    runner: Type.String({ description: "Which nested runner executed: \"goal\" or \"ralph\"." }),
+    // Genuinely dynamic: the nested runner (goal vs ralph) is chosen at runtime and
+    // each exposes a different declared output shape, so a loose object is appropriate here.
+    // When a child's outputs are known and fixed, declare the precise shape instead.
+    implementation: Type.Object({}, { additionalProperties: true, description: "Declared outputs from the nested implementation workflow." }),
+  },
+  run: async (ctx) => {
     const topic = String(ctx.inputs.topic);
     const research = await ctx.workflow(deepResearchCodebase, {
       inputs: { prompt: topic, max_concurrency: 4 },
@@ -1392,11 +1457,11 @@ export default defineWorkflow("research-then-implement")
       runner: "goal",
       implementation: implementation.outputs,
     };
-  })
-  .compile();
+  },
+});
 ```
 
-Passing a compiled definition directly to `ctx.workflow(...)` uses the child workflow's normalized name for replay metadata and default boundary labels (`shared-research` for the user-defined example above, or builtin names such as `deep-research-codebase`, `goal`, and `ralph`).
+Passing a workflow definition directly to `ctx.workflow(...)` uses the child workflow's normalized name for replay metadata and default boundary labels (`shared-research` for the user-defined example above, or builtin names such as `deep-research-codebase`, `goal`, and `ralph`).
 
 `ctx.workflow(workflowDefinition)` starts a nested workflow behind a parent boundary stage named `workflow:<workflow-name>` by default. User-facing status and graph views flatten that child into the parent run, so composition behaves like inlining the child workflow code: child stages, HIL prompt nodes, and deeper imported workflows appear in one expanded graph. The nested run id remains available internally for routing attach/pause/interrupt/resume/kill to the correct live stage, but it is not shown as a separate top-level `/workflow status` entry. The returned child result has:
 
@@ -1413,7 +1478,7 @@ Passing a compiled definition directly to `ctx.workflow(...)` uses the child wor
 
 | Option | Meaning |
 |---|---|
-| `inputs` | Values validated against the child workflow's `.input()` schema before the child starts. |
+| `inputs` | Values validated against the child workflow's `inputs` schema map before the child starts. |
 | `stageName` | Parent boundary stage label. Defaults to `workflow:<workflow-name>`. |
 
 Output exposure rules:
@@ -1428,9 +1493,9 @@ if (child.exited === true) {
 }
 ```
 
-A child exposes exactly its declared outputs — the keys it declared with `.output(...)` and returned from `.run()` or supplied to `ctx.exit({ outputs })`. There are no implicit outputs and no raw return-object passthrough. If `.run()` returns a key that was not declared with `.output(...)`, the child run fails with `atomic-workflows: workflow "<childName>" returned undeclared output "<key>"; declare it with .output("<key>", Type....) or remove it from the .run() return`, and the parent surfaces that failure through the wrapper `atomic-workflows: child workflow "<childName>" (<displayName>) failed with status failed: ...`. A child with no declared outputs therefore exposes no outputs. Missing required outputs, schema type mismatches, and non-JSON-serializable returned values fail normal child completion before the parent continues; child `ctx.exit({ outputs })` allows missing required outputs but still validates every provided key and sets `child.exited === true` so parent code must handle the partial shape.
+A child exposes exactly its declared outputs — the keys declared in `outputs` and returned from `run` or supplied to `ctx.exit({ outputs })`. There are no implicit outputs and no raw return-object passthrough. If `run` returns a key that was not declared in `outputs`, the child run fails with `atomic-workflows: workflow "<childName>" returned undeclared output "<key>"; declare it in outputs or remove it from the run return`, and the parent surfaces that failure through the wrapper `atomic-workflows: child workflow "<childName>" (<displayName>) failed with status failed: ...`. A child with no declared outputs therefore exposes no outputs. Missing required outputs, schema type mismatches, and non-JSON-serializable returned values fail normal child completion before the parent continues; child `ctx.exit({ outputs })` allows missing required outputs but still validates every provided key and sets `child.exited === true` so parent code must handle the partial shape.
 
-Only compiled workflow definitions can be passed to `ctx.workflow(...)`. Import reusable workflows with TypeScript `import` statements first; use `/workflow` names such as `goal` only for launching named runs, not as `ctx.workflow(...)` arguments. If a module is missing or does not export a compiled workflow definition, workflow discovery fails when loading that module. Nested child workflows count against `maxDepth` (default `4` total workflow levels).
+Only workflow definitions can be passed to `ctx.workflow(...)`. Import reusable workflows with TypeScript `import` statements first; use `/workflow` names such as `goal` only for launching named runs, not as `ctx.workflow(...)` arguments. If a module is missing or does not export a workflow definition, workflow discovery fails when loading that module. Nested child workflows count against `maxDepth` (default `4` total workflow levels).
 
 The graph includes both the parent boundary node and the imported child workflow's own stages while the child is loading/running, so the user can observe progress and interrupt sub-workflows before they complete. Completed boundaries still retain the child workflow name, child run id prefix, and exposed output count for replay/debugging. Skipped or failed boundaries do not retain child-edge metadata (`workflowChild` / `workflowChildRun`), and graph expansion ignores any stale non-completed boundary metadata from older persisted sessions instead of flattening an unrelated child run. Use `stageName` when the parent needs a more specific label, but keep it concise so the child summary remains readable in the graph.
 
@@ -1449,7 +1514,7 @@ Prefer high-level primitives because they create tracked graph nodes, provide co
 | Independent concurrent branches | `ctx.parallel(steps, options?)` |
 | Reusable child workflow | Call `ctx.workflow(workflowDefinition, options?)` |
 | Human input during a workflow run | `ctx.ui.input/confirm/select/editor/custom` |
-| Pure deterministic computation, parsing, or file I/O | Plain TypeScript in `.run()` or helpers |
+| Pure deterministic computation, parsing, or file I/O | Plain TypeScript in `run` or helpers |
 | Fine-grained session control | `ctx.stage(name, options?)` |
 
 Use `previous` and `{previous}` for compact handoffs only. If no placeholder is present, the runtime appends context, so a large `previous` payload can silently bloat the next model prompt. Chain defaults are:
@@ -1517,20 +1582,26 @@ A command such as `playwright-cli snapshot | grep title` passes only when both s
 
 `gitWorktreeDir` selects a reusable Git worktree root for `ctx.stage`, `ctx.task`, `ctx.chain`, and `ctx.parallel`. If the path is missing, Atomic creates it with `git worktree add --detach <path> <baseBranch>`; if it exists, it must be a same-repository worktree root. The default stage cwd becomes the matching cwd inside the worktree and preserves the invoking repo-relative subdirectory. Explicit `cwd` still wins; relative `cwd` values resolve from the worktree cwd, while absolute `cwd` values are used as provided. `gitWorktreeDir` is mutually exclusive with `worktree: true`: use `gitWorktreeDir` for named/reusable worktrees and `worktree: true` for temporary direct-mode worktrees that are cleaned up after the run.
 
-To bind user inputs to a workflow-wide worktree default, use the builder method:
+To bind user inputs to a workflow-wide worktree default, set `worktreeFromInputs` in `workflow({...})`:
 
 ```ts
-export default defineWorkflow("safe-implementation")
-  .input("task", Type.String())
-  .input("git_worktree_dir", Type.String({ default: "" }))
-  .input("base_branch", Type.String({ default: "origin/main" }))
-  .worktreeFromInputs({ gitWorktreeDir: "git_worktree_dir", baseBranch: "base_branch" })
-  .output("result", Type.String({ description: "Implementation result text." }))
-  .run(async (ctx) => {
+export default workflow({
+  name: "safe-implementation",
+  description: "",
+  inputs: {
+    task: Type.String(),
+    git_worktree_dir: Type.String({ default: "" }),
+    base_branch: Type.String({ default: "origin/main" }),
+  },
+  outputs: {
+    result: Type.String({ description: "Implementation result text." }),
+  },
+  worktreeFromInputs: { gitWorktreeDir: "git_worktree_dir", baseBranch: "base_branch" },
+  run: async (ctx) => {
     const result = await ctx.task("implement", { task: String(ctx.inputs.task) });
     return { result: result.text };
-  })
-  .compile();
+  },
+});
 ```
 
 For lower-level integrations, `@bastani/workflows` also exports `setupGitWorktree({ gitWorktreeDir, baseBranch, cwd })`, returning `{ worktreeRoot, cwd, repositoryRoot, created }` with the same validation, symlink-preserving path handling, and cwd-preservation behavior used by workflow stages.
@@ -1593,20 +1664,26 @@ The budget applies only to the candidate that carries the token; other primary a
 - `/workflow <name> key=value ...` for interactive named runs
 - `/workflow connect|attach|pause|interrupt|resume|status|inputs|reload` for live control, inspection, and rediscovery
 - the `workflow` tool for agent-initiated orchestration and direct one-off runs
-Workflow definition files must export definitions produced by `defineWorkflow(...).compile()`. Keep non-workflow runtime helpers (widget factories, shared utilities) in a subdirectory the discovery scan ignores, such as `.atomic/workflows/lib/` — see [Workflow Locations](#workflow-locations). The former imperative object-form runner is not part of the public SDK, and authored workflow files cannot import `runWorkflow` from `@bastani/workflows`.
+Workflow definition files must export definitions produced by `workflow({...})`. Keep non-workflow runtime helpers (widget factories, shared utilities) in a subdirectory the discovery scan ignores, such as `.atomic/workflows/lib/` — see [Workflow Locations](#workflow-locations). The former imperative object-form runner is not part of the public SDK, and authored workflow files cannot import `runWorkflow` from `@bastani/workflows`.
 
 Standalone TypeScript workflow packages type-check the SDK import with no hand-authored `.d.ts`, no `declare module` shim, and no `tsconfig` `paths` alias. The SDK types ship with `@bastani/atomic`, so a workflow package depends only on `@bastani/atomic` (plus a `typebox` peer):
 
 ```ts
-import { defineWorkflow, Type } from "@bastani/workflows";
+import { workflow } from "@bastani/workflows";
+import { Type } from "typebox";
 
-export default defineWorkflow("map-workflow-sdk")
-  .input("prompt", Type.String({ default: "map workflow sdk" }))
-  .run(async (ctx) => {
+export default workflow({
+  name: "map-workflow-sdk",
+  description: "Map the workflow SDK.",
+  inputs: {
+    prompt: Type.String({ default: "map workflow sdk" }),
+  },
+  outputs: {},
+  run: async (ctx) => {
     await ctx.task("map", { prompt: ctx.inputs.prompt });
     return {};
-  })
-  .compile();
+  },
+});
 ```
 
 How those types resolve depends on what else the package imports:
@@ -1630,22 +1707,29 @@ How those types resolve depends on what else the package imports:
   /// <reference types="@bastani/atomic/workflows/ambient" />
   ```
 
-Either form makes `import { defineWorkflow, Type } from "@bastani/workflows"` and the `@bastani/workflows/builtin/*` composition imports resolve under `tsc` (`moduleResolution: NodeNext`) with no hand-authored `.d.ts`, no `declare module` shim, and no `paths` alias. `@bastani/workflows` is not a separate npm package — its types ship with `@bastani/atomic` — so list both `@bastani/atomic` and `typebox` (the SDK's emitted types reference TypeBox) in `peerDependencies`. Runtime discovery and loading via `atomic.workflows` are unchanged: Atomic's loader still supplies the SDK when workflow files execute.
+Either form makes `import { workflow } from "@bastani/workflows"
+import { Type } from "typebox"` and the `@bastani/workflows/builtin/*` composition imports resolve under `tsc` (`moduleResolution: NodeNext`) with no hand-authored `.d.ts`, no `declare module` shim, and no `paths` alias. `@bastani/workflows` is not a separate npm package — its types ship with `@bastani/atomic` — so list both `@bastani/atomic` and `typebox` (workflow files import `Type` from `typebox`) in `peerDependencies`. Runtime discovery and loading via `atomic.workflows` are unchanged: Atomic's loader still supplies the SDK when workflow files execute.
 
 The `workflow` tool still supports direct one-off `task`, `tasks`, and `chain` modes. Direct chains support `chainName` for status/artifact grouping and `chainDir` as a shared directory for relative reads, outputs, and worktree diffs.
 
 Use `createRegistry()` when code needs to group definitions explicitly:
 
 ```ts
-import { createRegistry, defineWorkflow, Type } from "@bastani/workflows";
+import { createRegistry, workflow } from "@bastani/workflows";
+import { Type } from "typebox";
 
-const alpha = defineWorkflow("alpha")
-  .output("text", Type.String({ description: "Alpha task output text." }))
-  .run(async (ctx) => {
+const alpha = workflow({
+  name: "alpha",
+  description: "",
+  inputs: {},
+  outputs: {
+    text: Type.String({ description: "Alpha task output text." }),
+  },
+  run: async (ctx) => {
     const result = await ctx.task("alpha", { prompt: "Run alpha." });
     return { text: result.text };
-  })
-  .compile();
+  },
+});
 
 const registry = createRegistry().register(alpha);
 registry.names();
@@ -1816,7 +1900,7 @@ Before implementing or shipping a non-trivial workflow, answer these questions:
 - **Stage decomposition:** For each stage, what question does it answer, what context does it need, what output should it return, and what model/tool/MCP requirements does it have?
 - **Local stage contract:** Can this stage prompt stand alone with its current objective, inputs/artifacts, expected outputs, tools/checks, and success criteria, without unexplained workflow internals or future-stage assumptions?
 - **Information flow:** For every edge between stages, is `previous` enough, or should the handoff use structured returns, files, `reads`, `output`, or `outputMode`?
-- **Output contract:** Which outputs should be declared with `.output(...)`, which stage/task/child results should `.run()` return for those keys, and what runtime type must each value have? If another workflow may call this workflow as a child, which non-default outputs should the parent rely on?
+- **Output contract:** Which outputs should be declared in `outputs`, which stage/task/child results should `run` return for those keys, and what runtime type must each value have? If another workflow may call this workflow as a child, which non-default outputs should the parent rely on?
 - **Context size:** Can downstream stages succeed from the handoff alone? Should large transcripts, logs, or research bundles be summarized or saved as artifacts?
 - **Control flow:** Should the workflow use `ctx.chain`, `ctx.parallel`, `ctx.ui`, bounded loops, `failFast`, or `fallbackModels`?
 - **User experience:** Are stage names readable in status and graph views? Is the final output compact? Are important artifacts saved with stable paths?
@@ -1830,8 +1914,8 @@ Good workflows are information-flow systems, not just prompt sequences. Keep sta
 - Do not guess input keys; inspect with `inputs` or `get` first.
 - Do not call `create`, `update`, or `delete` on the workflow tool; definitions are code-authored.
 - Do not use legacy workflow tool fields like `agent`, `stage`, or run-control `name`.
-- Do not pass strings such as `"goal"` or path objects to `ctx.workflow(...)`; import the compiled workflow definition from `@bastani/workflows/builtin` or another TypeScript module first.
-- Do not rely on undeclared child outputs; returning a key that is not declared with `.output(...)` fails the run. Declare `.output(...)` for every child-workflow field you expose — including `result` — and return values matching those schemas from `.run()`.
+- Do not pass strings such as `"goal"` or path objects to `ctx.workflow(...)`; import the workflow definition from `@bastani/workflows/builtin` or another TypeScript module first.
+- Do not rely on undeclared child outputs; returning a key that is not declared in `outputs` fails the run. Declare every child-workflow field you expose in `outputs` — including `result` — and return values matching those schemas from `run`.
 - Do not expect to select or rename child outputs at the call site; parent workflows receive the child's declared output contract as `child.outputs` after checking `child.exited === false`, and a partial declared-output map when `child.exited === true`.
 - Do not expect named workflow runs to block the chat turn; they are background tasks.
 - Do not call `kill` when the user asks to interrupt or pause resumably.

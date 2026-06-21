@@ -22,7 +22,7 @@ import { join } from "node:path";
 import { dispatch } from "../../packages/workflows/src/extension/dispatcher.js";
 import { createExtensionRuntime } from "../../packages/workflows/src/extension/runtime.js";
 import { createRegistry } from "../../packages/workflows/src/workflows/registry.js";
-import { defineWorkflow } from "../../packages/workflows/src/workflows/define-workflow.js";
+import { workflow } from "../../packages/workflows/src/authoring/workflow.js";
 import { Type } from "typebox";
 import { createStore } from "../../packages/workflows/src/shared/store.js";
 import { renderResult } from "../../packages/workflows/src/extension/render-result.js";
@@ -130,26 +130,6 @@ function fakeStageSession(): StageSessionRuntime {
     };
 }
 
-const helloWorkflow = defineWorkflow("hello-world")
-    .description("Simple greeting")
-    .input("name", Type.String())
-    .output("greeting", Type.Optional(Type.Any()))
-    .run(async (ctx) => {
-        const stage = ctx.stage("greet");
-        const out = await stage.prompt(`Hello ${String(ctx.inputs["name"])}`);
-        return { greeting: out };
-    })
-    .compile() as WorkflowDefinition;
-
-const schemaWorkflow = defineWorkflow("schema-test")
-    .description("Multi-input schema")
-    .input("text", Type.String({ default: "hi" }))
-    .input("count", Type.Optional(Type.Number()))
-    .input("flag", Type.Boolean())
-    .output("ok", Type.Optional(Type.Any()))
-    .run(async (_ctx) => ({ ok: true }))
-    .compile() as WorkflowDefinition;
-
 // ---------------------------------------------------------------------------
 // dispatch: list
 // ---------------------------------------------------------------------------
@@ -170,15 +150,19 @@ describe("WorkflowPersistencePort — runtime persistence forwarding", () => {
         return { persistence, calls };
     }
 
-    const persistWorkflow = defineWorkflow("persist-forwarding-test")
-        .description("Tests persistence port forwarding through runtime")
-        .output("done", Type.Optional(Type.Any()))
-        .run(async (ctx) => {
+    const persistWorkflow = workflow({
+      name: "persist-forwarding-test",
+      description: "Tests persistence port forwarding through runtime",
+      inputs: {},
+      outputs: {
+        done: Type.Optional(Type.Any()),
+      },
+      run: async (ctx) => {
             const stage = ctx.stage("persist-stage");
             await stage.prompt("hello");
             return { done: true };
-        })
-        .compile() as WorkflowDefinition;
+        },
+    }) as WorkflowDefinition;
 
     const noopAdaptersForPersist: StageAdapters = {
         prompt: { prompt: async () => "ok" },
