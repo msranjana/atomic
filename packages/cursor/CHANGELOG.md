@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.9.0-alpha.2] - 2026-06-21
+
+### Changed
+
+- Published a synchronized Atomic 0.9.0-alpha.2 prerelease; no functional Cursor provider changes were made after 0.9.0-alpha.1.
+
 ## [0.9.0-alpha.1] - 2026-06-20
 
 ### Changed

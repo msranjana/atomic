@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.9.0-alpha.2] - 2026-06-21
+
 ### Breaking Changes
 
 - Removed the Atomic-specific `bashPolicy` command-level allow/deny API from `createAgentSession()`, `AgentSession` internals, SDK exports, and the built-in `bash` tool so shell execution matches upstream pi behavior. Use `tools`/`excludedTools`/`noTools` to expose or hide `bash`, and use a sandbox or custom tool for command allowlisting.

@@ -4,6 +4,8 @@ All notable changes to the `pi-intercom` extension will be documented in this fi
 
 ## [Unreleased]
 
+## [0.9.0-alpha.2] - 2026-06-21
+
 ### Changed
 
 - Aligned the intercom extension peer dependency with upstream pi TUI `^0.79.9` so coordination overlays and rendered message surfaces inherit the latest shared TUI compatibility fixes, including stabilized partial code-fence rendering during Markdown streaming; no intercom extension source changes were needed for this dependency-covered sync.

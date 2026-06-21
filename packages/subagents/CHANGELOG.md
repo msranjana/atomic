@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.9.0-alpha.2] - 2026-06-21
+
 ### Changed
 
 - Aligned the subagents extension peer dependencies with upstream pi `^0.79.9` runtime packages (`@earendil-works/pi-agent-core`, `@earendil-works/pi-ai`, and `@earendil-works/pi-tui`) so child sessions inherit chat-template custom-provider thinking controls, GLM-5.2 provider metadata, GitHub Copilot model-availability filtering, Mistral prompt-cache accounting, Markdown streaming code-fence stability, and shared agent/TUI compatibility fixes; no subagents extension source changes were needed for this dependency-covered sync.
