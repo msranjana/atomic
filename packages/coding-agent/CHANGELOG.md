@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.9.0-alpha.3] - 2026-06-21
+
 ### Fixed
 
 - Fixed the repository `publish-release` workflow's final Publish-run verifier to poll GitHub Actions run JSON until a terminal state instead of treating a still-`in_progress` publish run as a failed prerelease.

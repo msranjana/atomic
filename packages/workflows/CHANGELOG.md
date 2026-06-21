@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.9.0-alpha.3] - 2026-06-21
+
 ### Added
 
 - Added a shared `prompt-refinement` stage to the builtin `ralph` and `goal` workflows. Both now run one `prompt-refinement` stage at the start that invokes the `prompt-engineer` skill (`/skill:prompt-engineer`) to sharpen the raw user request into a clearer, more actionable objective using the Workflow Best Practices prompt anatomy documented in `packages/coding-agent/docs/workflows.md` (`## Workflow Best Practices`). The refined request replaces the original as the operative objective for all downstream stages (research, orchestration, worker/review loops); the original request is preserved for traceability. `ralph` exposes `original_prompt` and `refined_prompt` outputs, and `goal` exposes `original_objective` (omitted when refinement left it unchanged) and records the original objective in the ledger and final report. The stage uses the same model chain as ralph's prompt-engineering stage (`promptEngineerModelConfig`).
