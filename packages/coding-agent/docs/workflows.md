@@ -2,9 +2,9 @@
 
 # Workflows
 
-Workflows let Atomic run reusable multi-stage automation with tracked stages, parallel branches, artifacts, human input, live status, and resumable background execution.
+Workflows are how Atomic runs executable engineering loops: reusable multi-stage automation with tracked stages, parallel branches, artifacts, human input, live status, checkpoints, and resumable background execution.
 
-Use a workflow when a task should be repeatable, inspectable, resumable, or split across multiple model sessions. For one-off work, the `workflow` tool can also run a tracked single task, parallel fan-out, or chain without creating a saved workflow file.
+Use a workflow when a task should be repeatable, inspectable, resumable, or split across multiple model sessions. Markdown prompts can describe a loop; Atomic workflows run the loop with scoped context, tools, artifacts, verification, subagents, review gates, and human approvals. For one-off work, the `workflow` tool can also run a tracked single task, parallel fan-out, or chain without creating a saved workflow file.
 
 **Key capabilities:**
 - **Tracked stages** - Name each step and inspect it in workflow status and graph views
@@ -13,6 +13,7 @@ Use a workflow when a task should be repeatable, inspectable, resumable, or spli
 - **Human input** - Pause for `ctx.ui.input`, `confirm`, `select`, `editor`, or custom TUI widget decisions during a run
 - **Resumable control** - Interrupt, pause, resume, attach to, or kill workflow runs
 - **Artifacts** - Save large outputs to files instead of pushing everything through model context
+- **Verification and gates** - Preserve evidence, run checks, and stop for human approval where reliability matters
 - **Model fallback chains** - Retry important stages on fallback models when providers fail
 - **Package distribution** - Ship workflows through Atomic packages, settings, or conventional directories
 
@@ -291,7 +292,7 @@ Result fields:
 | `original_prompt` | The raw user prompt exactly as provided, before the `prompt-refinement` stage. |
 | `refined_prompt` | The clarity-refined prompt produced by the `prompt-refinement` stage and used as the operative objective for research, orchestration, and review. |
 
-A typical end-to-end flow is `/skill:research-codebase` → `/skill:create-spec` → `/workflow goal objective="Implement the researched rate-limit behavior, run the focused tests, and finish when the documented burst behavior is validated"` when you can identify the work surface, state the exact outcome, and name the validation that proves it is done. Keep using `/workflow ralph` for larger migrations, broad refactors, and multi-package changes where you want Atomic to research first, delegate through sub-agents, review, iterate, and optionally allow only the final `pull-request` stage to attempt PR creation with `create_pr=true`.
+A typical planned flow is `/skill:research-codebase` → `/skill:create-spec` → `/workflow ralph prompt="Implement specs/2026-03-rate-limit.md and validate the documented burst behavior"`. Ralph can start from a spec path, GitHub issue, or crisp ticket description, then refines the prompt, researches as needed, delegates through sub-agents, reviews, records a QA proof video for UI/full-stack changes when practical, and iterates. For smaller one-off tasks, use `/workflow goal` with a concrete objective that identifies the work surface, states the exact outcome, and names the validation that proves it is done.
 
 ### `open-claude-design`
 
@@ -575,13 +576,13 @@ Record the selected pattern in your spec or workflow README, then adapt the diag
 
 Claude Code Dynamic Workflows and Atomic are trying to solve a similar class of problem: important software engineering work is too large for one agent pass, so the system should split the job into stages, run agents in parallel, verify the result, and keep enough state to finish long-running work.
 
-The difference is where control lives.
+Atomic's category is broader and more explicit: it is the loop engine for engineering work. The difference is where control lives and how much of the loop you can inspect, version, extend, and connect to your stack.
 
 | Dimension | Atomic | Claude Code Dynamic Workflows |
 | --- | --- | --- |
-| Core idea | Open-source, repo-native workflow automation for coding agents. You can run built-ins, tell the coding agent to use a workflow for a task, describe new workflows in natural language for Atomic to scaffold dynamically, or version them as explicit TypeScript files. | Claude dynamically creates orchestration scripts for a task and fans work out to many parallel Claude subagents. |
-| Best fit | Teams that want repeatable software engineering workflows they can inspect, version, extend, and run across providers. | Claude Code users who want Claude to decide when a task needs a larger dynamic workflow and orchestrate it automatically. |
-| Workflow control | The process is explicit: stages, inputs, handoffs, retries, artifacts, model choices, and human gates are part of the workflow definition. | The process is generated dynamically by Claude for the current task, with confirmation before the first workflow run. |
+| Core idea | Open-source, repo-native loop engine for coding agents. You can run built-ins, tell the coding agent to use a workflow for a task, describe new loops in natural language for Atomic to scaffold dynamically, or version them as explicit TypeScript files. | Claude dynamically creates orchestration scripts for a task and fans work out to many parallel Claude subagents. |
+| Best fit | Teams that want repeatable software engineering loops they can inspect, version, extend, connect to tools, and run across providers. | Claude Code users who want Claude to decide when a task needs a larger dynamic workflow and orchestrate it automatically. |
+| Workflow control | The process is explicit: stages, inputs, handoffs, retries, artifacts, model choices, checkpoints, and human gates are part of the workflow definition. | The process is generated dynamically by Claude for the current task, with confirmation before the first workflow run. |
 | Models | Model-agnostic. Atomic connects directly to supported API-key and subscription providers, and workflows can use model fallback chains. | Claude-first. Availability is tied to Claude Code, Claude plans, and Anthropic-supported API/cloud channels. |
 | Extensibility | Built on Pi extensions: add tools, TUI, MCP, web access, intercom, skills, prompt templates, themes, custom providers, and packaged workflows. | Optimized for Claude Code's built-in dynamic orchestration experience rather than an open extension SDK you own in-repo. |
 | Artifacts and auditability | Research docs, specs, logs, transcripts, reviewer notes, check output, and final summaries can live in the repo or workflow run directory. | Progress is saved and resumable, but the orchestration is primarily a Claude Code runtime behavior. |
