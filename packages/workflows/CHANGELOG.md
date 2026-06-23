@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.9.1-alpha.1] - 2026-06-22
+
+### Changed
+
+- Changed the shared `goal`/`ralph` prompt-refinement stage to use a workflow-neutral, model-only rubric prompt that returns only the refined objective instead of invoking the `prompt-engineer` skill directly.
+
+### Fixed
+
+- Fixed the builtin `ralph` reviewer-c model configuration to use Gemini 3.1 Pro as the third reviewer with Gemini 3.1 provider fallbacks, removing Gemini 3.5 Flash from that slot's fallback chain ([#1484](https://github.com/bastani-inc/atomic/issues/1484)).
+
 ## [0.9.0] - 2026-06-22
 
 ### Breaking Changes
