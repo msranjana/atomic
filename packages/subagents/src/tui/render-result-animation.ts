@@ -1,5 +1,3 @@
-import { RUNNING_ANIMATION_MS } from "./render-layout.ts";
-
 type ResultAnimationTimer = ReturnType<typeof setInterval>;
 
 export interface SubagentResultRenderState {
@@ -8,8 +6,8 @@ export interface SubagentResultRenderState {
 	subagentResultSnapshotKey?: string;
 	/** Stable semantic/content timestamp used for durations and activity text. */
 	subagentResultSnapshotNow?: number;
-	/** Timer-driven timestamp used only for spinner glyph frames. */
-	subagentResultSpinnerFrameNow?: number;
+	/** Monotonic pulse frame, advanced once per progress update (no timer). */
+	subagentResultPulseFrame?: number;
 }
 
 export type ResultAnimationContext = {
@@ -23,45 +21,27 @@ type LegacyResultAnimationContext = {
 	};
 };
 
-const activeResultAnimationTimers = new Map<ResultAnimationTimer, SubagentResultRenderState>();
-
+/**
+ * Legacy safety net for render state objects created by earlier timer-driven
+ * foreground result rendering. New code never schedules result timers, but
+ * clearing the field prevents a stale interval from surviving across upgrades.
+ */
 export function clearResultAnimationTimer(context: LegacyResultAnimationContext): void {
 	const timer = context.state.subagentResultAnimationTimer;
-	if (timer) {
-		clearInterval(timer);
-		activeResultAnimationTimers.delete(timer);
-	}
+	if (timer) clearInterval(timer);
 	context.state.subagentResultAnimationTimer = undefined;
 	context.state.subagentResultAnimationCleanup = undefined;
+}
+
+export function advanceResultPulseFrame(frame: number | undefined): number {
+	return (frame ?? 0) + 1;
 }
 
 export function clearLegacyResultAnimationTimer(context: LegacyResultAnimationContext): void {
 	clearResultAnimationTimer(context);
 }
 
-export function ensureResultAnimation(context: ResultAnimationContext): void {
-	if (context.state.subagentResultAnimationTimer) return;
-	const timer = setInterval(() => {
-		context.state.subagentResultSpinnerFrameNow = Date.now();
-		try {
-			context.invalidate();
-		} catch {
-			clearResultAnimationTimer(context);
-		}
-	}, RUNNING_ANIMATION_MS);
-	timer.unref?.();
-	context.state.subagentResultAnimationTimer = timer;
-	context.state.subagentResultAnimationCleanup = () => clearResultAnimationTimer(context);
-	activeResultAnimationTimers.set(timer, context.state);
-}
-
 export function stopResultAnimations(): void {
-	for (const [timer, state] of activeResultAnimationTimers) {
-		clearInterval(timer);
-		if (state.subagentResultAnimationTimer === timer) {
-			state.subagentResultAnimationTimer = undefined;
-			state.subagentResultAnimationCleanup = undefined;
-		}
-	}
-	activeResultAnimationTimers.clear();
+	// Retained for extension teardown compatibility; result rendering no longer
+	// registers global animation timers.
 }

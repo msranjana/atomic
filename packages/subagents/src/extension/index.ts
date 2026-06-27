@@ -10,7 +10,7 @@ import { discoverAgents } from "../agents/agents.ts";
 import { cleanupAllArtifactDirs, cleanupOldArtifacts, getArtifactsDir } from "../shared/artifacts.ts";
 import { resolveCurrentSessionId } from "../shared/session-identity.ts";
 import { cleanupOldChainDirs } from "../shared/settings.ts";
-import { renderLiveSubagentResult, renderSubagentResult, stopResultAnimations, stopWidgetAnimation, type SubagentResultRenderState } from "../tui/render.ts";
+import { advanceResultPulseFrame, renderLiveSubagentResult, renderSubagentResult, stopResultAnimations, stopWidgetAnimation, type SubagentResultRenderState } from "../tui/render.ts";
 import { SubagentParams } from "./schemas.ts";
 import { createSubagentExecutor, type SubagentParamsLike } from "../runs/foreground/subagent-executor.ts";
 import { createAsyncJobTracker } from "../runs/background/async-job-tracker.ts";
@@ -69,7 +69,7 @@ type SubagentToolRenderState = SubagentResultRenderState;
 function rebuildSlashResultContainer(
 	container: Container,
 	result: AgentToolResult<Details>,
-	options: { expanded: boolean; now?: number },
+	options: { expanded: boolean; now?: number; pulseFrame?: number },
 	theme: ExtensionContext["ui"]["theme"],
 ): void {
 	container.clear();
@@ -87,12 +87,14 @@ function createSlashResultComponent(
 	const container = new Container();
 	let lastVersion = -1;
 	let lastSnapshotNow = 0;
+	let pulseFrame = 0;
 	container.render = (width: number): string[] => {
 		const snapshot = getSlashRenderableSnapshot(details);
 		if (snapshot.version !== lastVersion) {
 			lastVersion = snapshot.version;
 			lastSnapshotNow = Date.now();
-			rebuildSlashResultContainer(container, snapshot.result, { ...options, now: lastSnapshotNow }, theme);
+			pulseFrame = advanceResultPulseFrame(pulseFrame);
+			rebuildSlashResultContainer(container, snapshot.result, { ...options, now: lastSnapshotNow, pulseFrame }, theme);
 		}
 		return Container.prototype.render.call(container, width);
 	};

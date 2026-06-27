@@ -5,11 +5,11 @@
  * rendering responsibility across sibling modules.
  */
 
-export { RUNNING_ANIMATION_MS, currentRunningFrame } from "./render-layout.ts";
+export { PULSE_FRAMES, RUNNING_ANIMATION_MS, RUNNING_FRAMES, currentRunningFrame, pulseGlyph } from "./render-layout.ts";
 export {
+	advanceResultPulseFrame,
 	clearLegacyResultAnimationTimer,
 	clearResultAnimationTimer,
-	ensureResultAnimation,
 	stopResultAnimations,
 } from "./render-result-animation.ts";
 export type { SubagentResultRenderState } from "./render-result-animation.ts";
