@@ -82,6 +82,7 @@ interface PromptTemplateBridgeResult {
 			exitCode?: number;
 			error?: string;
 			model?: string;
+			toolCalls?: Array<{ text?: string; expandedText?: string }>;
 		}>;
 		progress?: Array<{
 			index?: number;
@@ -147,10 +148,13 @@ function parsePromptTemplateRequest(data: unknown): PromptTemplateDelegationRequ
 	if (!hasSingle && tasks.length === 0) return undefined;
 
 	const fallbackTask = tasks[0];
+	const agent = hasSingle ? value.agent : fallbackTask?.agent;
+	const task = hasSingle ? value.task : fallbackTask?.task;
+	if (!agent || !task) return undefined;
 	return {
 		requestId: value.requestId,
-		agent: hasSingle ? value.agent : fallbackTask!.agent,
-		task: hasSingle ? value.task : fallbackTask!.task,
+		agent,
+		task,
 		...(tasks.length > 0 ? { tasks } : {}),
 		context: value.context,
 		model: value.model,
@@ -209,13 +213,31 @@ function resolveProgressModel(
 	return firstWithModel?.model;
 }
 
-function buildDelegationMessages(result: { messages?: unknown[]; finalOutput?: string }, fallbackText?: string): unknown[] {
+function toolCallSummaryText(summary: { text?: string; expandedText?: string }): string | undefined {
+	const text = typeof summary.expandedText === "string" && summary.expandedText.trim().length > 0
+		? summary.expandedText.trim()
+		: typeof summary.text === "string"
+			? summary.text.trim()
+			: "";
+	return text || undefined;
+}
+
+function buildDelegationMessages(
+	result: { messages?: unknown[]; finalOutput?: string; toolCalls?: Array<{ text?: string; expandedText?: string }> },
+	fallbackText?: string,
+): unknown[] {
 	if (Array.isArray(result.messages) && result.messages.length > 0) return result.messages;
+	const toolCallSummaries = (result.toolCalls ?? []).flatMap((summary) => {
+		const text = toolCallSummaryText(summary);
+		return text ? [`- ${text}`] : [];
+	});
+	const toolCallText = toolCallSummaries.length > 0 ? `Tool calls:\n${toolCallSummaries.join("\n")}` : undefined;
 	const text = typeof result.finalOutput === "string" && result.finalOutput.trim().length > 0
 		? result.finalOutput.trim()
 		: fallbackText;
-	if (!text) return [];
-	return [{ role: "assistant", content: [{ type: "text", text }] }];
+	const contentText = [toolCallText, text].filter((part): part is string => Boolean(part)).join("\n\n");
+	if (!contentText) return [];
+	return [{ role: "assistant", content: [{ type: "text", text: contentText }] }];
 }
 
 function toDelegationUpdate(requestId: string, update: PromptTemplateBridgeResult): PromptTemplateDelegationUpdate | undefined {
