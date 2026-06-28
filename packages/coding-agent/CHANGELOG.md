@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.9.3-alpha.4] - 2026-06-28
+
 ### Changed
 
 - Updated workflow, quickstart, Atomic guide, and workflow-playbook documentation to present workflows as the default path for non-trivial or structured requests with verifiable objectives, explicitly including implementation, build, debugging, bug-fix, migration, new-feature, scoped multi-file, and validation-heavy docs/code prompts alongside loop-shaped prompts such as `do X until Y`, `repeat until`, `iterate until`, and review/fix/test-until-passing.

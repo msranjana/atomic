@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.9.3-alpha.4] - 2026-06-28
+
 ### Changed
 
 - Strengthened the model-facing workflow prompt guidance to treat workflows as the default path for non-trivial tasks and requests with inherent structure plus verifiable objectives, explicitly including implementation, build, debugging, bug-fix, migration, new-feature, scoped multi-file, and validation-heavy docs/code prompts alongside loop-shaped phrasing such as `do X until Y`, `repeat until`, `iterate until`, and review/fix/test-until-passing prompts.

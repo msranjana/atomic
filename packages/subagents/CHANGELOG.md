@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.9.3-alpha.4] - 2026-06-28
+
+### Changed
+
+- Published a synchronized Atomic 0.9.3-alpha.4 prerelease for the subagents extension; no subagents extension changes were made after 0.9.3-alpha.3.
+
 ## [0.9.3-alpha.3] - 2026-06-27
 
 ### Changed
