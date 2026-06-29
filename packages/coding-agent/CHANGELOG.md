@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Updated user-facing workflow documentation for the blocked lifecycle notice state, the default `workflowNotifications.notifyOn` set, and the reserved top-level workflow output `status` convention for returned `failed`/`blocked` run statuses.
+
 ## [0.9.3] - 2026-06-29
 
 ### Breaking Changes

@@ -696,7 +696,7 @@ Example config:
   "resumeInFlight": "ask",
   "workflowNotifications": {
     "enabled": true,
-    "notifyOn": ["completed", "failed", "awaiting_input"]
+    "notifyOn": ["completed", "failed", "blocked", "awaiting_input"]
   }
 }
 ```
@@ -711,7 +711,7 @@ Runtime config defaults:
 | `statusFile` | `false` | Write a derived status file; defaults under `.atomic/workflows/status.json` when enabled |
 | `resumeInFlight` | `"ask"` | Behavior when discovering resumable in-flight work |
 | `workflowNotifications.enabled` | `true` | Emit terminal workflow lifecycle notices into the active main chat |
-| `workflowNotifications.notifyOn` | `["completed", "failed", "awaiting_input"]` | Lifecycle states to track; terminal `completed`/`failed` states create main-chat notices, while `awaiting_input` is tracked for dedupe/restore without waking the main agent |
+| `workflowNotifications.notifyOn` | `["completed", "failed", "blocked", "awaiting_input"]` | Lifecycle states to track; terminal `completed`/`failed`/`blocked` states create main-chat notices, while `awaiting_input` is tracked for dedupe/restore without waking the main agent |
 
 Invalid JSON or invalid shapes produce `CONFIG_INVALID` diagnostics. Missing config files are ignored.
 
@@ -1007,7 +1007,7 @@ The default file backend needs no environment variable or database. It writes on
 
 ## Lifecycle Notices and Human Input
 
-Atomic emits deduplicated main-chat notices when top-level workflow runs complete or fail. Nested child workflow completion/failure is reflected inside the expanded parent graph instead of producing separate top-level completion cards. These terminal notices are queued into the active main chat as steering/context messages (`triggerTurn: true`, `deliverAs: "steer"`) so the model can react without the user manually polling status. Awaiting-input workflow states are tracked for dedupe/restore, but they do not enqueue main-chat connect cards or wake the model; prompt state remains visible through workflow status/connect surfaces. Configure lifecycle behavior with `workflowNotifications.enabled` (default `true`) and `workflowNotifications.notifyOn` (default `["completed", "failed", "awaiting_input"]`).
+Atomic emits deduplicated main-chat notices when top-level workflow runs complete, fail, or end blocked. Nested child workflow completion/failure is reflected inside the expanded parent graph instead of producing separate top-level completion cards. These terminal notices are queued into the active main chat as steering/context messages (`triggerTurn: true`, `deliverAs: "steer"`) so the model can react without the user manually polling status. Awaiting-input workflow states are tracked for dedupe/restore, but they do not enqueue main-chat connect cards or wake the model; prompt state remains visible through workflow status/connect surfaces. Configure lifecycle behavior with `workflowNotifications.enabled` (default `true`) and `workflowNotifications.notifyOn` (default `["completed", "failed", "blocked", "awaiting_input"]`).
 
 Human input is runtime-only: call `ctx.ui.input`, `ctx.ui.confirm`, `ctx.ui.select`, `ctx.ui.editor`, or `ctx.ui.custom<T>` at the point where the workflow actually needs a decision. No builder-level declaration is required or supported.
 
@@ -1289,6 +1289,8 @@ In TypeScript workflow files, entries in `inputs` also narrow `ctx.inputs` for b
 Workflow outputs are runtime contracts for completed workflow runs and for parent workflows that call a child with `ctx.workflow(childWorkflow, ...)`. A workflow normally returns a JSON-serializable object from `run`, and entries in the `outputs` object document, validate, and expose keys from that returned object. `ctx.exit({ outputs })` can expose a partial subset of the same declared output contract when the run intentionally stops early. Primitives, arrays, `null`, functions, symbols, `undefined` properties, `NaN`, and infinite numbers fail validation.
 
 **Return convention:** outputs are return-object keys. Atomic never infers child workflow outputs from stage names, stage order, or the final assistant message. If a parent should read `child.outputs.foo`, the child workflow's `run` must both declare `outputs: { foo: schema }` and return `{ foo: value }`. `result` is not special and is never added for you: to expose `result`, declare it in `outputs` and return `{ result }` exactly like any other output. Returning a key that is not declared in `outputs` fails the run with `atomic-workflows: workflow "<name>" returned undeclared output "<key>"; declare it in outputs or remove it from the run return`.
+
+**Reserved `status` output convention:** if a workflow declares and returns a top-level `status` output with the string value `"failed"` or `"blocked"`, Atomic treats that as the workflow's terminal run status instead of recording a successful completion. When present, a non-empty top-level `summary` string becomes the run error/reason shown in lifecycle notices and status surfaces. Use this convention only when the workflow is intentionally reporting its own terminal state (for example, a deterministic release gate that returns `{ status: "blocked", summary: "required checks are pending" }`). Do not use a top-level `status` field for unrelated external state such as a deployment/check you merely inspected; choose a domain-specific name like `deployment_status` or `gate_status` instead.
 
 The `outputs` object is a schema contract, not an automatic stage selector. To expose values from any stage, capture the stage/task/child result in normal TypeScript and return it from `run` under the desired key:
 

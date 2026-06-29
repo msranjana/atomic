@@ -8,6 +8,7 @@ import {
   type JsonValue,
   type PublishWorkflowRunVerification,
 } from "./publish-release.js";
+import { defaultSleep } from "./publish-release-helpers.js";
 
 type RunCommand = (args: readonly string[]) => CommandResult;
 type Sleep = (durationMs: number) => Promise<void>;
@@ -41,7 +42,6 @@ type RunIdentity =
 type JsonObject = { readonly [key: string]: JsonValue };
 
 const runJsonFields = "databaseId,status,conclusion,url,headBranch,event,workflowName,createdAt,headSha";
-
 function isJsonObject(value: JsonValue): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -122,7 +122,7 @@ export async function waitForWorkflowRunSucceeded(
   options: WaitOptions,
 ): Promise<PublishWorkflowRunVerification> {
   const execute = options.runCommand ?? defaultRunCommand;
-  const sleep = options.sleep ?? Bun.sleep;
+  const sleep = options.sleep ?? defaultSleep;
   const listAttempts = options.listAttempts ?? 6;
   const viewAttempts = options.viewAttempts ?? 120;
   const pollIntervalMs = options.pollIntervalMs ?? 10_000;
