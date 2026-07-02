@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.9.4-alpha.7] - 2026-07-02
+
 ### Added
 
 - Added dynamic GitHub Copilot model population from the live CAPI `/models` catalog: picker-enabled, non-disabled plain chat ids are synthesized from catalog metadata (endpoints, capabilities, limits, and display names) while built-in `pi-ai` definitions still win, namespaced enterprise deployments such as `org/deployment/model` are skipped, and cached catalog metadata enables the same models on cold start.
