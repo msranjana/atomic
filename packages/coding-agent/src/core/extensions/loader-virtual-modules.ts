@@ -3,7 +3,7 @@ import { createRequire } from "node:module";
 import * as path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createJiti } from "jiti/static";
-import { getExtensionTranspileCacheDir, isBunBinary } from "../../config.ts";
+import { getExtensionTranspileCacheDir, isBunBinary, isBundledBuild } from "../../config.ts";
 import { resolvePath } from "../../utils/paths.ts";
 import type { ExtensionFactory } from "./types.ts";
 
@@ -221,10 +221,15 @@ export async function loadExtensionModule(
   }
 
   const isWindows = process.platform === "win32";
+  // Single-file builds (compiled binary or dev bundle) cannot alias host
+  // package specifiers to files on disk: extensions must share the live
+  // module instances baked into the build, so virtualModules is used instead
+  // (which requires jiti's transformed-import path).
+  const isSingleFileBuild = isBunBinary || isBundledBuild;
   // Windows first-load fast path: native import() (jiti's default tryNative)
   // skips per-launch transpilation of the extension module graph. Re-loads of
   // the same path fall back to transformed imports for fresh evaluation.
-  const forceTransformedImports = isBunBinary || (isWindows && nativelyImportedPaths.has(extensionPath));
+  const forceTransformedImports = isSingleFileBuild || (isWindows && nativelyImportedPaths.has(extensionPath));
   const jiti = createJiti(import.meta.url, {
     moduleCache: false,
     ...(forceTransformedImports
@@ -232,7 +237,7 @@ export async function loadExtensionModule(
       : isWindows
         ? { fsCache: getTranspileCacheDir() }
         : {}),
-    ...(isBunBinary ? { virtualModules: await getVirtualModules() } : { alias: getAliases() }),
+    ...(isSingleFileBuild ? { virtualModules: await getVirtualModules() } : { alias: getAliases() }),
   });
   const module = await jiti.import(extensionImportSpecifier(extensionPath, cacheToken), { default: true });
   if (isWindows && !forceTransformedImports) {
