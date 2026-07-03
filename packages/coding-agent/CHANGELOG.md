@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.9.4-alpha.9] - 2026-07-02
+
 ### Changed
 
 - Sped up TUI startup for the compiled Bun binary (and Windows) by ~2.8x on warm starts: builtin extensions transpiled at runtime through jiti now use a persistent on-disk cache at `~/.atomic/agent/cache/jiti/<version>` instead of re-transpiling ~280 TypeScript files on every launch (extension loading drops from ~4.1s to ~1.4s on Linux). Cache entries self-invalidate via jiti's source-content hashing, and stale version directories are pruned in the background.
