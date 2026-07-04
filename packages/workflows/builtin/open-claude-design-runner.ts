@@ -86,6 +86,7 @@ export async function runOpenClaudeDesignWorkflow(ctx: OpenClaudeDesignContext):
       "zai-coding-cn/glm-5.2:xhigh",
       "openrouter/anthropic/claude-fable-5:xhigh",
       "openrouter/anthropic/claude-opus-4-8:xhigh",
+      "openrouter/sakana/fugu-ultra:high",
       "openrouter/z-ai/glm-5.2:xhigh"
     ],
   };
