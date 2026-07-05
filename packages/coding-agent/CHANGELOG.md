@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.9.5-alpha.3] - 2026-07-04
+
+### Changed
+
+- Hardened the bundled workflows extension's workflow-tool prompt guidance against inline analysis-paralysis drift: the agent must now decide and state the inline-vs-workflow execution mode before its first tool call (reconnaissance explicitly counts as inline execution), budget pre-workflow scoping to a few quick reads that only sharpen the objective and validation criteria, course-correct after roughly ten deliverable-free exploration tool calls (or repeated "let me verify one more thing" loops) by writing findings to a context file and handing off to the best-fit workflow via `reads` (named or user-defined workflows discovered with `action: "list"` first, builtin `goal`/`ralph` as fallbacks when nothing more specific fits), and treat sunk inline research as transferable via files rather than a reason to stay inline. The same "Decide before you explore" and "Course-correct instead of drifting" guidance is mirrored in `docs/workflows.md` under "When to Use Workflows".
+
 ## [0.9.5-alpha.2] - 2026-07-04
 
 ### Changed
