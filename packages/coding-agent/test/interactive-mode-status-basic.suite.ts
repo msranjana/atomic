@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { Container } from "@earendil-works/pi-tui";
@@ -158,6 +158,84 @@ describe("InteractiveMode reload project trust", () => {
 			expect(new ProjectTrustStore(agentDir).get(cwd)).toBe(true);
 			expect(fakeThis.autoTrustOnReloadCwd).toBeUndefined();
 			expect(fakeThis.showWarning).not.toHaveBeenCalled();
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	test("persists implicit startup trust after reload creates an AGENTS.md trust input", () => {
+		const root = mkdtempSync(path.join(tmpdir(), "atomic-reload-trust-agents-"));
+		try {
+			const cwd = path.join(root, "project");
+			const agentDir = path.join(root, "agent");
+			mkdirSync(cwd, { recursive: true });
+			mkdirSync(agentDir, { recursive: true });
+			writeFileSync(path.join(cwd, "AGENTS.md"), "project instructions");
+
+			const fakeThis = {
+				autoTrustOnReloadCwd: cwd,
+				sessionManager: { getCwd: () => cwd },
+				settingsManager: { isProjectTrusted: () => true },
+				runtimeHost: { services: { agentDir } },
+				showWarning: vi.fn(),
+			};
+
+			const saved = (InteractiveMode as any).prototype.maybeSaveImplicitProjectTrustAfterReload.call(fakeThis);
+
+			expect(saved).toBe(true);
+			expect(new ProjectTrustStore(agentDir).get(cwd)).toBe(true);
+			expect(fakeThis.autoTrustOnReloadCwd).toBeUndefined();
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	test("does not persist implicit startup trust before project config exists", () => {
+		const root = mkdtempSync(path.join(tmpdir(), "atomic-reload-trust-no-config-"));
+		try {
+			const cwd = path.join(root, "project");
+			const agentDir = path.join(root, "agent");
+			mkdirSync(cwd, { recursive: true });
+			mkdirSync(agentDir, { recursive: true });
+
+			const fakeThis = {
+				autoTrustOnReloadCwd: cwd,
+				sessionManager: { getCwd: () => cwd },
+				settingsManager: { isProjectTrusted: () => true },
+				runtimeHost: { services: { agentDir } },
+				showWarning: vi.fn(),
+			};
+
+			const saved = (InteractiveMode as any).prototype.maybeSaveImplicitProjectTrustAfterReload.call(fakeThis);
+
+			expect(saved).toBe(false);
+			expect(new ProjectTrustStore(agentDir).get(cwd)).toBe(null);
+			expect(fakeThis.autoTrustOnReloadCwd).toBe(cwd);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	test("does not persist implicit startup trust for an untrusted session", () => {
+		const root = mkdtempSync(path.join(tmpdir(), "atomic-reload-trust-untrusted-"));
+		try {
+			const cwd = path.join(root, "project");
+			const agentDir = path.join(root, "agent");
+			mkdirSync(path.join(cwd, ".atomic"), { recursive: true });
+			mkdirSync(agentDir, { recursive: true });
+
+			const fakeThis = {
+				autoTrustOnReloadCwd: cwd,
+				sessionManager: { getCwd: () => cwd },
+				settingsManager: { isProjectTrusted: () => false },
+				runtimeHost: { services: { agentDir } },
+				showWarning: vi.fn(),
+			};
+
+			const saved = (InteractiveMode as any).prototype.maybeSaveImplicitProjectTrustAfterReload.call(fakeThis);
+
+			expect(saved).toBe(false);
+			expect(new ProjectTrustStore(agentDir).get(cwd)).toBe(null);
 		} finally {
 			rmSync(root, { recursive: true, force: true });
 		}

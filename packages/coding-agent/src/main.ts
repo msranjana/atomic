@@ -17,7 +17,7 @@ import { AuthStorage } from "./core/auth-storage.ts";
 import { getBuiltinPackagePaths } from "./core/builtin-packages.ts";
 import { configureHttpDispatcher } from "./core/http-dispatcher.ts";
 import type { ExtensionFactory } from "./core/extensions/types.ts";
-import { resolveModelScope } from "./core/model-resolver.ts";
+import { resolveModelScope, resolveModelScopeWithDiagnostics } from "./core/model-resolver.ts";
 import { restoreStdout, takeOverStdout } from "./core/output-guard.ts";
 import { resolveProjectTrusted } from "./core/project-trust.ts";
 import { getMissingSessionCwdIssue, MissingSessionCwdError } from "./core/session-cwd.ts";
@@ -27,6 +27,7 @@ import { endTimingSpan, printTimings, resetTimings, startTimingSpan, time } from
 import { hasProjectTrustInputs, ProjectTrustStore } from "./core/trust-manager.ts";
 import { runMigrations, showDeprecationWarnings } from "./migrations.ts";
 import { type AppMode, isPlainRuntimeMetadataCommand, isReadOnlyRuntimeMetadataCommand, prepareInitialMessage, resolveAppMode, resolveCliPaths, resolveExcludedToolsForAppMode, toPrintOutputMode } from "./main-app-mode.ts";
+import { computeDeferExtensions, formatScopedModelList } from "./main-deferred-startup.ts";
 import { createSessionManager, promptForMissingSessionCwd, validateForkFlags, validateSessionIdFlags } from "./main-session.ts";
 import { buildSessionOptions } from "./main-session-options.ts";
 import { collectSettingsDiagnostics, drainProcessStdio, isTruthyEnvFlag, readPipedStdin, reportDiagnostics } from "./main-stdio.ts";
@@ -196,20 +197,20 @@ export async function main(args: string[], options?: MainOptions) {
 			parsed.projectTrustOverride === undefined && cachedProjectTrust === undefined && hasTrustInputs;
 		const runtimeSettingsManager = SettingsManager.create(cwd, agentDir, { projectTrusted: initialProjectTrusted });
 		// Defer extension loading to after first paint only when nothing before the TUI
-		// starts needs extensions: no trust prompt, no -e sources, no extension flags,
-		// no CLI/settings model selection that could reference extension providers.
-		const deferExtensions =
-			appMode === "interactive" &&
-			process.stdin.isTTY === true &&
-			sessionStartEvent === undefined &&
-			!parsed.help &&
-			parsed.listModels === undefined &&
-			(!shouldResolveProjectTrust || storedProjectTrust !== null) &&
-			(resolvedExtensionPaths?.length ?? 0) === 0 &&
-			parsed.unknownFlags.size === 0 &&
-			parsed.provider === undefined &&
-			parsed.model === undefined &&
-			(parsed.models ?? runtimeSettingsManager.getEnabledModels() ?? []).length === 0;
+		// starts needs extensions. Model scopes can be resolved again after extensions load.
+		const deferExtensions = computeDeferExtensions({
+			appMode,
+			stdinIsTTY: process.stdin.isTTY === true,
+			hasSessionStartEvent: sessionStartEvent !== undefined,
+			help: parsed.help,
+			listModels: parsed.listModels,
+			shouldResolveProjectTrust,
+			storedProjectTrust,
+			resolvedExtensionPathCount: resolvedExtensionPaths?.length ?? 0,
+			unknownFlagCount: parsed.unknownFlags.size,
+			provider: parsed.provider,
+			model: parsed.model,
+		});
 		if (sessionStartEvent === undefined) {
 			deferredExtensionLoad = deferExtensions;
 		}
@@ -297,7 +298,11 @@ export async function main(args: string[], options?: MainOptions) {
 
 		const modelPatterns = parsed.models ?? settingsManager.getEnabledModels();
 		const scopedModels =
-			modelPatterns && modelPatterns.length > 0 ? await resolveModelScope(modelPatterns, modelRegistry) : [];
+			modelPatterns && modelPatterns.length > 0
+				? deferredExtensionLoad
+					? (await resolveModelScopeWithDiagnostics(modelPatterns, modelRegistry)).scopedModels
+					: await resolveModelScope(modelPatterns, modelRegistry)
+				: [];
 		const {
 			options: sessionOptions,
 			cliThinkingFromModel,
@@ -444,13 +449,7 @@ export async function main(args: string[], options?: MainOptions) {
 		await runRpcMode(runtime);
 	} else if (appMode === "interactive") {
 		if (scopedModels.length > 0 && (parsed.verbose || !settingsManager.getQuietStartup())) {
-			const modelList = scopedModels
-				.map((sm) => {
-					const thinkingStr = sm.thinkingLevel ? `:${sm.thinkingLevel}` : "";
-					return `${sm.model.id}${thinkingStr}`;
-				})
-				.join(", ");
-			console.log(chalk.dim(`Model scope: ${modelList} ${chalk.gray("(ctrl+p cycle)")}`));
+			console.log(chalk.dim(`Model scope: ${formatScopedModelList(scopedModels)} ${chalk.gray("(ctrl+p cycle)")}`));
 		}
 
 		const interactiveMode = new InteractiveMode(runtime, {
@@ -462,6 +461,8 @@ export async function main(args: string[], options?: MainOptions) {
 			initialMessages: parsed.messages,
 			verbose: parsed.verbose,
 			deferredExtensionLoad,
+			deferredModelScopePatterns: deferredExtensionLoad ? (parsed.models ?? settingsManager.getEnabledModels()) : undefined,
+			deferredModelScopePreserveThinking: parsed.thinking !== undefined,
 		});
 		if (startupBenchmark) {
 			await interactiveMode.init();

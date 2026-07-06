@@ -4,11 +4,12 @@
 
 ### Fixed
 
-<<<<<<< HEAD
+- Fixed deferred TUI extension loading so the editor keeps accepting and echoing keystrokes after first paint: startup now yields cooperatively between extension/resource-loading chunks, preserves text typed during completion, and safely queues Enter submissions made before the main prompt loop is ready.
+- Fixed a warm-start TUI first-paint regression where persisted `enabledModels` or `--models` patterns forced all extensions to load synchronously before the first frame. Interactive startup now keeps the deferred-extension fast path and reapplies the model scope after extensions finish loading, preserving extension-registered provider matches and unmatched-pattern warnings without blocking paint.
+- Fixed the second-launch trust prompt regression for bare projects that create `.atomic/` or `.pi/` during an implicitly trusted first session. Atomic now records that existing implicit trust on deferred startup/shutdown when the directory later gains project config, without saving trust for prompt-required or untrusted sessions.
+- Fixed BOM-prefixed JSON state files being treated as parse failures: settings and project trust JSON readers now strip a leading UTF-8 BOM before parsing, so Windows-authored `settings.json` and `trust.json` files load the same as BOM-less files instead of silently ignoring user settings.
 - Fixed the bundled workflows documentation to reflect that attached workflow stage chats render live `subagent` widgets for single, parallel, and chain calls, keep them live across attach/re-attach cycles, and let Ctrl+O expand live detail for every child. ([#1643](https://github.com/bastani-inc/atomic/issues/1643))
-=======
 - Fixed a Windows `waitForChildProcess` exit-code race where the process-alive poll could report a fast-dying child as gone before Node emitted the real `exit` event, causing bash commands such as `exit 1` to be reported as successful with a fabricated exit code 0 ([#1647](https://github.com/bastani-inc/atomic/issues/1647)).
->>>>>>> 2d44820ac (fix(coding-agent): preserve Windows child exit codes)
 
 ## [0.9.5-alpha.5] - 2026-07-06
 

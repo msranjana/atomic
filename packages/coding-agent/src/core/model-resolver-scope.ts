@@ -7,6 +7,16 @@ import type { ModelRegistry } from "./model-registry.ts";
 import { parseModelPattern } from "./model-resolver-patterns.ts";
 import type { ScopedModel } from "./model-resolver-types.ts";
 
+export interface ModelScopeDiagnostic {
+  type: "warning";
+  message: string;
+}
+
+export interface ResolveModelScopeResult {
+  scopedModels: ScopedModel[];
+  diagnostics: ModelScopeDiagnostic[];
+}
+
 function hasGlobCharacters(pattern: string): boolean {
   return pattern.includes("*") || pattern.includes("?") || pattern.includes("[");
 }
@@ -36,10 +46,13 @@ function parseGlobThinkingLevel(pattern: string): { globPattern: string; thinkin
  * The algorithm tries to match the full pattern first, then progressively
  * strips colon-suffixes to find a match.
  */
-export async function resolveModelScope(patterns: string[], modelRegistry: ModelRegistry): Promise<ScopedModel[]> {
+export async function resolveModelScopeWithDiagnostics(
+  patterns: string[],
+  modelRegistry: ModelRegistry,
+): Promise<ResolveModelScopeResult> {
   const availableModels = await modelRegistry.getAvailable();
   const scopedModels: ScopedModel[] = [];
-
+  const diagnostics: ModelScopeDiagnostic[] = [];
   for (const pattern of patterns) {
     if (hasGlobCharacters(pattern)) {
       const { globPattern, thinkingLevel } = parseGlobThinkingLevel(pattern);
@@ -49,7 +62,7 @@ export async function resolveModelScope(patterns: string[], modelRegistry: Model
       });
 
       if (matchingModels.length === 0) {
-        console.warn(chalk.yellow(`Warning: No models match pattern "${pattern}"`));
+        diagnostics.push({ type: "warning", message: `No models match pattern "${pattern}"` });
         continue;
       }
 
@@ -64,11 +77,11 @@ export async function resolveModelScope(patterns: string[], modelRegistry: Model
     const { model, thinkingLevel, warning } = parseModelPattern(pattern, availableModels);
 
     if (warning) {
-      console.warn(chalk.yellow(`Warning: ${warning}`));
+      diagnostics.push({ type: "warning", message: warning });
     }
 
     if (!model) {
-      console.warn(chalk.yellow(`Warning: No models match pattern "${pattern}"`));
+      diagnostics.push({ type: "warning", message: `No models match pattern "${pattern}"` });
       continue;
     }
 
@@ -77,5 +90,13 @@ export async function resolveModelScope(patterns: string[], modelRegistry: Model
     }
   }
 
+  return { scopedModels, diagnostics };
+}
+
+export async function resolveModelScope(patterns: string[], modelRegistry: ModelRegistry): Promise<ScopedModel[]> {
+  const { scopedModels, diagnostics } = await resolveModelScopeWithDiagnostics(patterns, modelRegistry);
+  for (const diagnostic of diagnostics) {
+    console.warn(chalk.yellow(`Warning: ${diagnostic.message}`));
+  }
   return scopedModels;
 }

@@ -18,7 +18,7 @@ export interface InteractiveModeOptions {
   migratedProviders?: string[];
   /** Warning message if session model couldn't be restored */
   modelFallbackMessage?: string;
-  /** Cwd to persist as trusted after reload if it gains project config during an implicitly trusted session. */
+  /** Cwd to persist as trusted after reload/shutdown if it gains trust inputs during an implicitly trusted session. */
   autoTrustOnReloadCwd?: string;
   /** Initial message to send on startup (can include @file content) */
   initialMessage?: string;
@@ -30,4 +30,8 @@ export interface InteractiveModeOptions {
   verbose?: boolean;
   /** Runtime was created without extension code; finish loading in the background after first paint. */
   deferredExtensionLoad?: boolean;
+  /** Model scope patterns resolved again after deferred extension load registers providers. */
+  deferredModelScopePatterns?: string[];
+  /** Preserve an explicit CLI thinking level when applying deferred model-scope suffixes. */
+  deferredModelScopePreserveThinking?: boolean;
 }

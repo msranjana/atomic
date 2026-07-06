@@ -16,7 +16,7 @@ export type { AutocompleteProviderFactory, EditorFactory, ExtensionCommandContex
 export { FooterDataProvider, type ReadonlyFooterDataProvider } from "../../core/footer-data-provider.ts";
 export { type AppKeybinding, KeybindingsManager } from "../../core/keybindings.ts";
 export type { ContextCompactionResult } from "../../core/compaction/index.ts";
-export { defaultModelPerProvider, findExactModelReferenceMatch, resolveModelScope, resolveSavedModelReference } from "../../core/model-resolver.ts";
+export { defaultModelPerProvider, findExactModelReferenceMatch, resolveModelScope, resolveModelScopeWithDiagnostics, resolveSavedModelReference } from "../../core/model-resolver.ts";
 export { formatCodexFastModeModelLabel, hasSupportedCodexFastModeModel, shouldApplyCodexFastMode } from "../../core/codex-fast-mode.ts";
 export { configureHttpDispatcher } from "../../core/http-dispatcher.ts";
 export { DefaultPackageManager } from "../../core/package-manager.ts";
@@ -73,7 +73,7 @@ export { SkillInvocationMessageComponent } from "./components/skill-invocation-m
 export { ToolExecutionComponent } from "./components/tool-execution.ts";
 export { TreeSelectorComponent } from "./components/tree-selector.ts";
 export { TrustSelectorComponent } from "./components/trust-selector.ts";
-export { hasProjectConfigDir, ProjectTrustStore } from "../../core/trust-manager.ts";
+export { hasProjectConfigDir, hasProjectTrustInputs, ProjectTrustStore } from "../../core/trust-manager.ts";
 export { UserMessageComponent } from "./components/user-message.ts";
 export { UserMessageSelectorComponent } from "./components/user-message-selector.ts";
 export { getModelSearchText } from "./model-search.ts";

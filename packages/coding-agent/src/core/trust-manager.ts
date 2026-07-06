@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import lockfile from "proper-lockfile";
 import { CONFIG_DIR_NAMES } from "../config.ts";
+import { parseJsonFileContent } from "../utils/json.ts";
 import { canonicalizePath, getHomeDir, resolvePath } from "../utils/paths.ts";
 
 export type ProjectTrustDecision = boolean | null;
@@ -94,7 +95,7 @@ function readTrustFile(path: string): TrustFile {
 
 	let parsed: unknown;
 	try {
-		parsed = JSON.parse(readFileSync(path, "utf-8"));
+		parsed = parseJsonFileContent(readFileSync(path, "utf-8"));
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
 		throw new Error(`Failed to read trust store ${path}: ${message}`);

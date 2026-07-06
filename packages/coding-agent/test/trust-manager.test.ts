@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { hasProjectConfigDir, hasProjectTrustInputs } from "../src/core/trust-manager.ts";
+import { getProjectTrustPath, hasProjectConfigDir, hasProjectTrustInputs, ProjectTrustStore } from "../src/core/trust-manager.ts";
 
 const tempDirs: string[] = [];
 
@@ -93,5 +93,16 @@ describe("project trust input detection", () => {
 				process.env.USERPROFILE = previousUserProfile;
 			}
 		}
+	});
+});
+
+describe("ProjectTrustStore", () => {
+	it("reads trust.json with a leading UTF-8 BOM", () => {
+		const agentDir = createTempProject();
+		const cwd = createTempProject();
+		const trustPath = join(agentDir, "trust.json");
+		writeFileSync(trustPath, `\uFEFF${JSON.stringify({ [getProjectTrustPath(cwd)]: true })}`);
+
+		expect(new ProjectTrustStore(agentDir).get(cwd)).toBe(true);
 	});
 });

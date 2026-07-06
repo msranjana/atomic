@@ -3,6 +3,7 @@ import { dirname, join } from "path";
 import lockfile from "proper-lockfile";
 import { CONFIG_DIR_NAME } from "../config.ts";
 import { normalizePath, resolvePath } from "../utils/paths.ts";
+import { parseJsonFileContent } from "../utils/json.ts";
 import { deepMergeSettings } from "./settings-merge.ts";
 import type { Settings, SettingsScope, SettingsStorage } from "./settings-types.ts";
 
@@ -54,7 +55,7 @@ export class FileSettingsStorage implements SettingsStorage {
 		for (let i = readPaths.length - 1; i >= 0; i--) {
 			const readPath = readPaths[i]!;
 			if (!existsSync(readPath)) continue;
-			const parsed = JSON.parse(readFileSync(readPath, "utf-8")) as Settings;
+			const parsed = parseJsonFileContent(readFileSync(readPath, "utf-8")) as Settings;
 			merged = deepMergeSettings(merged, parsed);
 			found = true;
 		}

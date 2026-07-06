@@ -5,6 +5,7 @@ import {
 	getCodexFastModeEnvironmentSettings,
 	getProjectConfigPaths,
 } from "../config.ts";
+import { parseJsonFileContent } from "../utils/json.ts";
 import { parseContextWindowValue, validateContextWindowValue } from "./context-window.ts";
 import { deepMergeSettings } from "./settings-merge.ts";
 import { FileSettingsStorage, InMemorySettingsStorage } from "./settings-storage.ts";
@@ -122,7 +123,7 @@ export class SettingsManager {
 		if (!content) {
 			return {};
 		}
-		const settings = JSON.parse(content);
+		const settings = parseJsonFileContent(content) as Record<string, unknown>;
 		return SettingsManager.migrateSettings(settings);
 	}
 
@@ -413,7 +414,7 @@ export class SettingsManager {
 	): void {
 		this.storage.withLock(scope, (current) => {
 			const currentFileSettings = current
-				? SettingsManager.migrateSettings(JSON.parse(current) as Record<string, unknown>)
+				? SettingsManager.migrateSettings(parseJsonFileContent(current) as Record<string, unknown>)
 				: {};
 			const mergedSettings: Settings = { ...currentFileSettings };
 			for (const field of modifiedFields) {

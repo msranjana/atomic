@@ -21,6 +21,10 @@ If no extension or saved decision applies, `defaultProjectTrust` controls the fa
 
 Use `/trust` in interactive mode to save a project trust decision for future sessions, including trust for the immediate parent folder. It writes `~/.atomic/agent/trust.json` only; the current session is not reloaded, so restart Atomic for changes to take effect.
 
+If a bare directory starts without trust-gated inputs, Atomic may run the first interactive session as implicitly trusted. When that already-trusted session later creates a project config directory such as `.atomic/`, Atomic records the same trust decision on clean shutdown so the next launch does not block first paint on a new trust prompt. This does not trust directories that already required a prompt or were running untrusted.
+
+Settings and trust JSON files may start with a UTF-8 BOM, as commonly written by older Windows tools; Atomic strips that leading marker before parsing.
+
 ## All Settings
 
 ### Model & Thinking
@@ -240,7 +244,7 @@ When multiple sources specify a session directory, precedence is `--session-dir`
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
-| `enabledModels` | string[] | - | Model patterns for CTRL+P cycling (same format as `--models` CLI flag) |
+| `enabledModels` | string[] | - | Model patterns for CTRL+P cycling (same format as `--models` CLI flag). In interactive TUI startup, these patterns are resolved again after deferred extension loading so extension-provided providers can match without blocking first paint. |
 | `defaultContextWindow` | number \| string | model default | Optional global fallback context window for models that expose selectable context windows. Accepts raw token counts or compact labels such as `400k` and `1m`. Unsupported values are ignored for models that do not support them. |
 | `defaultContextWindows` | object | `{}` | Per-model preferred context windows keyed as `provider/modelId`. The interactive `/model` context picker writes this setting so a Copilot-specific prompt cap such as `936k` does not leak into Anthropic, Cursor, or other providers. |
 
