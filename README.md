@@ -4,8 +4,8 @@
 
 <p align="center">
   <b>The verifiable runtime for coding agents.</b><br>
-  <b>Run verifiable engineering loops with control, alignment, and confidence.</b><br>
-  <i>Define the work as stages, checks, gates, tools, artifacts, and approvals. Atomic runs the process so agent work is verifiable by design.</i>
+  <b>Run verifiable engineering loops with control, alignment, and confidence. Build your own software factory with verification built in.</b><br>
+  <i>Define the work as stages, checks, gates, tools, artifacts, and approvals. Atomic runs the process so agent work is verifiable by design. Leverage Atomic to start building your software factory.</i>
 </p>
 
 <p align="center">
