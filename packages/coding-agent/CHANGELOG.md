@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.9.5-alpha.5] - 2026-07-06
+
 ### Added
 
 - Added an internal tiered fallback ladder for automatic Verbatim Compaction when the strict `compression_ratio` target is not achievable: threshold and overflow auto-compaction now keep the standard strict planner pass as tier 1, tier 2 can accept a validated below-target result with at least one deletion when projected `tokensAfter` clears the relevant budget (`effectiveInputBudget - reserveTokens` for threshold, effective input budget for overflow), overflow commits from Atomic's internal ladder are gated on fitting the effective input budget even when the strict target is met, overflow-only tier 3 reruns the planner with critical LRU-style protected-entry eligibility for stale task-bearing user/custom/branch-summary context and an effective recent floor of `max(preserve_recent, 5)` across all compactable entries, and overflow-only tier 4 performs deterministic code-level LRU eviction without a model call or API credentials while enforcing the same effective last-5 recent floor until the effective input budget fits or no more safe deletion remains. The fallback tiers remain internal: extension hooks keep their existing shapes, extension-provided deletion requests still bypass the ladder including the overflow budget gate, and no public compaction mode API is exposed.

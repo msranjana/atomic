@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.9.5-alpha.5] - 2026-07-06
+
 ### Added
 
 - Added `git_worktree_dir` to the builtin `goal` workflow with Ralph-parity input binding so Goal runs can create or reuse a repository worktree from `base_branch` while preserving the invoking repo-relative cwd for worker, reviewer, and optional final PR stages.
