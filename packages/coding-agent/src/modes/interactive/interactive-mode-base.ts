@@ -16,6 +16,8 @@ export class InteractiveModeBase {
 
   chatContainer: Container;
 
+  startupNoticesContainer: Container;
+
 
   pendingMessagesContainer: Container;
 
@@ -74,6 +76,12 @@ export class InteractiveModeBase {
 
 
   pendingUserInputs: string[] = [];
+
+
+  deferredRenderedUserInputs: string[] = [];
+
+
+  deferredRenderedUserInputComponents = new Map<string, Component[][]>();
 
 
   loadingAnimation: Loader | undefined = undefined;
@@ -210,6 +218,12 @@ export class InteractiveModeBase {
 
 
   deferredStartupPromise: Promise<void> | undefined = undefined;
+  deferLoadedResourcesDisclosureUntilAgentEnd = false;
+
+
+  pendingLoadedResourcesDisclosure = false;
+
+
 
 
 
@@ -337,6 +351,7 @@ export class InteractiveModeBase {
     this.ui.setClearOnShrink(this.settingsManager.getClearOnShrink());
     this.headerContainer = new Container();
     this.chatContainer = new Container();
+    this.startupNoticesContainer = new Container();
     this.pendingMessagesContainer = new Container();
     this.statusContainer = new Container();
     this.widgetContainerAbove = new Container();

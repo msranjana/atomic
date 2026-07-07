@@ -1,7 +1,22 @@
 import { InteractiveModeBase } from "./interactive-mode-base.ts";
 import { modelsAreEqual } from "@earendil-works/pi-ai/compat";
-import { recordTimeSinceReset, resolveModelScopeWithDiagnostics, resolveSavedModelReference, setRegisteredThemes, Text, theme } from "./interactive-mode-deps.ts";
-import { yieldToEventLoop } from "../../utils/event-loop.ts";
+import { type Container, recordTimeSinceReset, resolveModelScopeWithDiagnostics, resolveSavedModelReference, setRegisteredThemes } from "./interactive-mode-deps.ts";
+
+export interface DeferredStartupMode {
+    deferredStartupPending: boolean;
+    deferredStartupPromise: Promise<void> | undefined;
+    completeDeferredStartup(): Promise<void>;
+  }
+
+export async function ensureDeferredStartupComplete(mode: DeferredStartupMode): Promise<void> {
+    if (!mode.deferredStartupPending && !mode.deferredStartupPromise) return;
+    mode.deferredStartupPromise ??= mode.completeDeferredStartup();
+    await mode.deferredStartupPromise;
+  }
+
+InteractiveModeBase.prototype.ensureDeferredStartupComplete = async function(this: InteractiveModeBase): Promise<void> {
+    await ensureDeferredStartupComplete(this);
+  };
 
 /**
  * Finishes a startup where extension loading was deferred so the TUI could
@@ -9,24 +24,22 @@ import { yieldToEventLoop } from "../../utils/event-loop.ts";
  * the same post-load UI wiring as /reload and discloses loaded resources.
  */
 InteractiveModeBase.prototype.completeDeferredStartup = async function(this: InteractiveModeBase): Promise<void> {
-    const loadingIndicator = new Text(theme.fg("dim", "Loading extensions, skills, prompts, themes..."), 1, 0);
-    this.chatContainer.addChild(loadingIndicator);
-    this.ui.requestRender();
-    await yieldToEventLoop();
-
-    try {
-      await this.session.reload({ reason: "startup" });
-    } catch (error) {
-      this.chatContainer.removeChild(loadingIndicator);
+	try {
+		await this.bindCurrentSessionExtensions();
+		await this.session.reload({ reason: "startup" });
+	} catch (error) {
+		this.stopWorkingLoader();
       this.deferredStartupPending = false;
       this.showError(
         `Extension loading failed: ${error instanceof Error ? error.message : String(error)}`,
       );
+      // The RESOURCES disclosure will not render; surface the held warning.
+      void this.maybeWarnAboutAnthropicSubscriptionAuth(undefined, this.startupNoticesContainer);
       return;
     }
 
-    this.chatContainer.removeChild(loadingIndicator);
-    this.deferredStartupPending = false;
+	this.stopWorkingLoader();
+	this.deferredStartupPending = false;
     recordTimeSinceReset("deferred-extension-load");
 
     setRegisteredThemes(this.session.resourceLoader.getThemes().themes);
@@ -34,10 +47,15 @@ InteractiveModeBase.prototype.completeDeferredStartup = async function(this: Int
     this.setupAutocompleteProvider();
     this.setupExtensionShortcuts(this.session.extensionRunner);
     await applyDeferredModelScope(this);
-    await this.retryDeferredModelRestore();
-    this.showLoadedResources({ force: false, showDiagnosticsWhenQuiet: true });
-    this.showStartupNoticesIfNeeded();
-
+    await this.retryDeferredModelRestore(this.startupNoticesContainer);
+	if (this.deferLoadedResourcesDisclosureUntilAgentEnd) {
+		this.pendingLoadedResourcesDisclosure = true;
+	} else {
+		this.showLoadedResources({ force: true, showDiagnosticsWhenQuiet: true, targetContainer: this.startupNoticesContainer });
+		// Keep the subscription warning after the RESOURCES disclosure.
+		void this.maybeWarnAboutAnthropicSubscriptionAuth(undefined, this.startupNoticesContainer);
+	}
+	this.showStartupNoticesIfNeeded(this.startupNoticesContainer);
     const modelsJsonError = this.session.modelRegistry.getError();
     if (modelsJsonError) {
       this.showError(`models.json error: ${modelsJsonError}`);
@@ -86,7 +104,7 @@ export async function applyDeferredModelScope(mode: InteractiveModeBase): Promis
  * until extensions load; retry the restore now and only surface the fallback
  * warning if it still fails.
  */
-InteractiveModeBase.prototype.retryDeferredModelRestore = async function(this: InteractiveModeBase): Promise<void> {
+InteractiveModeBase.prototype.retryDeferredModelRestore = async function(this: InteractiveModeBase, targetContainer?: Container): Promise<void> {
     const fallbackMessage = this.options.modelFallbackMessage;
     if (!fallbackMessage) {
       return;
@@ -103,5 +121,5 @@ InteractiveModeBase.prototype.retryDeferredModelRestore = async function(this: I
         return;
       }
     }
-    this.showWarning(fallbackMessage);
+    this.showWarning(fallbackMessage, targetContainer);
   };

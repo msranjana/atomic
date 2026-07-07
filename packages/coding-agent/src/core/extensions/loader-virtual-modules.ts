@@ -1,9 +1,11 @@
 import * as fs from "node:fs";
 import { createRequire } from "node:module";
 import * as path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { pathToFileURL } from "node:url";
 import { createJiti } from "jiti/static";
 import { getExtensionTranspileCacheDir, isBunBinary, isBundledBuild } from "../../config.ts";
+import { moduleDirFromMetaUrl } from "../../utils/split-launcher.ts";
+import { resolutionBaseUrl } from "../../utils/module-require.ts";
 import { resolvePath } from "../../utils/paths.ts";
 import type { ExtensionFactory } from "./types.ts";
 
@@ -153,6 +155,10 @@ function findPackageRoot(packageName: string, searchPaths?: string[]): string {
   }
   throw new Error(`Cannot locate package directory for "${packageName}"`);
 }
+function currentModuleDir(): string {
+  return moduleDirFromMetaUrl(import.meta.url, "dist", "core", "extensions");
+}
+
 
 /**
  * Get aliases for jiti (used in Node.js/development mode).
@@ -161,7 +167,7 @@ function findPackageRoot(packageName: string, searchPaths?: string[]): string {
 function getAliases(): Record<string, string> {
   if (_aliases) return _aliases;
 
-  const __dirname = path.dirname(fileURLToPath(import.meta.url));
+  const __dirname = currentModuleDir();
   const packageIndex = path.resolve(__dirname, "../..", "index.js");
 
   const typeboxEntry = require.resolve("typebox");
@@ -246,7 +252,7 @@ export async function loadExtensionModule(
   // skips per-launch transpilation of the extension module graph. Re-loads of
   // the same path fall back to transformed imports for fresh evaluation.
   const forceTransformedImports = isSingleFileBuild || (isWindows && nativelyImportedPaths.has(extensionPath));
-  const jiti = createJiti(import.meta.url, {
+  const jiti = createJiti(resolutionBaseUrl(import.meta.url), {
     moduleCache: false,
     ...(forceTransformedImports
       ? { fsCache: getTranspileCacheDir(), tryNative: false }

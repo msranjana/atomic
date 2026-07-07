@@ -1,9 +1,9 @@
 import { InteractiveModeBase } from "./interactive-mode-base.ts";
-import { type MarkdownTheme, os, path, Markdown, Spacer, Text, spawn, APP_NAME, APP_TITLE, ENV_OFFLINE, getEnvValue, getAgentDir, VERSION, formatCodexFastModeModelLabel, shouldApplyCodexFastMode, DefaultPackageManager, isInstallTelemetryEnabled, getChangelogPath, getEntriesForVersion, getNewEntries, normalizeChangelogLinks, parseChangelog, getCwdRelativePath, getPiUserAgent, recordTimeSinceReset, ensureTool, checkForNewPiVersion, renderAtomicAnsiBanner, DynamicBorder, getMarkdownTheme, onThemeChange, theme } from "./interactive-mode-deps.ts";
+import { type Container, type MarkdownTheme, os, path, Markdown, Spacer, Text, spawn, APP_NAME, APP_TITLE, ENV_OFFLINE, getEnvValue, getAgentDir, VERSION, formatCodexFastModeModelLabel, shouldApplyCodexFastMode, DefaultPackageManager, isInstallTelemetryEnabled, getChangelogPath, getEntriesForVersion, getNewEntries, normalizeChangelogLinks, parseChangelog, getCwdRelativePath, getPiUserAgent, recordTimeSinceReset, ensureTool, checkForNewPiVersion, renderAtomicAnsiBanner, DynamicBorder, getMarkdownTheme, onThemeChange, theme } from "./interactive-mode-deps.ts";
 import { ExpandableText } from "./interactive-mode-helpers.ts";
 import { ONBOARDING_COPY } from "./interactive-onboarding.ts";
 
-InteractiveModeBase.prototype.showStartupNoticesIfNeeded = function(this: InteractiveModeBase): void {
+InteractiveModeBase.prototype.showStartupNoticesIfNeeded = function(this: InteractiveModeBase, targetContainer: Container = this.chatContainer): void {
     if (this.startupNoticesShown) {
       return;
     }
@@ -15,23 +15,23 @@ InteractiveModeBase.prototype.showStartupNoticesIfNeeded = function(this: Intera
     }
 
     if (changelogMarkdown) {
-      if (this.chatContainer.children.length > 0) {
-        this.chatContainer.addChild(new Spacer(1));
+      if (targetContainer.children.length > 0) {
+        targetContainer.addChild(new Spacer(1));
       }
-      this.chatContainer.addChild(new DynamicBorder());
+      targetContainer.addChild(new DynamicBorder());
       if (this.settingsManager.getCollapseChangelog()) {
         const versionMatch = changelogMarkdown.match(
           /##\s+\[?((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-(?:alpha\.)?(?:0|[1-9]\d*))?)\]?/,
         );
         const latestVersion = versionMatch ? versionMatch[1] : this.version;
         const condensedText = `Updated to v${latestVersion}. Use ${theme.bold("/changelog")} to view full changelog.`;
-        this.chatContainer.addChild(new Text(condensedText, 1, 0));
+        targetContainer.addChild(new Text(condensedText, 1, 0));
       } else {
-        this.chatContainer.addChild(
+        targetContainer.addChild(
           new Text(theme.bold(theme.fg("accent", "What's New")), 1, 0),
         );
-        this.chatContainer.addChild(new Spacer(1));
-        this.chatContainer.addChild(
+        targetContainer.addChild(new Spacer(1));
+        targetContainer.addChild(
           new Markdown(
             changelogMarkdown.trim(),
             1,
@@ -39,14 +39,14 @@ InteractiveModeBase.prototype.showStartupNoticesIfNeeded = function(this: Intera
             this.getMarkdownThemeWithSettings(),
           ),
         );
-        this.chatContainer.addChild(new Spacer(1));
+        targetContainer.addChild(new Spacer(1));
       }
-      this.chatContainer.addChild(new DynamicBorder());
+      targetContainer.addChild(new DynamicBorder());
     }
 
     if (this.firstRunNoticeVisible) {
       this.firstRunOnboardingNoticeComponents = [];
-      if (this.chatContainer.children.length > 0) {
+      if (targetContainer.children.length > 0) {
         this.firstRunOnboardingNoticeComponents.push(new Spacer(1));
       }
       this.firstRunOnboardingNoticeComponents.push(
@@ -56,7 +56,7 @@ InteractiveModeBase.prototype.showStartupNoticesIfNeeded = function(this: Intera
         new Spacer(1),
       );
       for (const component of this.firstRunOnboardingNoticeComponents) {
-        this.chatContainer.addChild(component);
+        targetContainer.addChild(component);
       }
       // Mark completion only after queueing the notice in the chat canvas so
       // launches that skip rendering retry the first-run notice next time.
@@ -143,17 +143,27 @@ InteractiveModeBase.prototype.init = async function(this: InteractiveModeBase): 
         console.error(`Tool readiness check failed: ${message}`);
       });
 
-    // Initialize extensions first so resources are shown before messages
-    await this.rebindCurrentSession();
-
-    // Render initial messages AFTER showing loaded resources
-    this.renderInitialMessages();
-
-    // Extensions were skipped before first paint; finish loading them in the background.
+    // When startup resources are deferred, keep the already-painted editor responsive.
+    // Extension UI bindings are installed at the deferred reload boundary, not here,
+    // so no post-paint resource work can block visible typing.
     if (this.deferredStartupPending) {
-      this.deferredStartupPromise = this.completeDeferredStartup();
+      this.applyRuntimeSettings();
+      this.subscribeToAgent();
+      this.updateEditorBorderColor();
+      this.updateTerminalTitle();
+    } else {
+      await this.rebindCurrentSession();
     }
 
+    this.attachStartupNoticesContainer();
+    // Render initial messages AFTER the initial session binding is in place.
+    this.renderInitialMessages();
+	if (this.deferredStartupPending) {
+		setTimeout(() => {
+			if (!this.deferredStartupPending || this.deferredStartupPromise) return;
+			void this.ensureDeferredStartupComplete();
+		}, 2000);
+	}
     // Set up theme file watcher
     onThemeChange(() => {
       this.ui.invalidate();
@@ -188,30 +198,25 @@ InteractiveModeBase.prototype.updateTerminalTitle = function(this: InteractiveMo
 InteractiveModeBase.prototype.run = async function(this: InteractiveModeBase): Promise<void> {
     await this.init();
 
-    // Load GitHub Copilot context-window tiers from CAPI early (gated on the Copilot provider) so
-    // the footer and /model picker reflect GitHub's real windows. Best-effort, never blocks startup.
-    void this.refreshCopilotModelCatalog();
-
-    // Start version check asynchronously
-    checkForNewPiVersion(this.version).then((newVersion) => {
-      if (newVersion) {
-        this.showNewVersionNotification(newVersion);
-      }
-    });
-
-    // Start package update check asynchronously
-    this.checkForPackageUpdates().then((updates) => {
-      if (updates.length > 0) {
-        this.showPackageUpdateNotification(updates);
-      }
-    });
-
-    // Check tmux keyboard setup asynchronously
-    this.checkTmuxKeyboardSetup().then((warning) => {
-      if (warning) {
-        this.showWarning(warning);
-      }
-    });
+	setTimeout(() => {
+		void this.refreshCopilotModelCatalog();
+    const startupNoticesContainer = this.startupNoticesContainer;
+		checkForNewPiVersion(this.version).then((newVersion) => {
+			if (newVersion) this.showNewVersionNotification(newVersion, startupNoticesContainer);
+		});
+		this.checkForPackageUpdates().then((updates) => {
+			if (updates.length > 0) this.showPackageUpdateNotification(updates, startupNoticesContainer);
+		});
+		this.checkTmuxKeyboardSetup().then((warning) => {
+			if (warning) this.showWarning(warning, startupNoticesContainer);
+		});
+		// When startup is deferred, the RESOURCES disclosure renders after the
+		// deferred extension load; hold the subscription warning until then so
+		// the disclosure always appears first.
+		if (!this.deferredStartupPending && !this.deferredStartupPromise && !this.pendingLoadedResourcesDisclosure) {
+			void this.maybeWarnAboutAnthropicSubscriptionAuth(undefined, startupNoticesContainer);
+		}
+	}, 500);
 
     // Show startup warnings
     const {
@@ -233,17 +238,14 @@ InteractiveModeBase.prototype.run = async function(this: InteractiveModeBase): P
       this.showError(`models.json error: ${modelsJsonError}`);
     }
 
-    if (modelFallbackMessage && !this.deferredStartupPromise) {
-      // With a deferred extension load, model restore is retried once extension
-      // providers register; completeDeferredStartup shows the warning if it still fails.
-      this.showWarning(modelFallbackMessage);
+    if (modelFallbackMessage && !this.deferredStartupPending) {
+      this.showWarning(modelFallbackMessage, this.startupNoticesContainer);
     }
 
-    void this.maybeWarnAboutAnthropicSubscriptionAuth();
-
-    // Prompts need extension tools; wait for the background load before sending any.
-    if (this.deferredStartupPromise) {
-      await this.deferredStartupPromise;
+    // CLI-provided startup prompts need extension tools/resources; wait before sending them,
+    // but do not block the normal no-prompt input loop from becoming ready.
+    if (this.deferredStartupPending && (initialMessage || (initialMessages && initialMessages.length > 0))) {
+      await this.ensureDeferredStartupComplete();
     }
 
     // Process initial messages
@@ -272,13 +274,7 @@ InteractiveModeBase.prototype.run = async function(this: InteractiveModeBase): P
     // Main interactive loop
     while (true) {
       const userInput = await this.getUserInput();
-      try {
-        await this.session.prompt(userInput);
-      } catch (error: unknown) {
-        const errorMessage =
-          error instanceof Error ? error.message : "Unknown error occurred";
-        this.showError(errorMessage);
-      }
+      await this.runUserPromptTurn(userInput);
     }
   };
 

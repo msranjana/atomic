@@ -2,7 +2,19 @@ import { InteractiveModeBase } from "./interactive-mode-base.ts";
 import { chalk, killTrackedDetachedChildren } from "./interactive-mode-deps.ts";
 import { formatResumeCommand, isDeadTerminalError } from "./interactive-mode-helpers.ts";
 
+const SHUTDOWN_INPUT_DRAIN_MAX_MS = 250;
+const SHUTDOWN_INPUT_DRAIN_IDLE_MS = 50;
+
 InteractiveModeBase.prototype.handleCtrlC = function(this: InteractiveModeBase): void {
+    // When the agent is doing work, Ctrl+C interrupts it (matching Escape and
+    // common CLI muscle memory) instead of clearing/exiting the editor. Only
+    // fall back to the clear / double-press-exit behavior when idle.
+    if (this.interruptActiveOperation()) {
+      // Reset the double-press window so a follow-up Ctrl+C after the abort
+      // does not immediately exit.
+      this.lastSigintTime = 0;
+      return;
+    }
     const now = Date.now();
     if (now - this.lastSigintTime < 500) {
       void this.shutdown();
@@ -10,6 +22,28 @@ InteractiveModeBase.prototype.handleCtrlC = function(this: InteractiveModeBase):
       this.clearEditor();
       this.lastSigintTime = now;
     }
+  };
+
+InteractiveModeBase.prototype.interruptActiveOperation = function(this: InteractiveModeBase): boolean {
+    // Mirror the Escape interrupt paths so Ctrl+C aborts whichever operation is
+    // currently running. Returns true when something was aborted.
+    if (this.session.isStreaming) {
+      this.restoreQueuedMessagesToEditor({ abort: true });
+      return true;
+    }
+    if (this.session.isBashRunning) {
+      this.session.abortBash();
+      return true;
+    }
+    if (this.session.isCompacting) {
+      this.session.abortCompaction();
+      return true;
+    }
+    if (this.session.isRetrying) {
+      this.session.abortRetry();
+      return true;
+    }
+    return false;
   };
 
 InteractiveModeBase.prototype.handleCtrlD = function(this: InteractiveModeBase): void {
@@ -27,17 +61,17 @@ InteractiveModeBase.prototype.shutdown = async function(this: InteractiveModeBas
     if (options?.fromSignal) {
       await this.runtimeHost.dispose();
       this.themeController.disableAutoSync();
-      // Drain any in-flight Kitty key release events before stopping.
-      // This prevents escape sequences from leaking to the parent shell over slow SSH.
-      await this.ui.terminal.drainInput(1000);
+      // Drain any in-flight Kitty key release events briefly before stopping.
+      // Keep this bounded so Ctrl+C exits do not feel stalled on Windows.
+      await this.ui.terminal.drainInput(SHUTDOWN_INPUT_DRAIN_MAX_MS, SHUTDOWN_INPUT_DRAIN_IDLE_MS);
       this.stop();
       process.exit(0);
     }
 
-    // Drain any in-flight Kitty key release events before stopping.
-    // This prevents escape sequences from leaking to the parent shell over slow SSH.
+    // Drain any in-flight Kitty key release events briefly before stopping.
+    // Keep this bounded so Ctrl+C exits do not feel stalled on Windows.
     this.themeController.disableAutoSync();
-    await this.ui.terminal.drainInput(1000);
+    await this.ui.terminal.drainInput(SHUTDOWN_INPUT_DRAIN_MAX_MS, SHUTDOWN_INPUT_DRAIN_IDLE_MS);
 
     this.stop();
     await this.runtimeHost.dispose();
@@ -97,6 +131,12 @@ InteractiveModeBase.prototype.registerSignalHandlers = function(this: Interactiv
       process.prependListener(signal, handler);
       this.signalCleanupHandlers.push(() => process.off(signal, handler));
     }
+
+    const sigintHandler = () => {
+      this.handleCtrlC();
+    };
+    process.prependListener("SIGINT", sigintHandler);
+    this.signalCleanupHandlers.push(() => process.off("SIGINT", sigintHandler));
 
     const terminalErrorHandler = (error: Error) => {
       if (isDeadTerminalError(error)) {
