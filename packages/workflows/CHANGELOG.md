@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.9.5-alpha.8] - 2026-07-08
+
 ### Fixed
 
 - Fixed builtin `goal` and `ralph` reviewer convergence reporting so review artifacts and reducer/controller decisions now persist explicit parse/convergence summaries (`parsed`, `approved`, `stopReviewLoop`, `nextAction`, `finalActionRemaining`, and diagnostics). Malformed or missing structured reviewer output is surfaced as a parse failure distinct from parsed reviewer rejection/findings; PR/MR/review creation is represented as a post-approval final action when it is the only remaining task; successful reviewer convergence records the final action (`pull-request` or `finish`) without consuming another implementation loop; and the workflow authoring docs, default workflow guidance, and create-spec prompt now tell custom reviewer-gated workflows to model authorized PR, release, deployment, or publication work as final actions rather than implementation blockers while writing local, action-oriented prompts that do not rely on workflow/stage names as hidden context.

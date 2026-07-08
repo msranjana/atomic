@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.9.5-alpha.8] - 2026-07-08
+
 ### Added
 
 - Added main-chat `fallbackModels` support for retryable provider/model failures ([#1418](https://github.com/bastani-inc/atomic/issues/1418)). Users can configure an ordered fallback chain in settings or SDK session options with per-candidate reasoning suffixes such as `:high` and `:xhigh`; normal same-model retry remains first when enabled, fallback switches are recorded as session model changes, and the UI reports fallback progress.
