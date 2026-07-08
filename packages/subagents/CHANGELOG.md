@@ -5,6 +5,7 @@
 ### Fixed
 
 - Fixed background async result watching on Windows to use Atomic's safe watcher path strategy and fall back to polling when native `fs.watch` would receive an unsafe or non-canonical watcher path.
+- Fixed async/background subagent status visibility while the fullscreen workflow graph is active by publishing the live async summary through the shared status surface in addition to the below-editor widget.
 
 ## [0.9.5-alpha.8] - 2026-07-08
 
