@@ -10,9 +10,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Improved workflow extension startup by seeding only the bundled startup registry during extension registration/session start, then loading user, project, and package workflow modules in the background or when `/workflow` commands and workflow tool actions need the full registry.
 - Tightened the workflow-stage resume continuation prompt so resumed agents continue interrupted work only when needed and stop when the original or user-redefined task is already complete.
+- Updated the bundled `impeccable` skill from upstream 3.8.0 to 3.9.1, adding native platform guidance, hooks support, expanded detector rules, and the latest reference/script fixes ([#1696](https://github.com/bastani-inc/atomic/issues/1696)).
 
 ### Fixed
 
+- Hardened the bundled `impeccable` skill's local detector/live scripts against CodeQL-reported sanitization and command-injection patterns by tightening HTML block stripping, avoiding shell interpolation for `git check-ignore`, escaping Svelte preview CSS selectors correctly, and fixing the `ms*` JSX style prefix conversion.
 - Fixed lazy workflow startup follow-through so `session_start` loads only workflow config before restore/cleanup, discovery diagnostics are reported after deferred discovery settles, failed lazy discovery attempts are retryable, direct workflow-tool `task`/`tasks`/`chain` runs bypass full workflow discovery, named workflow-tool runs and failed-run resume re-resolve their runtime after discovery, paused/current live-run resume and live resume pickers avoid registry discovery, failed/durable resume still loads resources before registry-dependent lookups, and command autocomplete falls back to current/admin completions when lazy discovery fails without evaluating workflow modules on the startup path.
 - Fixed workflow lazy-startup session generation so session restarts and shutdowns invalidate in-flight background discovery before it can publish stale workflow registries into later sessions.
 
