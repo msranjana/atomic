@@ -143,7 +143,7 @@ Set `api` at provider level (default for all models) or model level (override pe
 | `headers`        | Custom headers (see value resolution below)                      |
 | `authHeader`     | Set `true` to add `Authorization: Bearer <apiKey>` automatically |
 | `models`         | Array of model configurations                                    |
-| `modelOverrides` | Per-model overrides for built-in models on this provider         |
+| `modelOverrides` | Per-model overrides for matching built-in or extension-registered models on this provider |
 
 ### Value Resolution
 
@@ -212,7 +212,7 @@ Current behavior:
 
 ### Thinking Level Map
 
-Use `thinkingLevelMap` on a model to describe model-specific thinking controls. Keys are Atomic thinking levels: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`.
+Use `thinkingLevelMap` on a model to describe model-specific thinking controls. Keys are Atomic thinking levels: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. A level is selectable only when the active model supports it; `xhigh` and `max` are not universal provider capabilities.
 
 Values are tristate:
 
@@ -233,7 +233,8 @@ Example for a model that only supports off, high, and max reasoning:
     "low": null,
     "medium": null,
     "high": "high",
-    "xhigh": "max"
+    "xhigh": null,
+    "max": "max"
   }
 }
 ```
@@ -366,7 +367,7 @@ Merge semantics:
 
 ## Per-model Overrides
 
-Use `modelOverrides` to customize specific built-in models without replacing the provider's full model list.
+Use `modelOverrides` to customize specific models without replacing the provider's full model list. Overrides apply to matching built-in models and to models later registered by an extension through `pi.registerProvider()`.
 
 ```json
 {
@@ -387,13 +388,14 @@ Use `modelOverrides` to customize specific built-in models without replacing the
 }
 ```
 
-`modelOverrides` supports these fields per model: `name`, `reasoning`, `input`, `cost` (partial), `contextWindow`, `contextWindowOptions`, `maxTokens`, `headers`, `compat`.
+`modelOverrides` supports these fields per model: `name`, `reasoning`, `thinkingLevelMap`, `input`, `cost` (partial), `contextWindow`, `contextWindowOptions`, `maxTokens`, `headers`, `compat`.
 
 Behavior notes:
-- `modelOverrides` are applied to built-in provider models.
-- Unknown model IDs are ignored.
-- You can combine provider-level `baseUrl`/`headers` with `modelOverrides`.
-- If `models` is also defined for a provider, custom models are merged after built-in overrides. A custom model with the same `id` replaces the overridden built-in model entry.
+- Atomic retains the parsed override map even when an extension registers the matching provider/model after `models.json` is loaded.
+- For a matching built-in or extension-registered model, the model definition is the base and `modelOverrides` wins for configured fields. Model `headers` are shallow-merged, with override headers winning duplicate names.
+- Provider-level request headers remain a separate provider layer and are combined at request time.
+- Unknown model IDs are ignored unless a matching model is subsequently registered by an extension.
+- If `models` is also defined for a provider in `models.json`, those custom models are merged after built-in overrides. A custom model with the same `id` replaces the overridden built-in model entry.
 
 ## Anthropic Messages Compatibility
 

@@ -6,7 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
-- Aligned the web-access extension peer dependency with upstream `pi-tui` `^0.80.5` as part of the consolidated dependency refresh; no web-access source changes were needed.
+- Aligned the web-access extension peer dependency with upstream `pi-tui` `^0.80.6` as part of the consolidated Pi sync; no web-access source behavior changed ([#1703](https://github.com/bastani-inc/atomic/issues/1703)).
 
 ## [0.9.4] - 2026-07-03
 

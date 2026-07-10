@@ -68,6 +68,51 @@ describeModelRegistry((context) => {
 			expect(registry.getProviderDisplayName("oauth-provider")).toBe("OAuth Provider");
 		});
 
+		test("applies models.json modelOverrides to extension-registered models", async () => {
+			writeRawModelsJson({
+				"extension-provider": {
+					modelOverrides: {
+						"demo-model": {
+							name: "Overridden Demo",
+							thinkingLevelMap: { low: "medium", high: "high" },
+							headers: { "X-Override": "override", "X-Shared": "override" },
+						},
+					},
+				},
+			});
+			const registry = ModelRegistry.create(context.authStorage, context.modelsJsonPath);
+			registry.registerProvider("extension-provider", {
+				baseUrl: "https://provider.test/v1",
+				apiKey: "TEST_KEY",
+				api: "openai-completions",
+				models: [
+					{
+						id: "demo-model",
+						name: "Demo Model",
+						reasoning: true,
+						thinkingLevelMap: { low: "low", xhigh: "xhigh" },
+						input: ["text"],
+						cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+						contextWindow: 128000,
+						contextWindowOptions: [256000],
+						maxTokens: 4096,
+						headers: { "X-Base": "base", "X-Shared": "base" },
+					},
+				],
+			});
+
+			const model = registry.find("extension-provider", "demo-model");
+			expect(model?.name).toBe("Overridden Demo");
+			expect(model?.thinkingLevelMap).toEqual({ low: "medium", xhigh: "xhigh", high: "high" });
+			expect(model?.defaultContextWindow).toBe(128000);
+			expect(model?.contextWindowOptions).toEqual([128000, 256000]);
+			if (!model) throw new Error("missing extension model");
+			expect(await registry.getApiKeyAndHeaders(model)).toMatchObject({
+				ok: true,
+				headers: { "X-Base": "base", "X-Override": "override", "X-Shared": "override" },
+			});
+		});
+
 		test("failed registerProvider does not persist invalid streamSimple config", () => {
 			const registry = ModelRegistry.create(context.authStorage, context.modelsJsonPath);
 

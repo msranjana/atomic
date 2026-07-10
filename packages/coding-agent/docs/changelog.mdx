@@ -3,6 +3,16 @@ title: "Changelog"
 description: "What's new in Atomic"
 ---
 
+<Update label="July 10, 2026">
+
+## Pi 0.80.6 compatibility
+
+- **Synced through upstream Pi 0.80.6.** Atomic and its bundled extensions now use the 0.80.6 Pi runtime packages, including signed empty Anthropic thinking preservation, request-wide GPT-5.4/5.5 long-context pricing, and corrected GPT-5.6 catalog/backend metadata.
+- **Model controls are current.** Atomic now accepts the `max` thinking level wherever the active model advertises it, and `models.json` overrides apply to matching extension-registered models as well as built-ins. See [Models](/models).
+- **Safer session and tool behavior.** Invalid explicit bash timeouts fail instead of being clamped; missing exact session IDs warn before creation; auth writes surface persistence failures; Windows context traversal terminates at drive roots; and duplicate fork selections are ignored. See [Tools](/tools) and [Usage](/usage).
+- **More reliable streaming and binaries.** Visible custom messages stay before the live assistant row, and standalone Linux clipboard reads can fall back to xclip with correctly packaged native bindings.
+
+</Update>
 <Update label="July 9, 2026">
 
 ## Dependency refresh

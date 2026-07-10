@@ -2,9 +2,13 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added model-capability-aware `max` reasoning suffix support to subagent model/fallback parsing and child CLI forwarding ([#1703](https://github.com/bastani-inc/atomic/issues/1703)).
+
 ### Changed
 
-- Aligned the subagents extension peer dependencies with upstream Pi `^0.80.5` runtime packages as part of the consolidated dependency refresh.
+- Aligned the subagents extension peer dependencies with upstream Pi `^0.80.6` runtime packages while preserving Atomic child-session and orchestration behavior ([#1703](https://github.com/bastani-inc/atomic/issues/1703)).
 
 ### Removed
 

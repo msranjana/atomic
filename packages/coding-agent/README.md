@@ -517,7 +517,7 @@ cat README.md | atomic -p "Summarize this text"
 | `--provider <name>` | Provider (anthropic, openai, google, etc.) |
 | `--model <pattern>` | Model pattern or ID (supports `provider/id` and optional `:<thinking>`) |
 | `--api-key <key>` | API key (overrides env vars) |
-| `--thinking <level>` | `off`, `minimal`, `low`, `medium`, `high`, `xhigh` |
+| `--thinking <level>` | `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` (subject to model capabilities) |
 | `--models <patterns>` | Comma-separated patterns for CTRL+P cycling |
 | `--list-models [search]` | List available models |
 
@@ -528,7 +528,7 @@ cat README.md | atomic -p "Summarize this text"
 | `-c`, `--continue` | Continue most recent session |
 | `-r`, `--resume` | Browse and select session |
 | `--session <path\|id>` | Use specific session file or partial UUID |
-| `--session-id <id>` | Use an exact project session ID, creating it if missing |
+| `--session-id <id>` | Use an exact project session ID; warn and create it when missing |
 | `--fork <path\|id>` | Fork specific session file or partial UUID into a new session |
 | `--session-dir <dir>` | Custom session storage directory |
 | `--name <name>`, `-n <name>` | Set the session display name |

@@ -6,6 +6,7 @@ import {
 	calculateContextTokens,
 	DEFAULT_COMPACTION_SETTINGS,
 	estimateContextTokens,
+	estimateTokens,
 	getLastAssistantUsage,
 	shouldCompact,
 } from "../src/core/compaction/index.ts";
@@ -295,6 +296,25 @@ describe("estimateContextTokens", () => {
 		expect(result.usageTokens).toBe(80);
 		expect(result.tokens).toBeGreaterThanOrEqual(80);
 		expect(result.lastUsageIndex).toBe(1); // index of "ok" assistant message
+	});
+
+	it("ignores assistant usage older than a newer inserted prefix", () => {
+		const messages: AgentMessage[] = [
+			{ ...createUserMessage("new prefix"), timestamp: 2_000 },
+			{ ...createAssistantMessage("old reply", createMockUsage(1_000_000, 100_000)), timestamp: 1_000 },
+			{ ...createUserMessage("tail"), timestamp: 3_000 },
+		];
+
+		const result = estimateContextTokens(messages);
+		const heuristicTokens = messages.reduce((total, message) => total + estimateTokens(message), 0);
+
+		expect(result).toEqual({
+			tokens: heuristicTokens,
+			usageTokens: 0,
+			trailingTokens: heuristicTokens,
+			lastUsageIndex: null,
+		});
+		expect(shouldCompact(result.tokens, 100_000, { ...DEFAULT_COMPACTION_SETTINGS, reserveTokens: 10_000 })).toBe(false);
 	});
 });
 

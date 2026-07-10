@@ -479,7 +479,7 @@ describe("AuthStorage", () => {
 			expect(updated.openai.key).toBe("openai-key");
 			expect(updated.google.key).toBe("google-key");
 		});
-		test("does not overwrite malformed auth file after load error", () => {
+		test("surfaces a malformed auth file without overwriting it", () => {
 			writeAuthJson({
 				anthropic: { type: "api_key", key: "anthropic-key" },
 			});
@@ -488,10 +488,11 @@ describe("AuthStorage", () => {
 			writeFileSync(authJsonPath, "{invalid-json", "utf-8");
 
 			authStorage.reload();
-			authStorage.set("openai", { type: "api_key", key: "openai-key" });
+			expect(() => authStorage.set("openai", { type: "api_key", key: "openai-key" })).toThrow();
 
 			const raw = readFileSync(authJsonPath, "utf-8");
 			expect(raw).toBe("{invalid-json");
+			expect(authStorage.get("openai")).toBeUndefined();
 		});
 });
 });

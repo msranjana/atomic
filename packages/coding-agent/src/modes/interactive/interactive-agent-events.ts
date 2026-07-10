@@ -92,7 +92,17 @@ InteractiveModeBase.prototype.handleEvent = async function(this: InteractiveMode
 
       case "message_start":
         if (event.message.role === "custom") {
+          const liveAssistant = this.streamingComponent;
+          const assistantIsAttached = liveAssistant
+            ? this.chatContainer.children.includes(liveAssistant)
+            : false;
+          if (liveAssistant && assistantIsAttached) {
+            this.chatContainer.removeChild(liveAssistant);
+          }
           this.addMessageToChat(event.message);
+          if (liveAssistant && assistantIsAttached) {
+            this.chatContainer.addChild(liveAssistant);
+          }
           this.ui.requestRender();
         } else if (event.message.role === "user") {
           if (!this.consumeDeferredRenderedUserInput(this.getUserMessageText(event.message))) {

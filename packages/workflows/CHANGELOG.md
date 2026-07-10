@@ -6,9 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- Added model-capability-aware `max` reasoning suffix support throughout workflow stage schemas, fallback candidates, authoring contracts, and TUI status labels ([#1703](https://github.com/bastani-inc/atomic/issues/1703)).
+
 ### Changed
 
-- Aligned the workflows extension peer dependency with upstream `pi-tui` `^0.80.5` as part of the consolidated dependency refresh.
+- Aligned the workflows extension peer dependency with upstream `pi-tui` `^0.80.6` as part of the consolidated Pi sync ([#1703](https://github.com/bastani-inc/atomic/issues/1703)).
 
 - Changed the builtin `ralph` workflow review fan-out from three reviewers to two (`reviewer-a` and `reviewer-b`), removing `reviewer-c` and its GLM-led model chain while keeping unanimous approval across the remaining reviewers.
 

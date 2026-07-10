@@ -6,6 +6,7 @@ import { formatCopilotProviderError } from "./copilot-errors.ts";
 import type { AgentSessionInternalSurface as AgentSession } from "./agent-session-methods.ts";
 import { customMessageExcludesContext, isSingleGenericAbortTextContent, replacementAbortContent, type AgentSessionEvent, type AgentSessionEventListener } from "./agent-session-types.ts";
 import type { MessageEndEvent, MessageStartEvent, MessageUpdateEvent, ToolExecutionEndEvent, ToolExecutionStartEvent, ToolExecutionUpdateEvent, TurnEndEvent, TurnStartEvent } from "./extensions/index.ts";
+import { normalizeMessageContent } from "./messages.ts";
 
 export function _emit(this: AgentSession, event: AgentSessionEvent): void {
 	for (const l of this._eventListeners) {
@@ -335,7 +336,7 @@ export async function _emitExtensionEvent(this: AgentSession, event: AgentEvent)
 		};
 		const replacement = await this._extensionRunner.emitMessageEnd(extensionEvent);
 		if (replacement) {
-			this._replaceMessageInPlace(event.message, replacement);
+			this._replaceMessageInPlace(event.message, normalizeMessageContent(replacement));
 		}
 	} else if (event.type === "tool_execution_start") {
 		const extensionEvent: ToolExecutionStartEvent = {

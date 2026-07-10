@@ -85,6 +85,8 @@ atomic --name "Refactor"   # Set the session display name
 atomic --fork <path|id>    # Fork a session into a new session file
 ```
 
+When `--session-id` does not match an exact session in the current project, Atomic warns that no session was found and then creates the requested new session. Reusing an existing exact ID opens it without that warning.
+
 Useful session commands:
 
 - `/session` shows the current session file and ID.
@@ -172,7 +174,7 @@ When a print-mode turn correctly finishes by calling an opt-in terminating struc
 | `--provider <name>` | Provider, such as `anthropic`, `openai`, or `google` |
 | `--model <pattern>` | Model pattern or ID; supports `provider/id` and optional `:<thinking>` |
 | `--api-key <key>` | API key, overriding environment variables |
-| `--thinking <level>` | `off`, `minimal`, `low`, `medium`, `high`, `xhigh` |
+| `--thinking <level>` | `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`; model capability mapping still governs availability |
 | `--models <patterns>` | Comma-separated patterns for CTRL+P cycling |
 | `--list-models [search]` | List available models |
 
@@ -183,7 +185,7 @@ When a print-mode turn correctly finishes by calling an opt-in terminating struc
 | `-c`, `--continue` | Continue the most recent session |
 | `-r`, `--resume` | Browse and select a session |
 | `--session <path\|id>` | Use a specific session file or partial UUID |
-| `--session-id <id>` | Use an exact project session ID, creating it if missing |
+| `--session-id <id>` | Use an exact project session ID; warn and create it when missing |
 | `--fork <path\|id>` | Fork a session file or partial UUID into a new session |
 | `--session-dir <dir>` | Custom session storage directory |
 | `--name <name>`, `-n <name>` | Set the session display name |

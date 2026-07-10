@@ -100,7 +100,7 @@ describeModelRegistry((context) => {
 			expect(claudeSonnet5.api).toBe("anthropic-messages");
 			expect(claudeSonnet5.reasoning).toBe(true);
 			expect(claudeSonnet5.compat).toEqual({ forceAdaptiveThinking: true });
-			expect(getSupportedThinkingLevels(claudeSonnet5)).toEqual(["off", "low", "medium", "high", "xhigh"]);
+			expect(getSupportedThinkingLevels(claudeSonnet5)).toEqual(["off", "low", "medium", "high", "xhigh", "max"]);
 			expect(claudeSonnet5.thinkingLevelMap?.xhigh).toBe("xhigh");
 			expect(claudeSonnet5.input).toEqual(["text", "image"]);
 			expect(claudeSonnet5.cost).toEqual({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });

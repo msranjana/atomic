@@ -25,8 +25,8 @@ interface SettingsManagerBasicAccessors {
 	getThemeSetting(): string | undefined;
 	getTheme(): string | undefined;
 	setTheme(theme: string): void;
-	getDefaultThinkingLevel(): "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | undefined;
-	setDefaultThinkingLevel(level: "off" | "minimal" | "low" | "medium" | "high" | "xhigh"): void;
+	getDefaultThinkingLevel(): "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | undefined;
+	setDefaultThinkingLevel(level: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"): void;
 	getFallbackModels(): string[];
 	getDefaultContextWindow(): number | undefined;
 	getDefaultContextWindowForModel(provider: string, modelId: string): number | undefined;

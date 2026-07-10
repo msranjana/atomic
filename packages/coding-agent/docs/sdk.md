@@ -417,7 +417,7 @@ const available = await modelRegistry.getAvailable();
 
 const { session } = await createAgentSession({
   model: opus,
-  thinkingLevel: "medium", // off, minimal, low, medium, high, xhigh
+  thinkingLevel: "medium", // off, minimal, low, medium, high, xhigh, max (when supported by the model)
   contextWindow: 1_000_000, // optional; must be supported by the selected model unless non-strict fallback is acceptable
   contextWindowStrict: true, // optional; return contextWindowError instead of warning/fallback when unsupported
   

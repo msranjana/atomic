@@ -29,7 +29,7 @@ export type WorkflowOutputSchema = TSchema;
 
 export type WorkflowOutputMode = "inline" | "file-only";
 export type WorkflowContextMode = "fresh" | "fork";
-export type WorkflowThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+export type WorkflowThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 export type WorkflowExecutionMode = "interactive" | "non_interactive";
 export type WorkflowExitStatus = "completed" | "skipped" | "cancelled" | "blocked";
 export type RunStatus = "pending" | "running" | "paused" | WorkflowExitStatus | "failed" | "killed";
@@ -48,7 +48,7 @@ export interface WorkflowExitOptions<TOutputs extends WorkflowOutputValues = Wor
 }
 
 export interface WorkflowModelFallbackFields {
-  /** Ordered model IDs to try after `model` fails; entries may use `:off|minimal|low|medium|high|xhigh` reasoning suffixes. */
+  /** Ordered model IDs to try after `model` fails; entries may use `:off|minimal|low|medium|high|xhigh|max` reasoning suffixes. */
   readonly fallbackModels?: readonly string[];
   /** Optional deprecated compatibility helper aligned to `fallbackModels`; ignored for entries with a reasoning suffix. */
   readonly fallbackThinkingLevels?: readonly string[];

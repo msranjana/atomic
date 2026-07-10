@@ -229,6 +229,8 @@ export function editorRuleColor(
       return ctx.theme.mauve;
     case "xhigh":
       return ctx.theme.error;
+    case "max":
+      return ctx.theme.error;
     case "off":
     default:
       return ctx.theme.border;

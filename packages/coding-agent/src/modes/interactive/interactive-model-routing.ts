@@ -299,30 +299,33 @@ InteractiveModeBase.prototype.showUserMessageSelector = async function(this: Int
     const initialSelectedId = userMessages[userMessages.length - 1]?.entryId;
 
     this.showSelector((done) => {
+      let selectionHandled = false;
       const selector = new UserMessageSelectorComponent(
         userMessages.map((m) => ({ id: m.entryId, text: m.text })),
         async (entryId) => {
+          if (selectionHandled) return;
+          selectionHandled = true;
+          done();
           try {
             await this.ensureDeferredStartupComplete();
             const result = await this.runtimeHost.fork(entryId);
             if (result.cancelled) {
-              done();
               this.ui.requestRender();
               return;
             }
 
             this.renderCurrentSessionState();
             this.editor.setText(result.selectedText ?? "");
-            done();
             this.showStatus("Forked to new session");
           } catch (error: unknown) {
-            done();
             this.showError(
               error instanceof Error ? error.message : String(error),
             );
           }
         },
         () => {
+          if (selectionHandled) return;
+          selectionHandled = true;
           done();
           this.ui.requestRender();
         },

@@ -45,6 +45,7 @@ export interface CustomModelsResult {
 
 export interface ModelRegistryLoadResult {
 	models: Model<Api>[];
+	modelOverrides: Map<string, Map<string, ModelOverride>>;
 	providerRequestConfigs: Map<string, ProviderRequestConfig>;
 	modelRequestHeaders: Map<string, Record<string, string>>;
 	loadError: string | undefined;
@@ -54,6 +55,7 @@ export interface DynamicProviderApplyInput {
 	providerName: string;
 	config: ProviderConfigInput;
 	models: Model<Api>[];
+	modelOverrides: Map<string, Map<string, ModelOverride>>;
 	authStorage: AuthStorage;
 	storeProviderRequestConfig: (providerName: string, config: ProviderRequestConfig) => void;
 	storeModelHeaders: (providerName: string, modelId: string, headers?: Record<string, string>) => void;

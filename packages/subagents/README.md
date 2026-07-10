@@ -1080,7 +1080,7 @@ The main runtime files are:
 
 ### Suffix-first reasoning levels
 
-Reasoning levels are configured suffix-first using the `model_name:thinking_effort` syntax on `model` and each `fallbackModels` entry: `model: claude-sonnet-4:high` and `fallbackModels: claude-sonnet-4:medium, gpt-5:low, claude-haiku-4:off`. Canonical efforts are `off`, `minimal`, `low`, `medium`, `high`, and `xhigh`. The older `thinking` field is deprecated; it remains supported as a legacy default only when a model candidate has no suffix, and a suffix always wins.
+Reasoning levels are configured suffix-first using the `model_name:thinking_effort` syntax on `model` and each `fallbackModels` entry: `model: claude-sonnet-4:high` and `fallbackModels: claude-sonnet-4:medium, gpt-5:low, claude-haiku-4:off`. Canonical efforts are `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`. `xhigh` and `max` are forwarded only when the selected model supports them. The older `thinking` field is deprecated; it remains supported as a legacy default only when a model candidate has no suffix, and a suffix always wins.
 
 Migrate legacy `thinking` frontmatter by folding the effort into `model` and `fallbackModels`:
 

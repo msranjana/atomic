@@ -81,7 +81,7 @@ export async function sendCustomMessage<T = unknown>(this: AgentSession,
 	const appMessage = {
 		role: "custom" as const,
 		customType: message.customType,
-		content: message.content,
+		content: message.content ?? [],
 		display: message.display,
 		details: message.details,
 		timestamp: Date.now(),

@@ -84,11 +84,19 @@ export interface ContextUsageEstimate {
 }
 
 function getLastAssistantUsageInfo(messages: AgentMessage[]): { usage: Usage; index: number } | undefined {
-	for (let i = messages.length - 1; i >= 0; i--) {
-		const usage = getAssistantUsage(messages[i]);
-		if (usage) return { usage, index: i };
+	let latestPrefixTimestamp = Number.NEGATIVE_INFINITY;
+	let usageInfo: { usage: Usage; index: number } | undefined;
+
+	for (let i = 0; i < messages.length; i++) {
+		const message = messages[i];
+		const usage = getAssistantUsage(message);
+		if (usage && message.timestamp >= latestPrefixTimestamp && calculateContextTokens(usage) > 0) {
+			usageInfo = { usage, index: i };
+		}
+		latestPrefixTimestamp = Math.max(latestPrefixTimestamp, message.timestamp);
 	}
-	return undefined;
+
+	return usageInfo;
 }
 
 /**

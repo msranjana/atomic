@@ -140,6 +140,7 @@ export class SessionManager {
 		this.fileEntries = [header];
 		this.byId.clear();
 		this.labelsById.clear();
+		this.labelTimestampsById.clear();
 		this.leafId = null;
 		this.flushed = false;
 

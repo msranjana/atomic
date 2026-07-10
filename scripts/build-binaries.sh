@@ -61,19 +61,18 @@ bun install --frozen-lockfile
 
 if [[ "$SKIP_DEPS" == "false" ]]; then
     echo "==> Installing cross-platform native bindings for clipboard..."
-    # bun (like npm) only installs optionalDependencies for the current
-    # platform/arch. For bun --compile to embed the right native module
-    # per target, force-install every platform binding via bun add --no-save.
-    # Failures here are non-fatal: clipboard is optional and the runtime
-    # call site has a try/catch fallback.
+    # Bun only installs optionalDependencies for the current platform/arch.
+    # Install every release target at the exact generic wrapper version; the
+    # packaging step below copies each binding beside the wrapper for Bun's
+    # standalone resolver.
+    clipboard_version="$(bun -e 'const p = await Bun.file("node_modules/@mariozechner/clipboard/package.json").json(); console.log(p.version)')"
     bun add --no-save \
-        @mariozechner/clipboard-darwin-arm64@0.3.2 \
-        @mariozechner/clipboard-darwin-x64@0.3.2 \
-        @mariozechner/clipboard-linux-x64-gnu@0.3.2 \
-        @mariozechner/clipboard-linux-arm64-gnu@0.3.2 \
-        @mariozechner/clipboard-win32-x64-msvc@0.3.2 \
-        @mariozechner/clipboard-win32-arm64-msvc@0.3.2 || \
-        echo "  warning: one or more clipboard bindings unavailable; binaries will fall back to no-op clipboard"
+        "@mariozechner/clipboard-darwin-arm64@$clipboard_version" \
+        "@mariozechner/clipboard-darwin-x64@$clipboard_version" \
+        "@mariozechner/clipboard-linux-x64-gnu@$clipboard_version" \
+        "@mariozechner/clipboard-linux-arm64-gnu@$clipboard_version" \
+        "@mariozechner/clipboard-win32-x64-msvc@$clipboard_version" \
+        "@mariozechner/clipboard-win32-arm64-msvc@$clipboard_version"
 else
     echo "==> Skipping cross-platform native bindings (--skip-deps)"
 fi
@@ -125,6 +124,13 @@ echo "==> Copying runtime dependencies..."
 runtime_deps_dir="binaries/.runtime-node_modules"
 rm -rf "$runtime_deps_dir"
 bun run scripts/copy-runtime-dependencies.ts "$runtime_deps_dir"
+clipboard_copy_args=()
+if [[ "$SKIP_DEPS" == "true" ]]; then
+    # Local builds reuse whichever optional native packages are already present.
+    # Release builds remain strict so every requested archive gets its binding.
+    clipboard_copy_args+=(--allow-missing)
+fi
+bun run scripts/copy-clipboard-native-bindings.ts "$runtime_deps_dir" "${clipboard_copy_args[@]}" "${PLATFORMS[@]}"
 
 echo "==> Copying shared assets..."
 cursor_native_filename() {

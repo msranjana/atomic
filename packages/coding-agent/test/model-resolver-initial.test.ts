@@ -194,4 +194,23 @@ describe("default model selection", () => {
 		expect(result.model?.provider).toBe("vercel-ai-gateway");
 		expect(result.model?.id).toBe("anthropic/claude-opus-4-6");
 	});
+	test("skips an unauthenticated saved default in favor of an available model", async () => {
+		const savedModel = allModels[0]!;
+		const availableModel = allModels[1]!;
+		const registry = {
+			find: () => savedModel,
+			hasConfiguredAuth: (model: Model<"anthropic-messages">) => model === availableModel,
+			getAvailable: async () => [availableModel],
+		} as unknown as Parameters<typeof findInitialModel>[0]["modelRegistry"];
+
+		const result = await findInitialModel({
+			scopedModels: [],
+			isContinuing: false,
+			defaultProvider: savedModel.provider,
+			defaultModelId: savedModel.id,
+			modelRegistry: registry,
+		});
+
+		expect(result.model).toBe(availableModel);
+	});
 });

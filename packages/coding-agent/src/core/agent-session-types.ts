@@ -206,7 +206,7 @@ export interface ToolDefinitionEntry {
 	sourceInfo: SourceInfo;
 }
 
-export const THINKING_LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high"];
+export const THINKING_LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
 export function customMessageExcludesContext(message: CustomMessage): boolean {
 	return (message as CustomMessage & { excludeFromContext?: boolean }).excludeFromContext === true;

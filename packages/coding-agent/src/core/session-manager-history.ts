@@ -1,5 +1,5 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import { createBranchSummaryMessage, createCustomMessage } from "./messages.ts";
+import { createBranchSummaryMessage, createCustomMessage, normalizeMessageContent } from "./messages.ts";
 import { contentArrayHasAssistantThinkingBlock } from "./thinking-blocks.ts";
 import { reconcilePersistedToolDependencyFilters } from "./session-manager-tool-dependencies.ts";
 import type {
@@ -318,7 +318,7 @@ export function buildSessionContext(
 	const appendMessage = (entry: SessionEntry) => {
 		let message: AgentMessage | undefined;
 		if (entry.type === "message") {
-			message = entry.message;
+			message = normalizeMessageContent(entry.message);
 		} else if (entry.type === "custom_message") {
 			message = createCustomMessage(
 				entry.customType,

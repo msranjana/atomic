@@ -1858,7 +1858,7 @@ When a finished stage's session is reattached for a follow-up (for example a pos
 
 ### Reasoning levels
 
-Each `model` and `fallbackModels` entry accepts a `model_name:thinking_effort` suffix that sets the reasoning effort for that candidate (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`). The effort travels with the model string, so a single fallback chain can mix efforts — for example a high-effort primary that degrades to lower-effort, cheaper fallbacks:
+Each `model` and `fallbackModels` entry accepts a `model_name:thinking_effort` suffix that sets the reasoning effort for that candidate (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`). The selected model's capability map still governs whether `xhigh` or `max` is available. The effort travels with the model string, so a single fallback chain can mix efforts — for example a high-effort primary that degrades to lower-effort, cheaper fallbacks:
 
 ```ts
 await ctx.task("review", {

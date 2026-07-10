@@ -149,11 +149,12 @@ export class AuthStorage {
 
 	private persistProviderChange(provider: string, credential: AuthCredential | undefined): void {
 		if (this.loadError) {
-			return;
+			this.reload();
+			if (this.loadError) throw this.loadError;
 		}
 
 		try {
-			this.storage.withLock((current) => {
+			const persistedData = this.storage.withLock((current) => {
 				const currentData = this.parseStorageData(current);
 				const merged: AuthStorageData = { ...currentData };
 				if (credential) {
@@ -161,10 +162,13 @@ export class AuthStorage {
 				} else {
 					delete merged[provider];
 				}
-				return { result: undefined, next: JSON.stringify(merged, null, 2) };
+				return { result: merged, next: JSON.stringify(merged, null, 2) };
 			});
+			this.data = persistedData;
+			this.loadError = null;
 		} catch (error) {
 			this.recordError(error);
+			throw error instanceof Error ? error : new Error(String(error));
 		}
 	}
 
@@ -179,7 +183,6 @@ export class AuthStorage {
 	 * Set credential for a provider.
 	 */
 	set(provider: string, credential: AuthCredential): void {
-		this.data[provider] = credential;
 		this.persistProviderChange(provider, credential);
 	}
 
@@ -187,7 +190,6 @@ export class AuthStorage {
 	 * Remove credential for a provider.
 	 */
 	remove(provider: string): void {
-		delete this.data[provider];
 		this.persistProviderChange(provider, undefined);
 	}
 
@@ -301,10 +303,10 @@ export class AuthStorage {
 			return null;
 		}
 
+		let synchronizedData: AuthStorageData | undefined;
 		const result = await this.storage.withLockAsync(async (current) => {
 			const currentData = this.parseStorageData(current);
-			this.data = currentData;
-			this.loadError = null;
+			synchronizedData = currentData;
 
 			const cred = currentData[providerId];
 			if (cred?.type !== "oauth") {
@@ -331,11 +333,12 @@ export class AuthStorage {
 				...currentData,
 				[providerId]: { type: "oauth", ...refreshed.newCredentials },
 			};
-			this.data = merged;
-			this.loadError = null;
+			synchronizedData = merged;
 			return { result: refreshed, next: JSON.stringify(merged, null, 2) };
 		});
 
+		if (synchronizedData) this.data = synchronizedData;
+		this.loadError = null;
 		return result;
 	}
 

@@ -92,7 +92,7 @@ export interface Settings {
 	onboardedVersion?: string;
 	defaultProvider?: string;
 	defaultModel?: string;
-	defaultThinkingLevel?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+	defaultThinkingLevel?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 	fallbackModels?: string[]; // Ordered main-chat fallback models, optionally suffixed with :thinkingLevel
 	defaultContextWindow?: ContextWindowSetting; // Optional global fallback; model picker writes defaultContextWindows instead.
 	defaultContextWindows?: ModelContextWindowSettings; // Per-model defaults keyed as "provider/modelId".

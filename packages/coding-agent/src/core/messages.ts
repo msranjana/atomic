@@ -60,6 +60,12 @@ declare module "@earendil-works/pi-agent-core" {
 	}
 }
 
+/** Normalize lax JavaScript/legacy message input before it reaches history or providers. */
+export function normalizeMessageContent<T extends AgentMessage>(message: T): T {
+	if (!("content" in message) || message.content != null) return message;
+	return { ...message, content: [] } as T;
+}
+
 /**
  * Convert a BashExecutionMessage to user message text for LLM context.
  */
@@ -102,7 +108,7 @@ export function createCustomMessage(
 	const message: CustomMessage & { excludeFromContext?: boolean } = {
 		role: "custom",
 		customType,
-		content,
+		content: content ?? [],
 		display,
 		details,
 		timestamp: new Date(timestamp).getTime(),

@@ -4,7 +4,7 @@
 
 ### Changed
 
-- Aligned the Cursor provider dependency with upstream `pi-ai` `^0.80.5` as part of the consolidated dependency refresh; no Cursor provider source changes were needed.
+- Aligned the Cursor provider dependency with upstream `pi-ai` `^0.80.6` and mapped the new `max` thinking level to Cursor's advertised effort variants while preserving per-model capability filtering ([#1703](https://github.com/bastani-inc/atomic/issues/1703)).
 
 ## [0.9.4] - 2026-07-03
 

@@ -22,7 +22,7 @@ export async function resolveSavedModelReference(
   modelRegistry: ModelRegistry,
 ): Promise<Model<Api> | undefined> {
   const found = modelRegistry.find(provider, modelId);
-  if (found) return found;
+  if (found && modelRegistry.hasConfiguredAuth(found)) return found;
   return buildConfiguredProviderFallbackModel(provider, modelId, modelRegistry);
 }
 

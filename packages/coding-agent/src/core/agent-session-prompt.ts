@@ -155,7 +155,7 @@ export async function prompt(this: AgentSession, text: string, options?: PromptO
 				messages.push({
 					role: "custom",
 					customType: msg.customType,
-					content: msg.content,
+					content: msg.content ?? [],
 					display: msg.display,
 					details: msg.details,
 					timestamp: Date.now(),

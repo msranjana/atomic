@@ -6,9 +6,10 @@ import {
 	type SimpleStreamOptions,
 } from "@earendil-works/pi-ai/compat";
 import { registerOAuthProvider } from "@earendil-works/pi-ai/oauth";
-import { normalizeContextWindowOptions, validateContextWindowValue } from "./context-window.ts";
-import type { DynamicProviderApplyInput, ProviderConfigInput } from "./model-registry-types.ts";
 import { warnDeprecation } from "../utils/deprecation.ts";
+import { normalizeContextWindowOptions, validateContextWindowValue } from "./context-window.ts";
+import { applyModelOverride } from "./model-registry-builtins.ts";
+import type { DynamicProviderApplyInput, ProviderConfigInput } from "./model-registry-types.ts";
 import { isLegacyEnvVarNameConfigValue } from "./resolve-config-value.ts";
 
 function validateContextWindowOptions(providerName: string, modelId: string, options: readonly number[] | undefined): void {
@@ -122,7 +123,7 @@ export function validateProviderConfig(providerName: string, config: ProviderCon
 }
 
 export function applyProviderConfigToModels(input: DynamicProviderApplyInput): Model<Api>[] {
-	const { providerName, config, authStorage, storeProviderRequestConfig, storeModelHeaders } = input;
+	const { providerName, config, authStorage, modelOverrides, storeProviderRequestConfig, storeModelHeaders } = input;
 	let models = input.models;
 
 	if (config.oauth) {
@@ -152,9 +153,13 @@ export function applyProviderConfigToModels(input: DynamicProviderApplyInput): M
 
 		for (const modelDef of config.models) {
 			const api = modelDef.api || config.api;
-			storeModelHeaders(providerName, modelDef.id, modelDef.headers);
+			const modelOverride = modelOverrides.get(providerName)?.get(modelDef.id);
+			storeModelHeaders(providerName, modelDef.id, {
+				...modelDef.headers,
+				...modelOverride?.headers,
+			});
 
-			models.push({
+			const model = {
 				id: modelDef.id,
 				name: modelDef.name,
 				api: api as Api,
@@ -173,7 +178,8 @@ export function applyProviderConfigToModels(input: DynamicProviderApplyInput): M
 				maxTokens: modelDef.maxTokens,
 				headers: undefined,
 				compat: modelDef.compat,
-			} as Model<Api>);
+			} as Model<Api>;
+			models.push(modelOverride ? applyModelOverride(model, modelOverride) : model);
 		}
 
 		if (config.oauth?.modifyModels) {

@@ -54,6 +54,7 @@ const ThinkingLevelMapSchema = Type.Object({
 	medium: Type.Optional(ThinkingLevelMapValueSchema),
 	high: Type.Optional(ThinkingLevelMapValueSchema),
 	xhigh: Type.Optional(ThinkingLevelMapValueSchema),
+	max: Type.Optional(ThinkingLevelMapValueSchema),
 });
 const ContextWindowOptionsSchema = Type.Array(Type.Number());
 const ChatTemplateKwargScalarSchema = Type.Union([Type.String(), Type.Number(), Type.Boolean(), Type.Null()]);

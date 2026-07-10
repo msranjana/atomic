@@ -218,6 +218,7 @@ export async function createSessionManager(
 		if (existingSession) {
 			return openSessionOrExit(existingSession.path, sessionDir);
 		}
+		console.error(chalk.yellow(`No session found with id '${parsed.sessionId}'; creating a new session.`));
 	}
 
 	return SessionManager.create(cwd, sessionDir, { id: parsed.sessionId });

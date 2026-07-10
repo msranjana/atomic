@@ -8,7 +8,7 @@ import { normalizeToolArgumentsForModel } from "./copilot-gemini-tool-arguments.
 import type { AgentSessionInternalSurface as AgentSession } from "./agent-session-methods.ts";
 
 
-const THINKING_SUFFIXES = ["off", "minimal", "low", "medium", "high", "xhigh"] as const satisfies readonly ThinkingLevel[];
+const THINKING_SUFFIXES = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const satisfies readonly ThinkingLevel[];
 const THINKING_SUFFIX_SET: ReadonlySet<string> = new Set(THINKING_SUFFIXES);
 
 function modelLabel(model: Model<Api> | undefined): string {

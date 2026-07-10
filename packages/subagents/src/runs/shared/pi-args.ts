@@ -14,8 +14,8 @@ import { resolveMcpDirectToolNames } from "./mcp-direct-tool-allowlist.ts";
 import { STRUCTURED_OUTPUT_CAPTURE_ENV, STRUCTURED_OUTPUT_SCHEMA_ENV } from "./structured-output.ts";
 import type { JsonSchemaObject } from "../../shared/types.ts";
 import { MAX_SUBAGENT_NESTING_DEPTH } from "../../shared/types-runtime.ts";
+import { THINKING_LEVELS } from "../../shared/model-info.ts";
 
-const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"];
 const TASK_ARG_LIMIT = 8000;
 export const SUBAGENT_PARENT_MAX_DEPTH = MAX_SUBAGENT_NESTING_DEPTH;
 export const PROMPT_RUNTIME_EXTENSION_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), "subagent-prompt-runtime.ts");
@@ -88,7 +88,7 @@ interface BuildPiArgsResult {
 export function applyThinkingSuffix(model: string | undefined, thinking: string | undefined): string | undefined {
 	if (!model || !thinking || thinking === "off") return model;
 	const colonIdx = model.lastIndexOf(":");
-	if (colonIdx !== -1 && THINKING_LEVELS.includes(model.substring(colonIdx + 1))) return model;
+	if (colonIdx !== -1 && THINKING_LEVELS.some((level) => level === model.substring(colonIdx + 1))) return model;
 	return `${model}:${thinking}`;
 }
 

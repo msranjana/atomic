@@ -28,6 +28,7 @@ export function loadModelRegistryModels(
 	}
 
 	return {
+		modelOverrides,
 		models: combined,
 		providerRequestConfigs,
 		modelRequestHeaders,

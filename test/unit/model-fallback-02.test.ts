@@ -26,6 +26,13 @@ const models: readonly WorkflowModelInfo[] = [
     },
     { provider: "openai", id: "gpt-5-mini", fullId: "openai/gpt-5-mini" },
 ];
+
+test("workflow model suffix parsing accepts max thinking", () => {
+    assert.deepEqual(splitReasoningSuffix("openai/gpt-5.6-sol:max"), {
+        baseModel: "openai/gpt-5.6-sol",
+        level: "max",
+    });
+});
 describe("context-window authoring token", () => {
     // Minimal Model<Api>-shaped fixtures: getSupportedContextWindows only reads
     // contextWindow / defaultContextWindow / contextWindowOptions.
