@@ -128,7 +128,11 @@ export default function webAccess(pi: ExtensionAPI) {
 				loadedHeavy = captured;
 				await replayCurrentSession(captured);
 				return captured;
-			})();
+			})().catch((error) => {
+				heavyPromise = null;
+				loadedHeavy = null;
+				throw error;
+			});
 		}
 		return heavyPromise;
 	}

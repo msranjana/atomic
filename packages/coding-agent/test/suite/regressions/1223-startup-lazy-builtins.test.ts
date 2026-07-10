@@ -55,6 +55,56 @@ await new Promise((resolve) => setTimeout(resolve, 250));
 	}
 }
 
+function assertWebAccessRetriesFailedHeavyInitialization(): void {
+	const tempDir = mkdtempSync(join(tmpdir(), "atomic-web-access-retry-"));
+	try {
+		writeFileSync(join(tempDir, "package.json"), JSON.stringify({ type: "module" }));
+		writeFileSync(join(tempDir, "index.ts"), readRepoFile("packages/web-access/index.ts"));
+		writeFileSync(join(tempDir, "result-renderers.ts"), "export function renderWebAccessToolResult() { return undefined; }\n");
+		writeFileSync(join(tempDir, "index-heavy.ts"), `
+let attempts = 0;
+export default async function webAccessHeavy(pi) {
+	attempts += 1;
+	if (attempts === 1) throw new Error("simulated heavy startup failure");
+	pi.registerTool({ name: "web_search", execute: async () => ({ ok: true, attempts }) });
+}
+`);
+		const extensionUrl = pathToFileURL(join(tempDir, "index.ts")).href;
+		const script = `
+const { default: webAccess } = await import(${JSON.stringify(extensionUrl)});
+const tools = [];
+const pi = {
+  registerTool(tool) { tools.push(tool); },
+  registerCommand() {},
+  registerShortcut() {},
+  registerMessageRenderer() {},
+  on() {},
+};
+webAccess(pi);
+const webSearch = tools.find((tool) => tool.name === "web_search");
+if (!webSearch) throw new Error("web_search was not registered");
+try {
+  await webSearch.execute({ query: "first" });
+  throw new Error("first execution unexpectedly succeeded");
+} catch (error) {
+  if (!String(error?.message ?? error).includes("simulated heavy startup failure")) throw error;
+}
+const result = await webSearch.execute({ query: "retry" });
+console.log(JSON.stringify(result));
+`;
+		const result = spawnSync("bun", ["--eval", script], {
+			cwd: repoRoot,
+			env: process.env,
+			encoding: "utf-8",
+		});
+		expect(result.status, result.stderr || result.stdout).toBe(0);
+		expect(JSON.parse(result.stdout.trim().split(/\r?\n/).at(-1) ?? "{}"))
+			.toEqual({ ok: true, attempts: 2 });
+	} finally {
+		rmSync(tempDir, { recursive: true, force: true });
+	}
+}
+
 function assertMcpColdStartupTools(options: { withCache: boolean; expectedTools: string[] }): void {
 	const tempDir = mkdtempSync(join(tmpdir(), "atomic-mcp-startup-"));
 	const agentDir = join(tempDir, "agent");
@@ -198,6 +248,10 @@ describe("regression #1223 lazy built-in startup imports", () => {
 
 		assertColdRegistrationDoesNotImportHeavy("packages/web-access/index.ts");
 		assertColdRegistrationDoesNotImportHeavy("packages/intercom/index.ts");
+	});
+
+	it("allows web-access lazy heavy imports to retry after initialization failure", () => {
+		assertWebAccessRetriesFailedHeavyInitialization();
 	});
 
 	it("keeps the MCP proxy fallback until cached direct tools are available", () => {

@@ -8,6 +8,10 @@ All notable changes to this project will be documented in this file.
 
 - Aligned the web-access extension peer dependency with upstream `pi-tui` `^0.80.5` as part of the consolidated dependency refresh; no web-access source changes were needed.
 
+### Fixed
+
+- Reset failed lazy web-access initialization attempts so a later `web_search`/`fetch_content` invocation can retry loading the heavy provider module instead of reusing a rejected startup promise ([#1704](https://github.com/bastani-inc/atomic/issues/1704)).
+
 ## [0.9.4] - 2026-07-03
 
 ### Changed
