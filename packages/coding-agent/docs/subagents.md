@@ -124,6 +124,8 @@ For adversarial review or research, prefer fresh context so the specialist inspe
 
 For parallel implementation work, `worktree: true` can give each child an isolated git worktree so concurrent edits do not clobber each other.
 
+Top-level parallel calls support up to 50 subagents after expanding each task's optional `count`. The extension's `parallel.maxTasks` setting defaults to 50 and can enforce a lower task limit; `parallel.concurrency` independently controls how many of those children run at once.
+
 When a subagent call, parallel task, chain step, or background run uses a `cwd`, Atomic validates that working directory before starting the child runtime. Missing or non-directory paths are reported as `cwd` problems instead of lower-level process-spawn errors, so failures point at the requested child workspace rather than at the runtime binary.
 
 ## Nested and fanout boundaries

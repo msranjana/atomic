@@ -880,7 +880,7 @@ Forces depth-0 single, parallel, and chain runs into background mode. Calls rema
 }
 ```
 
-`maxTasks` defaults to `8`; `concurrency` defaults to `4`. Per-call `concurrency` takes precedence.
+`maxTasks` defaults to `50`; `concurrency` defaults to `4`. `maxTasks` can set a lower per-call task limit but cannot exceed the hard maximum of `50`. Per-call `concurrency` takes precedence.
 
 ### `defaultSessionDir`
 

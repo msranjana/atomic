@@ -106,7 +106,7 @@ function makeExecutor(
 	return createSubagentExecutor({
 		pi: { events: { on: () => () => {}, emit: () => {} }, getSessionName: () => "parent" } as unknown as ExecutorDeps["pi"],
 		state,
-		config: { asyncByDefault, maxSubagentDepth: 2, parallel: { concurrency: 4, maxTasks: 8 } },
+		config: { asyncByDefault, maxSubagentDepth: 2, parallel: { concurrency: 4, maxTasks: 50 } },
 		asyncByDefault,
 		tempArtifactsDir: join(cwd, "artifacts"),
 		getSubagentSessionRoot: () => join(cwd, "sessions"),
@@ -187,6 +187,33 @@ describe("programmatic subagent tool boundary", () => {
 			assert.deepEqual(backgroundCalls, [{ agent: "worker", task: "fix it" }]);
 			assert.equal(foregroundCalls, 0);
 			assert.equal(customCalls, 0);
+		} finally {
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	});
+
+	test("async parallel execution rejects more than 50 expanded tasks before dispatch", async () => {
+		const cwd = mkdtempSync(join(tmpdir(), "atomic-subagent-tool-async-limit-"));
+		try {
+			let dispatchCalls = 0;
+			const executor = makeExecutor(cwd, [makeAgent("worker")], {
+				isAsyncAvailable: () => true,
+				executeAsyncChain: () => {
+					dispatchCalls += 1;
+					return { content: [{ type: "text", text: "background started" }], details: { mode: "parallel", results: [] } };
+				},
+			});
+			const result = await executor.execute(
+				"async-parallel-limit",
+				{ tasks: [{ agent: "worker", task: "repeat", count: 51 }], async: true },
+				new AbortController().signal,
+				undefined,
+				makeContext(cwd, () => { throw new Error("unexpected UI prompt"); }),
+			);
+
+			assert.equal(result.isError, true);
+			assert.equal(result.content[0]?.type === "text" ? result.content[0].text : "", "Max 50 tasks");
+			assert.equal(dispatchCalls, 0);
 		} finally {
 			rmSync(cwd, { recursive: true, force: true });
 		}

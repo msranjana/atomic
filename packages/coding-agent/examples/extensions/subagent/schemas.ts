@@ -1,6 +1,8 @@
 import { StringEnum } from "@earendil-works/pi-ai/compat";
 import { Type } from "typebox";
 
+export const MAX_PARALLEL_TASKS = 50;
+
 const TaskItem = Type.Object({
   agent: Type.String({ description: "Name of the agent to invoke" }),
   task: Type.String({ description: "Task to delegate to the agent" }),
@@ -36,7 +38,8 @@ export const SubagentParams = Type.Object({
   ),
   tasks: Type.Optional(
     Type.Array(TaskItem, {
-      description: "Array of {agent, task} for parallel execution",
+      description: `Array of {agent, task} for parallel execution (max ${MAX_PARALLEL_TASKS})`,
+      maxItems: MAX_PARALLEL_TASKS,
     }),
   ),
   chain: Type.Optional(
