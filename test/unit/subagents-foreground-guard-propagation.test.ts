@@ -191,7 +191,7 @@ function makeExecutor(_cwd: string, agents: MinimalAgentConfig[]) {
 	const deps = {
 		pi: makePi(),
 		state: makeState(),
-		config: { maxSubagentDepth: 2, parallel: { concurrency: 4, maxTasks: 8 } },
+		config: { maxSubagentDepth: 2, parallel: { concurrency: 4, maxTasks: 50 } },
 		asyncByDefault: false,
 		tempArtifactsDir: path.join(tempRoot, "artifacts"),
 		getSubagentSessionRoot: () => path.join(tempRoot, "sessions"),
