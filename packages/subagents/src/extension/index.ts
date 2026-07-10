@@ -17,7 +17,6 @@ import { registerSlashCommands } from "../slash/slash-commands.ts";
 import { registerPromptTemplateDelegationBridge } from "../slash/prompt-template-bridge.ts";
 import { registerSlashSubagentBridge } from "../slash/slash-bridge.ts";
 import { clearSlashSnapshots, getSlashRenderableSnapshot, resolveSlashMessageDetails, restoreSlashFinalSnapshots, type SlashMessageDetails } from "../slash/slash-live-state.ts";
-import { inspectSubagentStatus } from "../runs/background/run-status.ts";
 import registerSubagentNotify, { type SubagentNotifyDetails } from "../runs/background/notify.ts";
 import { SUBAGENT_CHILD_ENV, SUBAGENT_FANOUT_CHILD_ENV } from "../runs/shared/pi-args.ts";
 import registerFanoutChildSubagentExtension from "./fanout-child.ts";
@@ -288,7 +287,6 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 						cwd: request.cwd,
 						worktree: request.worktree,
 						async: false,
-						clarify: false,
 					},
 					signal,
 					onUpdate,
@@ -304,7 +302,6 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 					cwd: request.cwd,
 					model: request.model,
 					async: false,
-					clarify: false,
 				},
 				signal,
 				onUpdate,
@@ -324,6 +321,7 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 		label: "Subagent",
 		description: `Delegate to subagents or manage agent definitions.
 EXECUTION (use exactly ONE mode):
+• Execution calls always start non-interactively.
 • Before executing, use { action: "list" } to inspect configured agents/chains. Only execute agents listed as executable/non-disabled.
 • SINGLE: { agent, task? } - one task; omit task for self-contained agents
 • CHAIN: { chain: [{agent:"agent-a"}, {parallel:[{agent:"agent-b",count:3}]}] } - sequential pipeline with optional parallel fan-out
@@ -349,9 +347,7 @@ DIAGNOSTICS:
 • { action: "doctor" } - read-only report for runtime paths, discovery, sessions, and intercom`,
 		parameters: SubagentParams,
 		promptGuidelines: DEFAULT_PROMPT_GUIDANCE,
-		execute(id, params, signal, onUpdate, ctx) {
-			return executeSubagentCollapsed(id, params, signal, onUpdate, ctx);
-		},
+		execute: executeSubagentCollapsed,
 		renderCall(args, theme) {
 			if (args.action) {
 				const target = args.agent || args.chainName || "";
@@ -362,7 +358,7 @@ DIAGNOSTICS:
 			}
 			const isParallel = (args.tasks?.length ?? 0) > 0;
 			const parallelCount = effectiveParallelTaskCount(args.tasks as Array<{ count?: unknown }> | undefined);
-			const asyncLabel = args.async === true && args.clarify !== true && !isParallel ? theme.fg("warning", " [async]") : "";
+			const asyncLabel = args.async === true ? theme.fg("warning", " [async]") : "";
 			if (args.chain?.length)
 				return new Text(
 					`${theme.fg("toolTitle", theme.bold("subagent "))}chain (${args.chain.length})${asyncLabel}`,
@@ -371,7 +367,7 @@ DIAGNOSTICS:
 				);
 			if (isParallel)
 				return new Text(
-					`${theme.fg("toolTitle", theme.bold("subagent "))}parallel (${parallelCount})`,
+					`${theme.fg("toolTitle", theme.bold("subagent "))}parallel (${parallelCount})${asyncLabel}`,
 					0,
 					0,
 				);

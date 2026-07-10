@@ -8,7 +8,7 @@ import type { ExtensionAPI, ToolDefinition } from "@bastani/atomic";
 import { discoverAgents } from "../agents/agents.ts";
 import { resolveSubagentIntercomTarget } from "../intercom/intercom-bridge.ts";
 import { deliverSubagentIntercomMessageEvent } from "../intercom/result-intercom.ts";
-import { createSubagentExecutor, type SubagentParamsLike } from "../runs/foreground/subagent-executor.ts";
+import { createSubagentExecutor } from "../runs/foreground/subagent-executor.ts";
 import { readNestedControlRequests, resolveNestedRouteFromEnv, writeNestedControlResult, type NestedRoute } from "../runs/shared/nested-events.ts";
 import { SUBAGENT_CHILD_ENV, SUBAGENT_FANOUT_CHILD_ENV } from "../runs/shared/pi-args.ts";
 import { getArtifactsDir } from "../shared/artifacts.ts";
@@ -229,13 +229,12 @@ export default function registerFanoutChildSubagentExtension(pi: ExtensionAPI): 
 		label: "Subagent",
 		description: [
 			"Delegate to subagents from child-safe fanout mode.",
+			"Execution calls always start non-interactively.",
 			"Allowed management/control actions: list, get, status, interrupt, resume, doctor.",
 			"Agent config mutation actions create, update, and delete are blocked in this mode.",
 		].join("\n"),
 		parameters: SubagentParams,
-		execute(id, params, signal, onUpdate, ctx) {
-			return executor.execute(id, params as SubagentParamsLike, signal, onUpdate, ctx);
-		},
+		execute: executor.execute,
 	};
 
 	pi.registerTool(tool);
