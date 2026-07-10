@@ -52,6 +52,22 @@ type WorktreeFixture = {
 	reftableDir: string;
 };
 
+type ReftableWatcherTestAccess = {
+	reftableWatcher: FSWatcher | null;
+	reftableTablesListWatcher: FSWatcher | null;
+	handleReftableDirectoryEvent: (filename: string | Buffer | null) => void;
+};
+
+function getReftableWatcherTestAccess(provider: FooterDataProvider): ReftableWatcherTestAccess {
+	const access = provider as unknown as ReftableWatcherTestAccess;
+	expect(access.reftableWatcher).not.toBeNull();
+	expect(access.reftableTablesListWatcher).not.toBeNull();
+	// Keep watcher installation under test while making event delivery deterministic.
+	access.reftableWatcher?.removeAllListeners("change");
+	access.reftableTablesListWatcher?.removeAllListeners("change");
+	return access;
+}
+
 function createPlainReftableRepo(tempDir: string): string {
 	const repoDir = join(tempDir, "repo");
 	mkdirSync(join(repoDir, ".git", "reftable"), { recursive: true });
@@ -209,8 +225,10 @@ describe("FooterDataProvider reftable branch detection", () => {
 			const onBranchChange = vi.fn();
 			provider.onBranchChange(onBranchChange);
 			provider.startGitWatcher();
+			const watcherAccess = getReftableWatcherTestAccess(provider);
 
 			writeFileSync(join(reftableDir, "tables.list"), "1\n");
+			watcherAccess.handleReftableDirectoryEvent("tables.list");
 			await waitFor(() => mocked(execFile).mock.calls.length === 1);
 
 			expect(mocked(execFile)).toHaveBeenCalledTimes(1);
@@ -231,10 +249,14 @@ describe("FooterDataProvider reftable branch detection", () => {
 			expect(provider.getGitBranch()).toBe("main");
 			mocked(execFile).mockClear();
 			provider.startGitWatcher();
+			const watcherAccess = getReftableWatcherTestAccess(provider);
 
 			writeFileSync(join(reftableDir, "tables.list"), "1\n");
+			watcherAccess.handleReftableDirectoryEvent("tables.list");
 			writeFileSync(join(reftableDir, "tables.list"), "2\n");
+			watcherAccess.handleReftableDirectoryEvent("tables.list");
 			writeFileSync(join(reftableDir, "tables.list"), "3\n");
+			watcherAccess.handleReftableDirectoryEvent("tables.list");
 			await waitFor(() => mocked(execFile).mock.calls.length === 1);
 			await new Promise((resolve) => setTimeout(resolve, 650));
 
@@ -254,23 +276,21 @@ describe("FooterDataProvider reftable branch detection", () => {
 			expect(provider.getGitBranch()).toBe("main");
 			mocked(execFile).mockClear();
 			provider.startGitWatcher();
-			const providerWithInternals = provider as unknown as {
-				scheduleReftableRefresh: () => void;
-			};
+			const watcherAccess = getReftableWatcherTestAccess(provider);
 
 			writeFileSync(join(reftableDir, "tables.list"), "1\n");
-			providerWithInternals.scheduleReftableRefresh();
-			providerWithInternals.scheduleReftableRefresh();
+			watcherAccess.handleReftableDirectoryEvent("tables.list");
+			watcherAccess.handleReftableDirectoryEvent("tables.list");
 			await advanceTimersByTime(500);
 
 			expect(mocked(execFile)).toHaveBeenCalledTimes(1);
 
-			providerWithInternals.scheduleReftableRefresh();
+			watcherAccess.handleReftableDirectoryEvent("tables.list");
 			await advanceTimersByTime(650);
 			expect(mocked(execFile)).toHaveBeenCalledTimes(1);
 
 			writeFileSync(join(reftableDir, "tables.list"), "2\n");
-			providerWithInternals.scheduleReftableRefresh();
+			watcherAccess.handleReftableDirectoryEvent("tables.list");
 			await advanceTimersByTime(500);
 
 			expect(mocked(execFile)).toHaveBeenCalledTimes(2);
@@ -290,11 +310,9 @@ describe("FooterDataProvider reftable branch detection", () => {
 			expect(provider.getGitBranch()).toBe("main");
 			mocked(execFile).mockClear();
 			provider.startGitWatcher();
-			const providerWithInternals = provider as unknown as {
-				handleReftableDirectoryEvent: (filename: string | null) => void;
-			};
+			const watcherAccess = getReftableWatcherTestAccess(provider);
 
-			providerWithInternals.handleReftableDirectoryEvent(null);
+			watcherAccess.handleReftableDirectoryEvent(null);
 			await advanceTimersByTime(500);
 
 			expect(mocked(execFile)).toHaveBeenCalledTimes(1);
@@ -315,8 +333,10 @@ describe("FooterDataProvider reftable branch detection", () => {
 			const onBranchChange = vi.fn();
 			provider.onBranchChange(onBranchChange);
 			provider.startGitWatcher();
+			const watcherAccess = getReftableWatcherTestAccess(provider);
 
 			writeFileSync(join(reftableDir, "tables.list"), "1\n");
+			watcherAccess.handleReftableDirectoryEvent("tables.list");
 			await waitFor(() => mocked(execFile).mock.calls.length === 1);
 			await waitFor(() => provider.getGitBranch() === "foo");
 

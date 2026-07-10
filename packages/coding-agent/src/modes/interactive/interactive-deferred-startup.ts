@@ -1,6 +1,6 @@
 import { InteractiveModeBase } from "./interactive-mode-base.ts";
 import { modelsAreEqual } from "@earendil-works/pi-ai/compat";
-import { type Container, recordTimeSinceReset, resolveModelScopeWithDiagnostics, resolveSavedModelReference, setRegisteredThemes } from "./interactive-mode-deps.ts";
+import { type Container, recordTimeSinceReset, resolveModelScopeWithDiagnostics, resolveRestoredModelReference, setRegisteredThemes } from "./interactive-mode-deps.ts";
 
 export interface DeferredStartupMode {
     deferredStartupPending: boolean;
@@ -122,7 +122,7 @@ InteractiveModeBase.prototype.retryDeferredModelRestore = async function(this: I
       return;
     }
     if (savedModel) {
-      const restoredModel = await resolveSavedModelReference(
+      const restoredModel = await resolveRestoredModelReference(
         savedModel.provider,
         savedModel.modelId,
         this.session.modelRegistry,

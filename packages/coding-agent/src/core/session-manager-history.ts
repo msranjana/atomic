@@ -1,5 +1,6 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { createBranchSummaryMessage, createCustomMessage, normalizeMessageContent } from "./messages.ts";
+import { normalizeDerivedSessionEntries } from "./session-entry-normalization.ts";
 import { contentArrayHasAssistantThinkingBlock } from "./thinking-blocks.ts";
 import { reconcilePersistedToolDependencyFilters } from "./session-manager-tool-dependencies.ts";
 import type {
@@ -108,27 +109,28 @@ function findRetainedThinkingAssistants(
 }
 
 export function buildEffectiveContextDeletionFilters(path: SessionEntry[]): ContextDeletionFilters {
-	const filters = buildContextDeletionFilters(path);
-	if (!path.some((entry) => entry.type === "context_compaction")) return filters;
+	const derivedPath = normalizeDerivedSessionEntries(path);
+	const filters = buildContextDeletionFilters(derivedPath);
+	if (!derivedPath.some((entry) => entry.type === "context_compaction")) return filters;
 
 	const rawDeletedEntryIds = new Set<string>();
-	for (const compaction of path) {
+	for (const compaction of derivedPath) {
 		if (compaction.type !== "context_compaction") continue;
 		for (const target of compaction.deletedTargets) {
 			if (target.kind === "entry") rawDeletedEntryIds.add(target.entryId);
 		}
 	}
-	const retainedThinkingAssistants = findRetainedThinkingAssistants(path, rawDeletedEntryIds);
+	const retainedThinkingAssistants = findRetainedThinkingAssistants(derivedPath, rawDeletedEntryIds);
 	const retainedThinkingAssistantIds = new Set(retainedThinkingAssistants.map((entry) => entry.id));
 	const retainedThinkingAssistantById = new Map(retainedThinkingAssistants.map((entry) => [entry.id, entry]));
-	const toolResultEntryIdsByCallId = buildToolResultEntryIdsByCallId(path);
+	const toolResultEntryIdsByCallId = buildToolResultEntryIdsByCallId(derivedPath);
 	const effectiveFilters: ContextDeletionFilters = {
 		deletedEntryIds: new Set<string>(),
 		deletedContentBlocks: new Map<string, Set<number>>(),
 	};
 	const allRestoredToolResultEntryIds = new Set<string>();
 
-	for (const compaction of path) {
+	for (const compaction of derivedPath) {
 		if (compaction.type !== "context_compaction") continue;
 		for (const target of compaction.deletedTargets) {
 			if (target.kind !== "content_block") continue;
@@ -143,7 +145,7 @@ export function buildEffectiveContextDeletionFilters(path: SessionEntry[]): Cont
 		}
 	}
 
-	for (const compaction of path) {
+	for (const compaction of derivedPath) {
 		if (compaction.type !== "context_compaction") continue;
 		let restoresRetainedThinkingAssistant = false;
 		for (const target of compaction.deletedTargets) {
@@ -169,7 +171,7 @@ export function buildEffectiveContextDeletionFilters(path: SessionEntry[]): Cont
 		}
 	}
 
-	return reconcilePersistedToolDependencyFilters(path, effectiveFilters);
+	return reconcilePersistedToolDependencyFilters(derivedPath, effectiveFilters);
 }
 
 function filterContentArray<T>(content: T[], deletedBlocks: ReadonlySet<number>): T[] {
@@ -222,14 +224,16 @@ function filterMessageContentBlocks(
  */
 export function buildContextDeletionFilteredPath(
 	path: SessionEntry[],
-	effectiveFilters: ContextDeletionFilters = buildEffectiveContextDeletionFilters(path),
+	effectiveFilters?: ContextDeletionFilters,
 ): SessionEntry[] {
+	const derivedPath = normalizeDerivedSessionEntries(path);
+	const filters = effectiveFilters ?? buildEffectiveContextDeletionFilters(derivedPath);
 	const filteredPath: SessionEntry[] = [];
 
-	for (const entry of path) {
-		if (effectiveFilters.deletedEntryIds.has(entry.id)) continue;
+	for (const entry of derivedPath) {
+		if (filters.deletedEntryIds.has(entry.id)) continue;
 
-		const deletedBlocks = effectiveFilters.deletedContentBlocks.get(entry.id);
+		const deletedBlocks = filters.deletedContentBlocks.get(entry.id);
 		if (!deletedBlocks || deletedBlocks.size === 0) {
 			filteredPath.push(entry);
 			continue;
@@ -290,7 +294,7 @@ export function buildSessionContext(
 	}
 
 	// Walk from leaf to root, collecting path
-	const path = getBranchPath(leaf.id, byId);
+	const path = normalizeDerivedSessionEntries(getBranchPath(leaf.id, byId));
 
 	// Extract settings
 	let thinkingLevel = "off";

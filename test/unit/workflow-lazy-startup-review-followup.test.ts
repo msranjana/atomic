@@ -1,4 +1,4 @@
-import { afterEach, describe, test } from "bun:test";
+import { afterEach, beforeEach, describe, test } from "bun:test";
 import assert from "node:assert/strict";
 import factory, { type ExtensionAPI, type PiCommandOptions } from "../../packages/workflows/src/extension/index.js";
 import { store } from "../../packages/workflows/src/shared/store.js";
@@ -6,6 +6,9 @@ import type { ExtensionRuntime } from "../../packages/workflows/src/extension/ru
 import { makeExecuteWorkflowTool } from "../../packages/workflows/src/extension/workflow-tool.js";
 import type { WorkflowToolResult } from "../../packages/workflows/src/extension/render-result.js";
 import { handleRunControlCommand, type WorkflowRunControlDeps } from "../../packages/workflows/src/extension/workflow-run-control-command.js";
+import { WORKFLOW_STAGE_SUBAGENT_GUARD_ENV } from "@bastani/atomic";
+
+const previousWorkflowStageSubagentGuard = process.env[WORKFLOW_STAGE_SUBAGENT_GUARD_ENV];
 
 interface SelectorComponent {
   handleInput?: (data: string) => void;
@@ -47,8 +50,17 @@ function registerFactory(piOverrides: Partial<ExtensionAPI> = {}): Array<{ name:
   return commands;
 }
 
+beforeEach(() => {
+  delete process.env[WORKFLOW_STAGE_SUBAGENT_GUARD_ENV];
+});
+
 afterEach(() => {
   store.clear();
+  if (previousWorkflowStageSubagentGuard === undefined) {
+    delete process.env[WORKFLOW_STAGE_SUBAGENT_GUARD_ENV];
+    return;
+  }
+  process.env[WORKFLOW_STAGE_SUBAGENT_GUARD_ENV] = previousWorkflowStageSubagentGuard;
 });
 
 describe("workflow lazy-startup review follow-up fixes", () => {

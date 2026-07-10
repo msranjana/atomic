@@ -311,6 +311,42 @@ describe("context compaction", () => {
 			expect(validated.stats.percentReduction).toBe(expectedPercentReduction);
 		});
 
+		it("normalizes persisted null content before Verbatim Compaction without mutating source entries", () => {
+			resetIds();
+			const task = entry(user("Keep the task"));
+			const laxPersisted = entry({
+				...assistantTextWithoutUsage("legacy placeholder"),
+				content: null as never,
+			}) as SessionMessageEntry;
+			const tail = entry(assistantTextWithoutUsage("retained tail"));
+			const entries: SessionEntry[] = [task, laxPersisted, tail];
+
+			const preparation = prepareContextCompaction(entries, DEFAULT_COMPACTION_SETTINGS, {
+				preserve_recent: 0,
+			});
+
+			expect(preparation).toBeDefined();
+			const derivedBranchEntry = preparation!.branchEntries.find(
+				(entry) => entry.id === laxPersisted.id,
+			) as SessionMessageEntry;
+			const transcriptEntry = preparation!.transcript.entries.find(
+				(entry) => entry.entryId === laxPersisted.id,
+			);
+			expect(derivedBranchEntry.message.content).toEqual([]);
+			expect(transcriptEntry?.message.content).toEqual([]);
+			expect(Number.isFinite(transcriptEntry?.tokenEstimate)).toBe(true);
+			expect(JSON.stringify(preparation)).not.toContain('"content":null');
+
+			const validated = validateContextDeletionRequest(
+				{ deletions: [{ kind: "entry", entryId: laxPersisted.id }] },
+				preparation!.transcript,
+			);
+			expect(validated.deletedTargets).toEqual([{ kind: "entry", entryId: laxPersisted.id }]);
+			expect(buildSessionContext(entries).messages[1]?.content).toEqual([]);
+			expect(laxPersisted.message.content).toBeNull();
+			expect(entries[1]).toBe(laxPersisted);
+		});
+
 		it("validates paired tool-call deletions and rebuilds without mutating retained entries", () => {
 			resetIds();
 			const u1 = entry(user("Original user task must stay verbatim"));

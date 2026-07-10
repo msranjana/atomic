@@ -115,7 +115,7 @@ describe("default model selection", () => {
 		expect(result.model?.provider).toBe("openrouter");
 		expect(result.model?.id).toBe("openai/ghost-model");
 	});
-	test("findInitialModel restores saved custom Cursor model ids from an authenticated provider template", async () => {
+	test("findInitialModel does not synthesize unknown saved settings model ids", async () => {
 		const registry = {
 			find: () => undefined,
 			getAvailable: async () => [cursorBaseModel],
@@ -128,9 +128,24 @@ describe("default model selection", () => {
 			defaultThinkingLevel: "medium",
 			modelRegistry: registry,
 		});
-		expect(result.model?.provider).toBe("cursor");
-		expect(result.model?.id).toBe("cursor-compose-2.5");
-		expect(result.model?.api).toBe("cursor-agent");
+		expect(result.model).toBe(cursorBaseModel);
+		expect(result.thinkingLevel).toBe("medium");
+	});
+	test("findInitialModel accepts an exact authenticated saved settings model", async () => {
+		const registry = {
+			find: () => cursorBaseModel,
+			hasConfiguredAuth: () => true,
+			getAvailable: async () => [],
+		} as unknown as Parameters<typeof findInitialModel>[0]["modelRegistry"];
+		const result = await findInitialModel({
+			scopedModels: [],
+			isContinuing: false,
+			defaultProvider: cursorBaseModel.provider,
+			defaultModelId: cursorBaseModel.id,
+			defaultThinkingLevel: "medium",
+			modelRegistry: registry,
+		});
+		expect(result.model).toBe(cursorBaseModel);
 		expect(result.thinkingLevel).toBe("medium");
 	});
 	test("restoreModelFromSession restores saved custom Cursor model ids from an authenticated provider template", async () => {
@@ -149,6 +164,18 @@ describe("default model selection", () => {
 		expect(result.model?.provider).toBe("cursor");
 		expect(result.model?.id).toBe("cursor-compose-2.5");
 		expect(result.model?.api).toBe("cursor-agent");
+	});
+	test("restoreModelFromSession rejects an exact unauthenticated model instead of synthesizing it", async () => {
+		const unauthenticatedExact = { ...cursorBaseModel, id: "saved-exact" };
+		const registry = {
+			find: () => unauthenticatedExact,
+			hasConfiguredAuth: () => false,
+			getAvailable: async () => [cursorBaseModel],
+		} as unknown as Parameters<typeof restoreModelFromSession>[4];
+		const result = await restoreModelFromSession("cursor", "saved-exact", undefined, false, registry);
+		expect(result.model).toBe(cursorBaseModel);
+		expect(result.model?.id).not.toBe("saved-exact");
+		expect(result.fallbackMessage).toContain("no auth configured");
 	});
 	test("restoreModelFromSession scrubs inherited context-window options from fallback models", async () => {
 		const registry = {

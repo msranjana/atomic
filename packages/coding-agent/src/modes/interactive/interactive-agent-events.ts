@@ -1,5 +1,6 @@
 import { InteractiveModeBase } from "./interactive-mode-base.ts";
 import { type Message, type AgentSessionEvent, type ContextCompactionResult, Loader, Spacer, Text, pickWhimsicalWorkingMessage, AssistantMessageComponent, CountdownTimer, keyText, ToolExecutionComponent, theme } from "./interactive-mode-deps.ts";
+import { appendNewChildrenBeforeAttachedChild } from "./interactive-child-ordering.ts";
 
 InteractiveModeBase.prototype.subscribeToAgent = function(this: InteractiveModeBase): void {
     this.unsubscribe = this.session.subscribe(async (event) => {
@@ -92,17 +93,11 @@ InteractiveModeBase.prototype.handleEvent = async function(this: InteractiveMode
 
       case "message_start":
         if (event.message.role === "custom") {
-          const liveAssistant = this.streamingComponent;
-          const assistantIsAttached = liveAssistant
-            ? this.chatContainer.children.includes(liveAssistant)
-            : false;
-          if (liveAssistant && assistantIsAttached) {
-            this.chatContainer.removeChild(liveAssistant);
-          }
-          this.addMessageToChat(event.message);
-          if (liveAssistant && assistantIsAttached) {
-            this.chatContainer.addChild(liveAssistant);
-          }
+          appendNewChildrenBeforeAttachedChild(
+            this.chatContainer,
+            this.streamingComponent,
+            () => this.addMessageToChat(event.message),
+          );
           this.ui.requestRender();
         } else if (event.message.role === "user") {
           if (!this.consumeDeferredRenderedUserInput(this.getUserMessageText(event.message))) {

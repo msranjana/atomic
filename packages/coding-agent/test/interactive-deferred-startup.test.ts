@@ -77,4 +77,39 @@ describe("retryDeferredModelRestore", () => {
 		expect(mode.session.modelRegistry.hasConfiguredAuth).toHaveBeenCalledWith(claudeModel);
 		expect(mode.showWarning).not.toHaveBeenCalled();
 	});
+
+	it("does not synthesize an exact unauthenticated saved model after deferred loading", async () => {
+		const exactModel = { ...claudeModel, provider: "extension-provider", id: "saved-exact" };
+		const sameProviderTemplate = {
+			...claudeModel,
+			provider: "extension-provider",
+			id: "authenticated-template",
+		};
+		const setModel = vi.fn();
+		const showWarning = vi.fn();
+		const mode = {
+			options: { modelFallbackMessage: "Could not restore saved model" },
+			sessionManager: {
+				buildSessionContext: () => ({
+					model: { provider: exactModel.provider, modelId: exactModel.id },
+				}),
+			},
+			session: {
+				model: sameProviderTemplate,
+				modelRegistry: {
+					find: vi.fn(() => exactModel),
+					getAvailable: vi.fn(async () => [sameProviderTemplate]),
+					hasConfiguredAuth: vi.fn((model) => model !== exactModel),
+				},
+				setModel,
+			},
+			showWarning,
+		};
+
+		await InteractiveMode.prototype.retryDeferredModelRestore.call(mode as never);
+
+		expect(mode.session.modelRegistry.getAvailable).not.toHaveBeenCalled();
+		expect(setModel).not.toHaveBeenCalled();
+		expect(showWarning).toHaveBeenCalledWith("Could not restore saved model", undefined);
+	});
 });

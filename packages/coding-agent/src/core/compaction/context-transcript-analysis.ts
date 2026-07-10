@@ -1,6 +1,7 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage } from "@earendil-works/pi-ai/compat";
 import { createBranchSummaryMessage, createCustomMessage } from "../messages.ts";
+import { normalizeDerivedSessionEntries } from "../session-entry-normalization.ts";
 import {
 	isAssistantThinkingBlockType,
 	messageHasAssistantThinkingContentBlock,
@@ -184,8 +185,9 @@ export function hasFailedBashExecution(message: AgentMessage): boolean {
 }
 
 export function autoDetectContextCompactionQuery(pathEntries: readonly SessionEntry[]): string {
-	for (let index = pathEntries.length - 1; index >= 0; index--) {
-		const entry = pathEntries[index];
+	const derivedPathEntries = normalizeDerivedSessionEntries(pathEntries);
+	for (let index = derivedPathEntries.length - 1; index >= 0; index--) {
+		const entry = derivedPathEntries[index];
 		if (entry.type === "context_compaction") continue;
 		const message = getContextEligibleMessageFromEntry(entry);
 		if (!message || message.role !== "user") continue;
@@ -215,15 +217,16 @@ export function prepareContextCompaction(
 	settings: CompactionSettings,
 	options: ContextCompactionRunOptions = {},
 ): ContextCompactionPreparation | undefined {
-	if (pathEntries.length === 0) return undefined;
+	const derivedPathEntries = normalizeDerivedSessionEntries(pathEntries);
+	if (derivedPathEntries.length === 0) return undefined;
 
-	const effectiveDeletionFilters = buildEffectiveContextDeletionFilters(pathEntries);
-	const filteredPathEntries = buildContextDeletionFilteredPath(pathEntries, effectiveDeletionFilters);
+	const effectiveDeletionFilters = buildEffectiveContextDeletionFilters(derivedPathEntries);
+	const filteredPathEntries = buildContextDeletionFilteredPath(derivedPathEntries, effectiveDeletionFilters);
 	const parameters = normalizeContextCompactionParameters(
 		{ ...settings, ...options },
 		autoDetectContextCompactionQuery(filteredPathEntries),
 	);
-	const rawEntryById = new Map(pathEntries.map((entry) => [entry.id, entry]));
+	const rawEntryById = new Map(derivedPathEntries.map((entry) => [entry.id, entry]));
 	const messageEntryIds = filteredPathEntries
 		.filter((entry) => entry.type !== "context_compaction" && getContextEligibleMessageFromEntry(entry) !== undefined)
 		.map((entry) => entry.id);
@@ -264,7 +267,7 @@ export function prepareContextCompaction(
 	if (entries.length < 2) return undefined;
 
 	return {
-		branchEntries: pathEntries,
+		branchEntries: derivedPathEntries,
 		parameters,
 		transcript: {
 			entries,

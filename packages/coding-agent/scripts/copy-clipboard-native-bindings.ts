@@ -59,12 +59,15 @@ function readVersion(packageDir: string): string {
 export function copyClipboardNativeBindings(options: CopyClipboardNativeBindingsOptions): void {
 	const sourceWrapper = packagePath(options.sourceNodeModules, "@mariozechner/clipboard");
 	const destinationWrapper = packagePath(options.destinationNodeModules, "@mariozechner/clipboard");
-	const wrapperVersion = readVersion(sourceWrapper);
-	const destinationVersion = readVersion(destinationWrapper);
-	if (destinationVersion !== wrapperVersion) {
-		throw new Error(
-			`Clipboard wrapper version mismatch: source ${wrapperVersion}, destination ${destinationVersion}`,
-		);
+	const wrapperVersion = readVersion(destinationWrapper);
+	const sourceWrapperPackageJson = join(sourceWrapper, "package.json");
+	if (existsSync(sourceWrapperPackageJson)) {
+		const sourceVersion = readVersion(sourceWrapper);
+		if (sourceVersion !== wrapperVersion) {
+			throw new Error(
+				`Clipboard wrapper version mismatch: source ${sourceVersion}, destination ${wrapperVersion}`,
+			);
+		}
 	}
 
 	for (const platform of options.platforms) {
@@ -90,15 +93,32 @@ export function copyClipboardNativeBindings(options: CopyClipboardNativeBindings
 
 if (import.meta.main) {
 	const args = process.argv.slice(2);
-	const allowMissing = args.includes("--allow-missing");
-	const [destinationNodeModules, ...platforms] = args.filter((arg) => arg !== "--allow-missing");
+	let allowMissing = false;
+	let sourceNodeModules = resolve(import.meta.dir, "..", "..", "..", "node_modules");
+	const positional: string[] = [];
+	for (let index = 0; index < args.length; index += 1) {
+		const arg = args[index]!;
+		if (arg === "--allow-missing") {
+			allowMissing = true;
+			continue;
+		}
+		if (arg === "--source-node-modules") {
+			const value = args[index + 1];
+			if (!value) throw new Error("--source-node-modules requires a path");
+			sourceNodeModules = resolve(value);
+			index += 1;
+			continue;
+		}
+		positional.push(arg);
+	}
+	const [destinationNodeModules, ...platforms] = positional;
 	if (!destinationNodeModules || platforms.length === 0) {
 		throw new Error(
-			"Usage: copy-clipboard-native-bindings.ts <destination-node_modules> [--allow-missing] <platform...>",
+			"Usage: copy-clipboard-native-bindings.ts <destination-node_modules> [--source-node-modules <path>] [--allow-missing] <platform...>",
 		);
 	}
 	copyClipboardNativeBindings({
-		sourceNodeModules: resolve(import.meta.dir, "..", "..", "..", "node_modules"),
+		sourceNodeModules,
 		destinationNodeModules: resolve(destinationNodeModules),
 		platforms,
 		allowMissing,

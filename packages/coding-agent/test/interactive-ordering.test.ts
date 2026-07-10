@@ -58,19 +58,26 @@ describe("interactive ordering", () => {
 		expect(mode.editor.setText).toHaveBeenCalledWith("forked");
 	});
 
-	it("inserts a visible custom message immediately before a live assistant", async () => {
+	it("inserts new custom components at the live assistant index without moving existing components", async () => {
 		const chatContainer = new Container();
 		const before = new Text("before", 0, 0);
 		const streaming = new Text("streaming", 0, 0);
+		const trailingTool = new Text("trailing tool", 0, 0);
+		const customSpacer = new Text("custom spacer", 0, 0);
 		const custom = new Text("custom", 0, 0);
 		chatContainer.addChild(before);
 		chatContainer.addChild(streaming);
+		chatContainer.addChild(trailingTool);
+		const removeChild = vi.spyOn(chatContainer, "removeChild");
 		const mode = Object.assign(Object.create(InteractiveMode.prototype), {
 			isInitialized: true,
 			footer: { invalidate: vi.fn() },
 			chatContainer,
 			streamingComponent: streaming,
-			addMessageToChat: vi.fn(() => chatContainer.addChild(custom)),
+			addMessageToChat: vi.fn(() => {
+				chatContainer.addChild(customSpacer);
+				chatContainer.addChild(custom);
+			}),
 			ui: { requestRender: vi.fn() },
 		});
 
@@ -79,7 +86,11 @@ describe("interactive ordering", () => {
 			message: { role: "custom", customType: "test", content: "custom", display: true },
 		});
 
-		expect(chatContainer.children).toEqual([before, custom, streaming]);
+		expect(chatContainer.children).toEqual([before, customSpacer, custom, streaming, trailingTool]);
+		expect(chatContainer.children[0]).toBe(before);
+		expect(chatContainer.children[3]).toBe(streaming);
+		expect(chatContainer.children[4]).toBe(trailingTool);
+		expect(removeChild).not.toHaveBeenCalled();
 	});
 
 	it("appends a visible custom message normally when no assistant is streaming", async () => {
