@@ -121,8 +121,8 @@ export function analyzeCompactableAssistantTurns(
 /**
  * Analyze chronological LLM-visible entries as logical assistant tool-use turns.
  * Callers adapt each context-visible user-like message into `startsNewTurn`;
- * tool results remain in the current turn. The final logical turn is active,
- * even when its current input has not received an assistant reply.
+ * tool results remain in the current turn. A trailing input-only turn is omitted,
+ * intentionally leaving the preceding assistant turn historical rather than active.
  */
 export function analyzeAssistantToolUseTurns(entries: readonly AssistantTurnEntry[]): AssistantToolUseTurn[] {
 	const groups: Array<Omit<AssistantToolUseTurn, "active">> = [];
