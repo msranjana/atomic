@@ -402,11 +402,8 @@ export function registerSlashCommands(
 			if (!state.baseCwd) { ctx.ui.notify("Subagent session cwd is not initialized yet", "error"); return; }
 			const agents = discoverAgents(state.baseCwd, "both").agents;
 			if (!agents.find((a) => a.name === agentName)) { ctx.ui.notify(`Unknown agent: ${agentName}`, "error"); return; }
-			let finalTask = task;
-			if (inline.reads && Array.isArray(inline.reads) && inline.reads.length > 0) {
-				finalTask = `[Read from: ${inline.reads.join(", ")}]\n\n${finalTask}`;
-			}
-			const params: SubagentParamsLike = { agent: agentName, task: finalTask, agentScope: "both" };
+			const params: SubagentParamsLike = { agent: agentName, task, agentScope: "both" };
+			if (inline.reads !== undefined) params.reads = inline.reads;
 			if (inline.output !== undefined) params.output = inline.output;
 			if (inline.outputMode !== undefined) params.outputMode = inline.outputMode;
 			if (inline.skill !== undefined) params.skill = inline.skill;

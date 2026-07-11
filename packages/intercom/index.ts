@@ -4,6 +4,7 @@ import { Type } from "typebox";
 import { renderIntercomToolResult } from "./result-renderers.js";
 import { executeHeavyTool, runHeavyCommand, type HeavyHandle } from "./lazy-tool-execution.js";
 import { assertCurrentLifecycleLease, createLifecycleLease, retainSettledLifecycleCleanup, retireLifecycleLease, SerializedLifecycleForwarder, type LifecycleLease } from "./lifecycle-lease.js";
+import { rejectLazyResultRelay } from "./lazy-subagent-ack.js";
 type CapturedCommand = Omit<RegisteredCommand, "name" | "sourceInfo">;
 type CapturedShortcut = Parameters<ExtensionAPI["registerShortcut"]>[1];
 type EventHandler = Parameters<ExtensionAPI["events"]["on"]>[1];
@@ -167,7 +168,6 @@ function renderHeavyToolResult(loadedHeavy: CapturedHeavy | null, name: string, 
 	if (renderer) return renderer(...args);
 	return renderIntercomToolResult(name, args);
 }
-
 export default function intercom(pi: ExtensionAPI) {
 	let heavyAttempt: HeavyAttempt | null = null;
 	let loadedHeavy: IntercomHeavyHandle | null = null;
@@ -403,6 +403,7 @@ export default function intercom(pi: ExtensionAPI) {
 				await dispatchEventHandlers(handle.heavy, eventName, payload);
 				handle.assertCurrent();
 			}).catch((error) => {
+				rejectLazyResultRelay(pi, eventName, payload, error);
 				console.error(`Intercom event relay failed (${eventName}):`, error);
 			});
 		});
@@ -445,7 +446,6 @@ Usage:
 			return new Text(theme.fg("toolTitle", theme.bold(`intercom ${input.action ?? ""}`)) + theme.fg("accent", target), 0, 0);
 		},
 	});
-
 	if (hasSubagentIntercomEnv()) {
 		pi.registerTool({
 			name: "contact_supervisor",

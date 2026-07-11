@@ -1,4 +1,5 @@
 interface CompletionDataLike {
+	runId?: unknown;
 	id?: unknown;
 	agent?: unknown;
 	timestamp?: unknown;
@@ -20,6 +21,8 @@ function asFiniteNumber(value: unknown): number | undefined {
 }
 
 export function buildCompletionKey(data: CompletionDataLike, fallback: string): string {
+	const runId = asNonEmptyString(data.runId);
+	if (runId) return `run:${runId}`;
 	const id = asNonEmptyString(data.id);
 	if (id) return `id:${id}`;
 	const sessionId = asNonEmptyString(data.sessionId) ?? "no-session";
@@ -44,6 +47,15 @@ function pruneSeenMap(seen: Map<string, number>, now: number, ttlMs: number): vo
 	for (const [key, ts] of seen.entries()) {
 		if (now - ts > ttlMs) seen.delete(key);
 	}
+}
+
+export function hasSeenWithTtl(seen: Map<string, number>, key: string, now: number, ttlMs: number): boolean {
+	pruneSeenMap(seen, now, ttlMs);
+	return seen.has(key);
+}
+
+export function recordSeen(seen: Map<string, number>, key: string, now: number): void {
+	seen.set(key, now);
 }
 
 export function markSeenWithTtl(seen: Map<string, number>, key: string, now: number, ttlMs: number): boolean {

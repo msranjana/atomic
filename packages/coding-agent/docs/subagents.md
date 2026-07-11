@@ -109,7 +109,7 @@ subagent({ action: "doctor" })
 
 Use `interrupt` when you want a resumable stop. Use `resume` to send a follow-up to a reachable async child, or to revive a completed child from its saved session when the run has enough metadata. Use `doctor` for read-only setup diagnostics.
 
-Background runs are detached. If Atomic has no useful independent work while a background subagent runs, it should end the turn instead of polling in a loop; the run will notify the originating session when it completes.
+Background runs are detached. Their acknowledgement explicitly says the run was launched and completion is pending: the launch tool call itself is terminal, while the detached child continues and will notify the originating session when it completes. If Atomic has no useful independent work in the meantime, it should end the turn instead of polling in a loop.
 
 When a workflow graph overlay is open, Atomic also publishes the live async subagent summary into the shared status surface. The below-editor async widget remains available when the workflow overlay is hidden, and the overlay statusline keeps the run count/state visible while the graph fills the terminal.
 
@@ -129,6 +129,8 @@ Fresh child processes use normal Atomic package discovery when an agent omits `e
 Top-level parallel calls support up to 50 subagents after expanding each task's optional `count`. The extension's `parallel.maxTasks` setting defaults to 50 and can enforce a lower task limit; `parallel.concurrency` independently controls how many of those children run at once.
 
 When a subagent call, parallel task, chain step, or background run uses a `cwd`, Atomic validates that working directory before starting the child runtime. Missing or non-directory paths are reported as `cwd` problems instead of lower-level process-spawn errors, so failures point at the requested child workspace rather than at the runtime binary.
+
+Single-agent calls also accept `reads: string[] | false`. Atomic prepends those files as read context for foreground and background execution through the same path resolver, including `/run agent[reads=a.md+b.md]`. Relative entries resolve against the effective child `cwd` (including a relative top-level `cwd` resolved from the parent); absolute entries are unchanged. Invalid values fail before either child runtime starts.
 
 ## Nested and fanout boundaries
 

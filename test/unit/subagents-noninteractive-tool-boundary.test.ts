@@ -116,6 +116,40 @@ function makeExecutor(
 	});
 }
 
+test("root single reads are schema-valid, cwd-correct, and identical in foreground and async modes", async () => {
+	const parentCwd = mkdtempSync(join(tmpdir(), "atomic-subagent-root-reads-"));
+	try {
+		const childCwd = join(parentCwd, "child");
+		const absoluteRead = join(parentCwd, "absolute.md");
+		const reads = ["docs/a.md", "../shared.md", absoluteRead];
+		assert.equal(Value.Check(SubagentParams, { agent: "worker", task: "fix it", cwd: "child", reads }), true);
+		assert.equal(Value.Check(SubagentParams, { agent: "worker", task: "fix it", reads: true }), false);
+		const captured: string[] = [];
+		const foreground = makeExecutor(parentCwd, [makeAgent("worker")], {
+			runSync: async (_cwd, _agents, agent, task) => { captured.push(task); return makeResult(agent, task); },
+		});
+		const background = makeExecutor(parentCwd, [makeAgent("worker")], {
+			isAsyncAvailable: () => true,
+			executeAsyncSingle: (_id, params) => {
+				captured.push(params.task ?? "");
+				return { content: [{ type: "text", text: "launched" }], details: { mode: "single", results: [] } };
+			},
+		}, true);
+		const context = makeContext(parentCwd, () => { throw new Error("unexpected prompt"); });
+		await foreground.execute("fg", { agent: "worker", task: "fix it", cwd: "child", reads }, new AbortController().signal, undefined, context);
+		await background.execute("bg", { agent: "worker", task: "fix it", cwd: "child", reads }, new AbortController().signal, undefined, context);
+		const expected = `[Read from: ${join(childCwd, "docs/a.md")}, ${join(parentCwd, "shared.md")}, ${absoluteRead}]\n\nfix it`;
+		assert.deepEqual(captured, [expected, expected]);
+		await foreground.execute("disabled", { agent: "worker", task: "plain", reads: false }, new AbortController().signal, undefined, context);
+		assert.equal(captured.at(-1), "plain");
+
+		const invalid = await foreground.execute("bad", { agent: "worker", task: "fix it", reads: ["ok", 3] as never }, new AbortController().signal, undefined, context);
+		assert.equal(invalid.isError, true);
+		assert.match(invalid.content[0]?.type === "text" ? invalid.content[0].text : "", /reads.*array.*strings.*false/i);
+	} finally {
+		rmSync(parentCwd, { recursive: true, force: true });
+	}
+});
 describe("programmatic subagent tool boundary", () => {
 	test("accepts supported output limits and rejects unknown fields", () => {
 		assert.equal(Value.Check(SubagentParams, {

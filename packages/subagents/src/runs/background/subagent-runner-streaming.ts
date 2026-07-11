@@ -1,7 +1,6 @@
 import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import type { Message } from "@earendil-works/pi-ai/compat";
-import { appendJsonl } from "../../shared/artifacts.ts";
 import { attachPostExitStdioGuard, trySignalChild } from "../../shared/post-exit-stdio-guard.ts";
 import { detectSubagentError, extractTextFromContent, extractToolArgsPreview, getFinalOutput } from "../../shared/utils.ts";
 import { getSubagentDepthEnv } from "../../shared/types.ts";
@@ -14,6 +13,7 @@ import {
 import { modelFailureMessage } from "../shared/model-fallback.ts";
 import { createAttemptWatchdog } from "../shared/attempt-watchdog.ts";
 import type { ChildEvent, ChildEventContext, RunPiStreamingResult } from "./subagent-runner-types.ts";
+import { createChildEventJournal } from "./async-event-journal.ts";
 import { emptyUsage } from "./subagent-runner-utils.ts";
 
 export function runPiStreaming(
@@ -57,6 +57,11 @@ export function runPiStreaming(
 			env: spawnEnv,
 			windowsHide: true,
 		});
+		const childEventJournal = createChildEventJournal(childEventContext?.eventsPath, child.stdout, {
+			runId: childEventContext?.runId ?? "",
+			stepIndex: childEventContext?.stepIndex,
+			agent: childEventContext?.agent ?? "",
+		});
 		let stderr = "";
 		let stdoutBuf = "";
 		let stderrBuf = "";
@@ -66,6 +71,7 @@ export function runPiStreaming(
 		let error: string | undefined;
 		let assistantError: string | undefined;
 		let assistantFailureSignal: unknown;
+		let spawnErrorText: string | undefined;
 		let interrupted = false;
 		let activeToolExecutions = 0;
 		const rawStdoutLines: string[] = [];
@@ -83,14 +89,7 @@ export function runPiStreaming(
 
 		const appendChildEvent = (event: Record<string, unknown> | ChildEvent) => {
 			if (!childEventContext) return;
-			appendJsonl(childEventContext.eventsPath, JSON.stringify({
-				...event,
-				subagentSource: "child",
-				subagentRunId: childEventContext.runId,
-				subagentStepIndex: childEventContext.stepIndex,
-				subagentAgent: childEventContext.agent,
-				observedAt: Date.now(),
-			}));
+			childEventJournal.append({ ...event });
 		};
 
 		const appendChildLine = (type: "subagent.child.stdout" | "subagent.child.stderr", line: string) => {
@@ -249,7 +248,7 @@ export function runPiStreaming(
 			childExited = true;
 			clearDrainTimers();
 		});
-		child.on("close", (exitCode, signal) => {
+		child.on("close", async (exitCode, signal) => {
 			settled = true;
 			registerInterrupt?.(undefined);
 			clearDrainTimers();
@@ -258,8 +257,9 @@ export function runPiStreaming(
 			if (stdoutBuf.trim()) processStdoutLine(stdoutBuf);
 			if (stderrBuf.trim()) appendChildLine("subagent.child.stderr", stderrBuf);
 			outputStream.end();
+			await childEventJournal.close();
 			const finalOutput = getFinalOutput(messages) || rawStdoutLines.join("\n").trim();
-			const finalError = error ?? assistantError;
+			const finalError = error ?? assistantError ?? spawnErrorText;
 			const forcedDrainAfterFinalSuccess = forcedTerminationSignal && cleanTerminalAssistantStopReceived && !finalError;
 			resolve({
 				stderr,
@@ -276,15 +276,19 @@ export function runPiStreaming(
 			});
 		});
 
-		child.on("error", (spawnError) => {
+		child.on("error", async (spawnError) => {
+			// Capture the diagnostic before awaiting journal drain: `close` may fire
+			// while this handler is suspended and win Promise settlement.
+			spawnErrorText = formatPiSpawnError(spawnError, spawnSpec, cwd);
 			settled = true;
 			registerInterrupt?.(undefined);
 			clearDrainTimers();
 			clearStdioGuard();
 			attemptWatchdog.clear();
 			outputStream.end();
+			await childEventJournal.close();
 			const finalOutput = getFinalOutput(messages) || rawStdoutLines.join("\n").trim();
-			const finalError = error ?? assistantError ?? formatPiSpawnError(spawnError, spawnSpec, cwd);
+			const finalError = error ?? assistantError ?? spawnErrorText;
 			resolve({
 				stderr,
 				exitCode: 1,

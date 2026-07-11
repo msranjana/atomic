@@ -9,6 +9,7 @@ import {
   getErrorMessage,
   parseSubagentIntercomPayload,
 } from "./intercom-utils.js";
+import { DeliveredMessageCache } from "./broker/delivered-message-cache.js";
 
 interface SubagentRelayDeps {
   runtimeGeneration(): number;
@@ -23,6 +24,7 @@ interface SubagentRelayDeps {
 
 export function registerSubagentRelay(pi: ExtensionAPI, deps: SubagentRelayDeps): void {
   const { getLiveContext, currentSessionTargetMatches, sendIncomingMessage, ensureConnected, resolveSessionTarget } = deps;
+  const localDeliveries = new DeliveredMessageCache();
   function deliverLocalSubagentRelayMessage(sender: "subagent-control" | "subagent-result", status: string, messageText: string): void {
     const now = Date.now();
     sendIncomingMessage({
@@ -60,6 +62,32 @@ export function registerSubagentRelay(pi: ExtensionAPI, deps: SubagentRelayDeps)
       ...(error ? { error: getErrorMessage(error) } : {}),
     });
   }
+  function acknowledgeResult(options: { acknowledge?: boolean }, requestId: string | undefined, delivered: boolean, error?: unknown): void {
+    if (options.acknowledge) emitResultDelivery(requestId, delivered, error);
+  }
+  function deliverLocal(
+    parsed: ReturnType<typeof parseSubagentIntercomPayload> & {},
+    options: { sender: "subagent-control" | "subagent-result"; status: string; errorEntryType: string; acknowledge?: boolean },
+  ): void {
+    try {
+      if (!parsed.requestId || !localDeliveries.has(parsed.requestId)) {
+        deliverLocalSubagentRelayMessage(options.sender, options.status, parsed.message);
+        if (parsed.requestId) localDeliveries.record(parsed.requestId);
+      }
+      acknowledgeResult(options, parsed.requestId, true);
+    } catch (error) {
+      try {
+        recordSubagentDeliveryError(options.errorEntryType, parsed.to, parsed.message, error);
+      } catch (recordError) {
+        console.error("Failed to record local subagent relay error:", recordError);
+      }
+      try {
+        acknowledgeResult(options, parsed.requestId, false, error);
+      } catch (ackError) {
+        console.error("Failed to acknowledge local subagent relay error:", ackError);
+      }
+    }
+  }
   function relaySubagentIntercomPayload(payload: unknown, options: {
     sender: "subagent-control" | "subagent-result";
     status: string;
@@ -73,11 +101,11 @@ export function registerSubagentRelay(pi: ExtensionAPI, deps: SubagentRelayDeps)
     void (async () => {
       const relayStillLive = () => !deps.runtimeStarted() || Boolean(getLiveContext(deps.runtimeContext(), relayGeneration));
       if (!relayStillLive()) {
+        acknowledgeResult(options, parsed.requestId, false);
         return;
       }
       if (currentSessionTargetMatches(parsed.to)) {
-        deliverLocalSubagentRelayMessage(options.sender, options.status, parsed.message);
-        if (options.acknowledge) emitResultDelivery(parsed.requestId, true);
+        deliverLocal(parsed, options);
         return;
       }
 
@@ -87,35 +115,47 @@ export function registerSubagentRelay(pi: ExtensionAPI, deps: SubagentRelayDeps)
         activeClient = await ensureConnected("background");
         target = await resolveSessionTarget(activeClient, parsed.to) ?? parsed.to;
       } catch (error) {
-        if (!relayStillLive()) return;
+        if (!relayStillLive()) {
+          acknowledgeResult(options, parsed.requestId, false, error);
+          return;
+        }
         recordSubagentDeliveryError(options.errorEntryType, parsed.to, parsed.message, error);
-        if (options.acknowledge) emitResultDelivery(parsed.requestId, false, error);
+        acknowledgeResult(options, parsed.requestId, false, error);
         return;
       }
 
       if (!relayStillLive()) {
+        acknowledgeResult(options, parsed.requestId, false);
         return;
       }
       if (currentSessionTargetMatches(parsed.to, target, activeClient)) {
-        deliverLocalSubagentRelayMessage(options.sender, options.status, parsed.message);
-        if (options.acknowledge) emitResultDelivery(parsed.requestId, true);
+        deliverLocal(parsed, options);
         return;
       }
 
       try {
-        const result = await activeClient.send(target, { text: parsed.message });
-        if (!relayStillLive()) return;
+        const result = await activeClient.send(target, {
+          text: parsed.message,
+          ...(parsed.requestId ? { messageId: parsed.requestId } : {}),
+        });
+        if (!relayStillLive()) {
+          acknowledgeResult(options, parsed.requestId, result.delivered);
+          return;
+        }
         if (!result.delivered) {
           const error = new Error(result.reason ?? "Session may not exist or has disconnected.");
           recordSubagentDeliveryError(options.errorEntryType, parsed.to, parsed.message, error);
-          if (options.acknowledge) emitResultDelivery(parsed.requestId, false, error);
+          acknowledgeResult(options, parsed.requestId, false, error);
           return;
         }
-        if (options.acknowledge) emitResultDelivery(parsed.requestId, true);
+        acknowledgeResult(options, parsed.requestId, true);
       } catch (error) {
-        if (!relayStillLive()) return;
+        if (!relayStillLive()) {
+          acknowledgeResult(options, parsed.requestId, false, error);
+          return;
+        }
         recordSubagentDeliveryError(options.errorEntryType, parsed.to, parsed.message, error);
-        if (options.acknowledge) emitResultDelivery(parsed.requestId, false, error);
+        acknowledgeResult(options, parsed.requestId, false, error);
       }
     })();
   }

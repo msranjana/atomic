@@ -29,7 +29,7 @@ import {
 	type ArtifactConfig,
 	type SubagentToolResult,
 } from "../../shared/types.ts";
-import { isParallelStep as isSettingsParallelStep, type SequentialStep } from "../../shared/settings.ts";
+import { buildReadInstruction, isParallelStep as isSettingsParallelStep, type SequentialStep } from "../../shared/settings.ts";
 import type { ExecutionContextBuildResult, ExecutorDeps, ResolvedExecutorDeps, SubagentParamsLike } from "./subagent-executor-types.ts";
 import {
 	applyAgentDefaultContext,
@@ -108,6 +108,10 @@ export function prepareExecutionContext(input: {
 		hasSingle,
 	);
 	if (validationError) return { error: validationError };
+	if (hasSingle) {
+		const readInstruction = buildReadInstruction(effectiveParams.reads, effectiveCwd);
+		if (readInstruction) effectiveParams = { ...effectiveParams, task: `${readInstruction}\n\n${effectiveParams.task ?? ""}` };
+	}
 
 	let sessionFileForIndex: (idx?: number) => string | undefined = () => undefined;
 	try {

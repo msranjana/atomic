@@ -158,8 +158,9 @@ describe("human subagent slash command bridge", () => {
 
 			assert.deepEqual(params, {
 				agent: "slash-alpha",
-				task: "[Read from: notes.md, spec.md]\n\nfix the bug",
+				task: "fix the bug",
 				agentScope: "both",
+				reads: ["notes.md", "spec.md"],
 				output: "reports/run.md",
 				outputMode: "file-only",
 				skill: ["tdd", "tmux"],

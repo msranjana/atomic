@@ -48,6 +48,7 @@ export interface SubagentParamsLike {
 	skill?: string | string[] | boolean;
 	output?: string | boolean;
 	outputMode?: "inline" | "file-only";
+	reads?: string[] | false;
 	agentScope?: string;
 	chainDir?: string;
 }

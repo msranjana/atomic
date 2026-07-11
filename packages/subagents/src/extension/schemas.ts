@@ -35,6 +35,14 @@ const ReadsOverride = Type.Unsafe({
 	description: "Files to read before running (array of filenames), or false to disable",
 });
 
+const RootReadsOverride = Type.Unsafe({
+	anyOf: [
+		{ type: "array", items: { type: "string" } },
+		{ type: "boolean", enum: [false] },
+	],
+	description: "Files for a single agent to read before running, or false to disable. Relative paths resolve against the effective child cwd.",
+});
+
 const JsonSchemaObject = Type.Unsafe({
 	type: "object",
 	additionalProperties: true,
@@ -226,6 +234,7 @@ export const SubagentParams = Type.Object({
 		description: "Output file for single agent (string), or false to disable. Relative paths resolve against cwd.",
 	})),
 	outputMode: Type.Optional(OutputModeOverride),
+	reads: Type.Optional(RootReadsOverride),
 	skill: Type.Optional(SkillOverride),
 	model: Type.Optional(Type.String({ description: "Override model for single agent (e.g. 'anthropic/claude-sonnet-4')" })),
 }, { additionalProperties: false });

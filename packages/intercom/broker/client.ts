@@ -4,6 +4,7 @@ import { randomUUID } from "crypto";
 import { writeMessage, createMessageReader } from "./framing.js";
 import { getBrokerSocketPath } from "./paths.js";
 import type { SessionInfo, Message, Attachment } from "../types.js";
+import { buildSendSignature, PendingSendRegistry } from "./pending-send-registry.js";
 
 const BROKER_SOCKET = getBrokerSocketPath();
 
@@ -107,19 +108,14 @@ function isSessionInfo(value: unknown): value is SessionInfo {
 export class IntercomClient extends EventEmitter {
   private socket: net.Socket | null = null;
   private _sessionId: string | null = null;
-  private pendingSends = new Map<string, { resolve: (r: SendResult) => void; reject: (e: Error) => void }>();
+  private pendingSends = new PendingSendRegistry();
   private pendingLists = new Map<string, { resolve: (sessions: SessionInfo[]) => void; reject: (e: Error) => void }>();
   private disconnecting = false;
   private disconnectError: Error | null = null;
 
   private failPending(error: Error): void {
-    for (const pending of this.pendingSends.values()) {
-      pending.reject(error);
-    }
-    this.pendingSends.clear();
-    for (const pending of this.pendingLists.values()) {
-      pending.reject(error);
-    }
+    this.pendingSends.rejectAll(error);
+    for (const pending of this.pendingLists.values()) pending.reject(error);
     this.pendingLists.clear();
   }
 
@@ -314,31 +310,23 @@ export class IntercomClient extends EventEmitter {
         break;
       }
       case "delivered": {
-        const { messageId } = brokerMessage;
-        if (typeof messageId !== "string") {
+        const { messageId, attemptId } = brokerMessage;
+        if (typeof messageId !== "string" || (attemptId !== undefined && typeof attemptId !== "string")) {
           throw new Error("Invalid delivered message");
         }
-        const pending = this.pendingSends.get(messageId);
-        if (!pending) {
-          // Late send responses are harmless once the caller has already timed out.
-          return;
-        }
-        this.pendingSends.delete(messageId);
-        pending.resolve({ id: messageId, delivered: true });
+        const result = { id: messageId, delivered: true } as const;
+        if (attemptId === undefined) this.pendingSends.resolveLegacy(messageId, result);
+        else this.pendingSends.resolve(messageId, attemptId, result);
         break;
       }
       case "delivery_failed": {
-        const { messageId, reason } = brokerMessage;
-        if (typeof messageId !== "string" || typeof reason !== "string") {
+        const { messageId, attemptId, reason } = brokerMessage;
+        if (typeof messageId !== "string" || (attemptId !== undefined && typeof attemptId !== "string") || typeof reason !== "string") {
           throw new Error("Invalid delivery_failed message");
         }
-        const pending = this.pendingSends.get(messageId);
-        if (!pending) {
-          // Late send responses are harmless once the caller has already timed out.
-          return;
-        }
-        this.pendingSends.delete(messageId);
-        pending.resolve({ id: messageId, delivered: false, reason });
+        const result = { id: messageId, delivered: false, reason } as const;
+        if (attemptId === undefined) this.pendingSends.resolveLegacy(messageId, result);
+        else this.pendingSends.resolve(messageId, attemptId, result);
         break;
       }
       case "session_joined": {
@@ -452,40 +440,27 @@ export class IntercomClient extends EventEmitter {
       return Promise.reject(toError(error));
     }
     const messageId = options.messageId ?? randomUUID();
+    let acquired;
+    try {
+      acquired = this.pendingSends.acquire(messageId, buildSendSignature(to, options), 10000);
+    } catch (error) {
+      return Promise.reject(toError(error));
+    }
+    if (!acquired.owner) return acquired.attempt.promise;
+
     const message: Message = {
       id: messageId,
       timestamp: Date.now(),
       replyTo: options.replyTo,
       expectsReply: options.expectsReply,
-      content: {
-        text: options.text,
-        attachments: options.attachments,
-      },
+      content: { text: options.text, attachments: options.attachments },
     };
-    return new Promise((resolve, reject) => {
-      const wrappedResolve = (result: SendResult) => {
-        clearTimeout(timeout);
-        resolve(result);
-      };
-      const wrappedReject = (error: Error) => {
-        clearTimeout(timeout);
-        reject(error);
-      };
-      const timeout = setTimeout(() => {
-        if (this.pendingSends.has(messageId)) {
-          this.pendingSends.delete(messageId);
-          wrappedReject(new Error("Send timeout"));
-        }
-      }, 10000);
-      this.pendingSends.set(messageId, { resolve: wrappedResolve, reject: wrappedReject });
-      try {
-        writeMessage(socket, { type: "send", to, message });
-      } catch (error) {
-        clearTimeout(timeout);
-        this.pendingSends.delete(messageId);
-        reject(toError(error));
-      }
-    });
+    try {
+      writeMessage(socket, { type: "send", to, message, attemptId: acquired.attempt.attemptId });
+    } catch (error) {
+      this.pendingSends.reject(acquired.attempt, toError(error));
+    }
+    return acquired.attempt.promise;
   }
   updatePresence(updates: { name?: string; status?: string; model?: string }): void {
     if (this.disconnecting) {

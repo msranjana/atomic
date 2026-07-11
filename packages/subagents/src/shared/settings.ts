@@ -290,11 +290,11 @@ export function suppressProgressForReadOnlyTask(behavior: ResolvedStepBehavior, 
 // Chain Instruction Injection
 // =============================================================================
 
-/**
- * Resolve a file path: absolute paths pass through, relative paths get chainDir prepended.
- */
-function resolveChainPath(filePath: string, chainDir: string): string {
-	return path.isAbsolute(filePath) ? filePath : path.join(chainDir, filePath);
+/** Build the common read prefix, resolving relative paths against the child's effective cwd. */
+export function buildReadInstruction(reads: string[] | false | undefined, cwd: string): string {
+	if (!reads || reads.length === 0) return "";
+	const files = reads.map((file) => path.resolve(cwd, file));
+	return `[Read from: ${files.join(", ")}]`;
 }
 
 /**
@@ -315,14 +315,12 @@ export function buildChainInstructions(
 	const suffixParts: string[] = [];
 
 	// READS - prepend to override any hardcoded filenames in task text
-	if (behavior.reads && behavior.reads.length > 0) {
-		const files = behavior.reads.map((f) => resolveChainPath(f, chainDir));
-		prefixParts.push(`[Read from: ${files.join(", ")}]`);
-	}
+	const readInstruction = buildReadInstruction(behavior.reads, chainDir);
+	if (readInstruction) prefixParts.push(readInstruction);
 
 	// OUTPUT - prepend so agent knows where to write
 	if (behavior.output) {
-		const outputPath = resolveChainPath(behavior.output, chainDir);
+		const outputPath = path.isAbsolute(behavior.output) ? behavior.output : path.join(chainDir, behavior.output);
 		prefixParts.push(`[Write to: ${outputPath}]`);
 	}
 

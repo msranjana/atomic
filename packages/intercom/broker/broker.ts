@@ -4,6 +4,7 @@ import { randomUUID } from "crypto";
 import { writeMessage, createMessageReader } from "./framing.js";
 import { getBrokerPidPath, getBrokerSocketPath, getIntercomDirPath } from "./paths.js";
 import type { SessionInfo, Message, Attachment, BrokerMessage } from "../types.js";
+import { DeliveredMessageCache } from "./delivered-message-cache.js";
 
 const INTERCOM_DIR = getIntercomDirPath();
 const SOCKET_PATH = getBrokerSocketPath();
@@ -96,6 +97,7 @@ class IntercomBroker {
   private sessions = new Map<string, ConnectedSession>();
   private server: net.Server;
   private shutdownTimer: NodeJS.Timeout | null = null;
+  private deliveredMessages = new DeliveredMessageCache();
 
   constructor() {
     mkdirSync(INTERCOM_DIR, { recursive: true });
@@ -219,13 +221,20 @@ class IntercomBroker {
       case "send": {
         const message = clientMessage.message;
         const messageId = isMessage(message) ? message.id : "unknown";
+        const attemptId = typeof clientMessage.attemptId === "string" ? clientMessage.attemptId : undefined;
 
         if (typeof clientMessage.to !== "string" || !isMessage(message)) {
           writeMessage(socket, {
             type: "delivery_failed",
             messageId,
+            attemptId,
             reason: "Invalid message format",
           });
+          break;
+        }
+
+        if (this.deliveredMessages.has(message.id)) {
+          writeMessage(socket, { type: "delivered", messageId: message.id, attemptId });
           break;
         }
 
@@ -236,6 +245,7 @@ class IntercomBroker {
             writeMessage(socket, {
               type: "delivery_failed",
               messageId: message.id,
+              attemptId,
               reason: "Sender session not found",
             });
             break;
@@ -245,7 +255,8 @@ class IntercomBroker {
             from: fromSession.info,
             message,
           });
-          writeMessage(socket, { type: "delivered", messageId: message.id });
+          this.deliveredMessages.record(message.id);
+          writeMessage(socket, { type: "delivered", messageId: message.id, attemptId });
           break;
         }
 
@@ -253,6 +264,7 @@ class IntercomBroker {
           writeMessage(socket, {
             type: "delivery_failed",
             messageId: message.id,
+            attemptId,
             reason: `Multiple sessions named \"${clientMessage.to}\" are connected. Use the session ID instead.`,
           });
           break;
@@ -261,6 +273,7 @@ class IntercomBroker {
         writeMessage(socket, {
           type: "delivery_failed",
           messageId: message.id,
+          attemptId,
           reason: "Session not found",
         });
         break;

@@ -61,6 +61,13 @@ export function renderSubagentResult(
 	theme: Theme,
 ): Component {
 	const d = result.details;
+	if (d?.asyncId && d.results.length === 0) {
+		const contextPrefix = d.context === "fork" ? `${theme.fg("warning", "[fork]")} ` : "";
+		const container = new Container();
+		container.addChild(new Text(`${contextPrefix}${theme.fg("success", "launched")} · async run ${d.asyncId}`, 0, 0));
+		container.addChild(new Text(theme.fg("dim", "completion pending; the detached result will be delivered when it finishes"), 0, 0));
+		return container;
+	}
 	if (!d || !d.results.length) {
 		const t = result.content[0];
 		const text = t?.type === "text" ? t.text : "(no output)";

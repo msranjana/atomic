@@ -59,10 +59,11 @@ const jitiCliPath = resolveJitiCliPath();
 
 export function formatAsyncStartedMessage(headline: string): string {
 	return [
-		headline,
+		`Launched: ${headline}`,
+		"Completion pending; Pi will deliver the result when the detached run finishes.",
 		"",
 		"The async run is detached. Do not run sleep timers or polling loops just to wait for it.",
-		"If you have independent work, continue that work. If you have nothing else to do until the async result arrives, end your turn now; Pi will deliver the completion when the run finishes.",
+		"If you have independent work, continue that work. If you have nothing else to do until the async result arrives, end your turn now.",
 		"Use subagent({ action: \"status\", id: \"...\" }) when you need the current status/result, or to inspect a blocked/stale run. Do not poll just to wait.",
 	].join("\n");
 }

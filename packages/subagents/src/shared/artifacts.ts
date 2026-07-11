@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { getAgentConfigPaths } from "@bastani/atomic";
+import { appendToActiveEventWriter } from "./event-jsonl-writer.ts";
 import { TEMP_ARTIFACTS_DIR, type ArtifactPaths } from "./types.ts";
 const CLEANUP_MARKER_FILE = ".last-cleanup";
 
@@ -37,7 +38,7 @@ export function writeMetadata(filePath: string, metadata: object): void {
 }
 
 export function appendJsonl(filePath: string, line: string): void {
-	fs.appendFileSync(filePath, `${line}\n`);
+	if (!appendToActiveEventWriter(filePath, line)) fs.appendFileSync(filePath, `${line}\n`);
 }
 
 export function cleanupOldArtifacts(dir: string, maxAgeDays: number): void {

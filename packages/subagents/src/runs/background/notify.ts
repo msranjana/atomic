@@ -3,7 +3,8 @@
  */
 
 import type { ExtensionAPI } from "@bastani/atomic";
-import { buildCompletionKey, markSeenWithTtl } from "./completion-dedupe.ts";
+import { buildCompletionKey, hasSeenWithTtl, recordSeen } from "./completion-dedupe.ts";
+import type { CompletionNotificationEnvelope } from "./completion-notification.ts";
 import { SUBAGENT_ASYNC_COMPLETE_EVENT } from "../../shared/types.ts";
 
 interface ChainStepResult {
@@ -89,11 +90,13 @@ export default function registerSubagentNotify(pi: ExtensionAPI): () => void {
 	let registration: NotifyRegistration;
 	const handleComplete = (data: unknown) => {
 		if (registry.get(pi) !== registration) return;
-		const result = data as SubagentResult;
+		const result = data as SubagentResult & Partial<CompletionNotificationEnvelope>;
 		const now = Date.now();
-		const key = buildCompletionKey(result, "notify");
-		if (markSeenWithTtl(seen, key, now, ttlMs)) return;
-
+		const key = result.notificationId ? `notification:${result.notificationId}` : buildCompletionKey(result, "notify");
+		if (hasSeenWithTtl(seen, key, now, ttlMs)) {
+			result.acknowledge?.(true);
+			return;
+		}
 		const agent = result.agent ?? "unknown";
 		const summary = typeof result.summary === "string" ? result.summary : "";
 		const paused = !result.success && (
@@ -127,14 +130,21 @@ export default function registerSubagentNotify(pi: ExtensionAPI): () => void {
 			.filter((line) => line !== undefined)
 			.join("\n");
 
-		pi.sendMessage(
-			{
-				customType: "subagent-notify",
-				content,
-				display: true,
-			},
-			{ triggerTurn: true },
-		);
+		try {
+			pi.sendMessage(
+				{
+					customType: "subagent-notify",
+					content,
+					display: true,
+				},
+				{ triggerTurn: true },
+			);
+			recordSeen(seen, key, Date.now());
+			result.acknowledge?.(true);
+		} catch (error) {
+			result.acknowledge?.(false);
+			console.error("Failed to deliver async subagent completion notification:", error);
+		}
 	};
 
 	const unsubscribe = pi.events.on(SUBAGENT_ASYNC_COMPLETE_EVENT, handleComplete);
