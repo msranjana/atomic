@@ -116,6 +116,16 @@ function takeProviderBlock(
 	return { block: undefined, nextProviderIndex: providerIndex };
 }
 
+function nonThinkingBlocksAlign(message: AssistantMessage, providerBlocks: readonly AnthropicContentBlock[]): boolean {
+	const sourceTypes = message.content.flatMap((block) => {
+		if (!isObject(block) || typeof block.type !== "string") return [];
+		if (block.type === "text") return typeof block.text === "string" && block.text.trim().length > 0 ? ["text"] : [];
+		return block.type === "toolCall" ? ["tool_use"] : [];
+	});
+	const providerTypes = providerBlocks.filter((block) => !isThinkingLikeAnthropicBlock(block)).map((block) => block.type);
+	return sourceTypes.length === providerTypes.length && sourceTypes.every((type, index) => type === providerTypes[index]);
+}
+
 function repairAssistantContent(
 	originalMessage: AssistantMessage,
 	providerBlocks: readonly AnthropicContentBlock[],
@@ -206,19 +216,23 @@ export function restoreAnthropicReplayThinkingBlocks(payload: unknown, sourceMes
 
 	if (assistantPayloads.length === 0) return payload;
 
+	const emittingSourceAssistants = sourceMessages.filter(
+		(message): message is AssistantMessage => message.role === "assistant" && legacyProviderWouldEmitAssistant(message, model),
+	);
+	// Fail closed if pi-ai's converter emission behavior drifts from the model above;
+	// ordinal restoration must never splice thinking into a different assistant.
+	if (emittingSourceAssistants.length !== assistantPayloads.length) return payload;
+
 	const allowEmptySignature = isObject(model.compat) && model.compat.allowEmptySignature === true;
-	let assistantPayloadOrdinal = 0;
 	let nextPayloadMessages: unknown[] | undefined;
 
-	for (const sourceMessage of sourceMessages) {
-		if (sourceMessage.role !== "assistant") continue;
-		if (!legacyProviderWouldEmitAssistant(sourceMessage, model)) continue;
-
+	for (const [assistantPayloadOrdinal, sourceMessage] of emittingSourceAssistants.entries()) {
 		const payloadAssistant = assistantPayloads[assistantPayloadOrdinal];
-		assistantPayloadOrdinal += 1;
-		if (!payloadAssistant) break;
 
 		if (!isSameModelAssistant(sourceMessage, model) || !hasReplayThinkingBlock(sourceMessage, allowEmptySignature)) continue;
+		// A second fail-closed guard verifies the non-thinking shape before replacing
+		// signed blocks, protecting against equal-count ordinal misalignment.
+		if (!nonThinkingBlocksAlign(sourceMessage, payloadAssistant.content)) continue;
 
 		const repairedContent = repairAssistantContent(sourceMessage, payloadAssistant.content, allowEmptySignature);
 		if (JSON.stringify(repairedContent) === JSON.stringify(payloadAssistant.content)) continue;

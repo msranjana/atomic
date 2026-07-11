@@ -155,6 +155,8 @@ export function formatProtectedToolDependencyError(
 	return `${context} ${protectedMessage}`;
 }
 
+// Keep legacy protection phrases recognizable for callers handling errors
+// produced by older compaction plans and extension versions.
 export function isProtectedContextDeletionErrorMessage(message: string): boolean {
 	return (
 		/\bprotected\b/i.test(message) ||

@@ -41,29 +41,18 @@ export function recentAssistantEntries(prefix: string, count = 2): CompactableTr
 	});
 }
 function protectedUserEntry(entryId: string): CompactableTranscript["entries"][number] {
-	const text = "Current task starts a new turn.";
+	const text = "Keep the user's task protected.";
 	return {
-		entryId, entryType: "message", role: "user", text, tokenEstimate: 4, protected: true,
+		entryId, entryType: "message", role: "user", text, tokenEstimate: 8, protected: true,
 		contentBlocks: [], message: userMessage(text), toolCallIds: [],
 	};
 }
 export function createTranscript(): CompactableTranscript {
-	const task = userMessage("Keep the user's task protected.");
 	const oldOne = assistantMessage("Old search output that can be deleted.");
 	const oldTwo = assistantMessage("Old file read that can be deleted.");
 	const recentEntries = recentAssistantEntries("entry-recent");
 	const entries: CompactableTranscript["entries"] = [
-			{
-				entryId: "entry-user",
-				entryType: "message",
-				role: "user",
-				text: "Keep the user's task protected.",
-				tokenEstimate: 8,
-				protected: true,
-				contentBlocks: [],
-				message: task,
-				toolCallIds: [],
-			},
+		protectedUserEntry("entry-user"),
 			{
 				entryId: "entry-old-1",
 				entryType: "message",

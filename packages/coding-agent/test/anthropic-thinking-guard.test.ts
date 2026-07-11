@@ -333,6 +333,80 @@ describe("restoreAnthropicReplayThinkingBlocks", () => {
 		expect(JSON.stringify(capturedPayload).match(/opaque-second-only/g)).toHaveLength(1);
 	});
 
+	it("fails closed when emitting source and payload assistant counts differ", () => {
+		const sourceMessages: Message[] = [
+			assistantMessage([{ type: "thinking", thinking: "first exact", thinkingSignature: "sig-first" }]),
+			assistantMessage([{ type: "thinking", thinking: "second exact", thinkingSignature: "sig-second" }]),
+		];
+		const payload = {
+			messages: [{ role: "assistant", content: [{ type: "thinking", thinking: "sanitized", signature: "sig-first" }] }],
+		};
+
+		const restored = restoreAnthropicReplayThinkingBlocks(payload, sourceMessages, anthropicModel());
+
+		expect(restored).toBe(payload);
+	});
+
+	it("fails closed when a source assistant non-thinking shape does not match its payload ordinal", () => {
+		const sourceMessages: Message[] = [
+			assistantMessage([
+				{ type: "thinking", thinking: "exact", thinkingSignature: "sig-exact" },
+				{ type: "text", text: "expected text" },
+			]),
+		];
+		const payload = {
+			messages: [
+				{
+					role: "assistant",
+					content: [
+						{ type: "thinking", thinking: "sanitized", signature: "sig-exact" },
+						{ type: "tool_use", id: "wrong", name: "read", input: {} },
+					],
+				},
+			],
+		};
+
+		const restored = restoreAnthropicReplayThinkingBlocks(payload, sourceMessages, anthropicModel());
+
+		expect(restored).toBe(payload);
+	});
+
+	it("skips non-emitting error assistants without shifting the payload ordinal", () => {
+		const failed = {
+			...assistantMessage([{ type: "thinking", thinking: "failed exact", thinkingSignature: "sig-failed" }]),
+			stopReason: "error",
+		} as AssistantMessage;
+		const valid = assistantMessage([
+			{ type: "thinking", thinking: "valid exact", thinkingSignature: "sig-valid" },
+			{ type: "text", text: "visible" },
+		]);
+		const payload = {
+			messages: [
+				{
+					role: "assistant",
+					content: [
+						{ type: "thinking", thinking: "sanitized", signature: "sig-valid" },
+						{ type: "text", text: "visible" },
+					],
+				},
+			],
+		};
+
+		const restored = restoreAnthropicReplayThinkingBlocks(payload, [failed, valid], anthropicModel());
+
+		expect(restored).toEqual({
+			messages: [
+				{
+					role: "assistant",
+					content: [
+						{ type: "thinking", thinking: "valid exact", signature: "sig-valid" },
+						{ type: "text", text: "visible" },
+					],
+				},
+			],
+		});
+	});
+
 	it("leaves cross-model assistant thinking converted by the provider unchanged", () => {
 		const crossModelAssistant = {
 			...assistantMessage([{ type: "thinking", thinking: "old thinking", thinkingSignature: "sig-old" }]),
