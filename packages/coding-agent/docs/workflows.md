@@ -37,6 +37,7 @@ Loop or stop-condition phrasing is an especially strong workflow signal: `do X u
 - [Built-in Workflows](#built-in-workflows)
 - [When to Use Workflows](#when-to-use-workflows)
 - [Workflow Starter Patterns](#workflow-starter-patterns)
+- [Choosing an Execution Shape](#choosing-an-execution-shape)
 - [Atomic vs Claude Code Dynamic Workflows](#atomic-vs-claude-code-dynamic-workflows)
 - [Workflow Locations](#workflow-locations)
 - [Workflow Configuration](#workflow-configuration)
@@ -246,7 +247,7 @@ Write the `objective` like a compact acceptance spec. Say what should exist when
 
 Goal worker/reviewer prompts treat the objective and acceptance criteria as the sole literal source of truth: if follow-up deltas, language specs, upstream issues, in-repo comments, or best practices conflict with explicit wording, reviewers surface the conflict instead of silently implementing external knowledge. Reviewer findings carry `objective_alignment` (`required_by_objective`, `consistent_with_objective`, `beyond_objective`, or `contradicts_objective`); `beyond_objective` and `contradicts_objective` findings are reported but do not block completion and must not be promoted into follow-up objectives without reconciling them against the acceptance criteria. Severity labels alone never dismiss objective-relevant findings: `required_by_objective` findings block at any priority (P3 included), while `consistent_with_objective` P3 nice-to-haves stay non-blocking. Review decisions also include `requirements_traceability`, a clause-by-clause evidence map over every explicit objective/acceptance-criteria requirement. Goal approval requires that map to be non-empty and fully `proven` except for a missing PR/MR/review row when `create_pr=true` and that final handoff is the only remaining action; passing worker-authored tests or snapshots alone is circular evidence unless tied to independent current-state proof.
 
-The worker may claim readiness, but it cannot finalize completion. Workers start from an observable acceptance/contract matrix derived from the literal objective/acceptance criteria (one row per clause, each mapped to the concrete check that proves it), and are prompted to model states, transitions, and invariants explicitly when the work is stateful. Reviewer findings from the latest round are consolidated into a deduplicated cross-reviewer batch persisted in the round artifact (`consolidated_findings` in `review-round-latest.json`), and the next worker turn is instructed to plan and repair the whole batch — with durable regression evidence for reproduced findings — rather than fixing one finding per turn. Workers and reviewers are prompted to verify user-visible behavior end-to-end when practical, using `playwright-cli`-skilled subagents for web/frontend flows that may depend on backend/API behavior and tmux-skilled subagents for TUI or terminal-app scenarios. They must assume credentials/auth/environment access exists until concrete checks plus an actual app/flow launch attempt prove otherwise; skipped E2E is valid only when exact attempted commands and observed failure output are recorded. Goal reviewers also look for any QA E2E video referenced by the ledger or receipt and must inspect the actual video before treating it as proof. Three reviewers independently inspect the ledger, worker receipt, repository state, and diff against `base_branch`; each is instructed to first derive its own adversarial check list from the literal contract — boundary/edge/negative probes plus state/transition/invariant probes — before relying on the worker receipt or worker-authored tests, and each returns structured JSON with findings, evidence, verification still remaining, and an optional blocker. A TypeScript reducer marks the goal complete only when reviewer quorum approves and evidence closure holds (no unresolved objective-relevant blocking finding from any reviewer in the round), marks blocked only when the same dependency/tool blocker repeats for the blocker threshold, continues when evidence is missing or closure fails (recording the unresolved findings in the decision reason), and returns `needs_human` when `max_turns` is exhausted or worker execution fails, so the bounded loop always stops with an inspectable reason.
+The worker may claim readiness, but it cannot finalize completion. Workers start from an observable acceptance/contract matrix derived from the literal objective/acceptance criteria (one row per clause, each mapped to the concrete check that proves it), and are prompted to model states, transitions, and invariants explicitly when the work is stateful. Reviewer findings from the latest round are consolidated into a deduplicated cross-reviewer batch persisted in the round artifact (`consolidated_findings` in `review-round-latest.json`), and the next worker turn is instructed to plan and repair the whole batch — with durable regression evidence for reproduced findings — rather than fixing one finding per turn. Workers and reviewers are prompted to verify user-visible behavior end-to-end when practical, using `playwright-cli`-skilled subagents for web/frontend flows that may depend on backend/API behavior and tmux-skilled subagents for TUI or terminal-app scenarios. They must assume credentials/auth/environment access exists until concrete checks plus an actual app/flow launch attempt prove otherwise; skipped E2E is valid only when exact attempted commands and observed failure output are recorded. Goal reviewers also look for any QA E2E video referenced by the ledger or receipt and must inspect the actual video before treating it as proof. Three reviewers independently inspect the ledger, worker receipt, repository state, and diff against `base_branch`; each starts in a clean, non-forked context, matching Ralph's reviewer context behavior, and every Goal reviewer uses Ralph's `reviewer-a` model chain with Claude Fable 5 as the primary model. Each reviewer is instructed to first derive its own adversarial check list from the literal contract — boundary/edge/negative probes plus state/transition/invariant probes — before relying on the worker receipt or worker-authored tests, and each returns structured JSON with findings, evidence, verification still remaining, and an optional blocker. A TypeScript reducer marks the goal complete only when reviewer quorum approves and evidence closure holds (no unresolved objective-relevant blocking finding from any reviewer in the round), marks blocked only when the same dependency/tool blocker repeats for the blocker threshold, continues when evidence is missing or closure fails (recording the unresolved findings in the decision reason), and returns `needs_human` when `max_turns` is exhausted or worker execution fails, so the bounded loop always stops with an inspectable reason.
 
 When Goal's reducer returns `needs_human`, `blocked`, or another incomplete status, the top-level workflow run is not reported as a successful completion. `/workflow status` and lifecycle notices surface it as blocked/failed according to the run's terminal condition. Atomic also preserves structured recoverable failure metadata from the run's blocking stage (`failedStageId`) or run-level failure metadata, so auth, rate-limit, and provider fallback exhaustion remains blocked/resumable even if the workflow later returns ordinary outputs instead of a reserved `status` value. Tolerated branch failures from non-fail-fast parallel work do not reclassify an otherwise completed run.
 
@@ -614,6 +615,98 @@ Best practices:
 - Pick **loop until done** when the workflow should continue until evidence says it is finished, not until a preselected number of stages completes.
 
 Record the selected pattern in your spec or workflow README, then adapt the diagram to the actual stage graph. If the final design does not resemble any starter pattern, explain why in the workflow's design notes.
+
+## Choosing an Execution Shape
+
+"Use a workflow" is not one decision — it is a ladder of execution shapes with different costs and guarantees. This section is written as agent-facing guidance: it is the self-prompt an orchestrating agent should run before the first tool call on a new request, and it doubles as documentation for humans who want to steer that choice explicitly.
+
+The shapes, cheapest first:
+
+| Shape | What it is | Guarantees you gain | Cost you pay |
+|---|---|---|---|
+| **Inline** | Answer or edit directly in the current session. | Lowest latency, zero ceremony. | No tracking, no gates, no isolation, easy to drift. |
+| **Inline + subagents** | Bounded specialist delegation (locate/analyze/research/debug passes, noisy command investigation, parallel read-only fanouts) while the parent keeps control and synthesizes. | Context isolation for noisy or parallel evidence-gathering. | No completion gate, no durable stages; the parent is the only reviewer. |
+| **Direct one-off shapes** | `workflow({ task })`, `workflow({ tasks })`, or `workflow({ chain })` without saving a definition. | Stage tracking, artifacts, model fallbacks, monitoring, resume. | Linear/parallel control flow only; no custom branching or loops. |
+| **Named workflows** | Installed builtin, project, user, or package workflows (`goal`, `ralph`, `deep-research-codebase`, `open-claude-design`, ...). | A proven graph: bounded loops, reviewer gates, ledgers, evidence contracts, tuned model chains. | The task must actually match the graph's objective and inputs. |
+| **Custom workflow** | A task-specific TypeScript `workflow({...})` authored inline, composing the starter patterns. | Exactly the control flow the task needs: runtime branching, dynamic fan-out, custom gates, tournaments, bounded loops. | Authoring and reload time; you own the design quality. |
+| **Composed/nested workflows** | A custom parent that imports proven definitions and calls `ctx.workflow(child)`. | Reuse of hardened children (research, review loops) inside custom control flow, within `maxDepth`. | Parent/child input-output contracts must be mapped deliberately. |
+
+### The self-prompt
+
+Ask these questions in order and stop at the first shape that satisfies every remaining requirement. Decide before the first tool call and state the decision; reconnaissance already counts as inline execution.
+
+1. **Is the outcome provable?** If success can be stated as evidence (tests green, artifact exists, behavior demonstrated, reviewer approves), the task is workflow-shaped. If no proof is possible or needed, inline is probably fine.
+2. **Is there structure?** Multiple subtasks, dependencies, handoffs, or parallel slices push past inline. A single focused evidence-gathering pass does not.
+3. **Is there a loop or gate?** Any "until Y", "fix until passing", review/approval gate, or unknown-length repair cycle requires an engine that owns the stop condition — a workflow, never an improvised inline retry loop or a stretched subagent chain.
+4. **Is it one task or a queue of tasks?** "Address all open issues" or "fix every ticket assigned to me" is a factory request, not one workflow. Enumerate and dependency-classify the items first, then follow [Task queues and software factories](#task-queues-and-software-factories): independent items become separate per-item runs; dependent items share one composed graph.
+5. **Does an installed graph already fit?** If a named workflow's objective and inputs cover essentially the whole task, run it. Do not force-fit: a builtin that matches 60% of the task and fights the other 40% is worse than a small custom graph.
+6. **Does the control flow need shapes builtins don't offer?** Runtime classification, per-item dynamic fan-out, generate-and-filter, tournaments, or domain-specific gates mean authoring a custom workflow from the starter patterns.
+7. **Is a sub-problem already solved by a proven graph?** Nest it with `ctx.workflow(...)` instead of re-authoring its prompts and gates. Composition beats duplication whenever a child's input/output contract can be mapped cleanly.
+8. **Is it only specialist evidence-gathering?** If the parent keeps control, no completion gate is needed, and the work is bounded (a debug pass, a parallel research fanout, one noisy investigation), inline subagents are enough — and cheaper than a workflow.
+9. **Is it truly tiny?** Deterministic, low-risk, single-file/no-test/no-review — answer or edit inline and stop.
+
+### Scoring rubric
+
+When the ladder is ambiguous, score the task on six dimensions (0–2 each):
+
+| Dimension | 0 | 1 | 2 |
+|---|---|---|---|
+| **Structure** | one action | a few sequential steps | many steps, dependencies, or parallel slices |
+| **Verifiability** | no objective check | spot-checkable | provable by tests, builds, artifacts, or review evidence |
+| **Iteration** | one pass suffices | may need one repair round | unknown-length loop until evidence passes |
+| **Risk** | trivial, reversible | scoped multi-file change | regressions, migrations, releases, or user-visible behavior |
+| **Duration** | seconds to minutes | tens of minutes | long-running, background, or resumable across sessions |
+| **Isolation** | one context is fine | one noisy investigation to quarantine | many slices needing clean contexts or adversarial independence |
+
+Interpretation:
+
+- **0–3 total:** inline. Adding stages costs more than it buys.
+- **4–6 total, Iteration ≤ 1, no gate:** inline subagents (parent-controlled) or a direct one-off `task`/`tasks`/`chain` when tracking and artifacts help.
+- **7+ total, or Iteration = 2, or Verifiability = 2 with a review/approval gate:** a real workflow. Prefer a named workflow when one fits the whole task; otherwise author a custom graph, nesting proven children where sub-problems overlap.
+- **Any single hard signal overrides the arithmetic:** an explicit loop/stop condition, an approval or evidence gate, or a request for durable/background execution puts the task in workflow territory regardless of total score.
+
+Two common misuses the rubric exists to prevent: stretching parent-controlled subagent calls into an ad hoc implement→review→retry pipeline (that is adversarial verification without an engine — use a workflow and let its stages delegate specialists), and unbounded inline reconnaissance (after roughly ten exploratory calls with no artifact, write findings to a context file and hand off through `reads`; sunk research transfers, it is not a reason to stay inline).
+
+### Task queues and software factories
+
+Some requests are not one task but a queue of them: "address all open issues", "fix every Linear ticket assigned to me", "burn down the TODO backlog", "upgrade every service to the new SDK". These fire-and-forget factory requests get their own decision step, because the biggest mistake is jumping straight to one monolithic workflow that grinds through the queue serially in a single ever-growing context.
+
+**Triage the queue before choosing the shape.** The first action is always a cheap enumeration-and-dependency pass, not implementation: list the items (issue tracker query, ticket API, grep for TODOs), then classify how they relate:
+
+- **Independent items** — different subsystems, no shared files, no ordering constraints, each individually verifiable.
+- **Dependent items** — one blocks another, they touch the same files/modules, they share a migration or API change, or their acceptance criteria reference each other.
+- **Clustered** — the queue splits into groups: dependencies inside a group, independence between groups.
+
+**Independent items → many small runs, not one big one.** Spawn one workflow run per item (typically `goal` with the item's text as the objective and acceptance criteria, `create_pr=true` for per-item PRs), each in its own `git_worktree_dir`, running in the background. One run per item buys what a monolith cannot:
+
+- **Isolation:** a hard item that stalls or fails does not poison the remaining ones; each run resumes, retries, or gets killed independently.
+- **Clean contexts:** every item starts with full attention on its own objective instead of inheriting twenty finished tickets of transcript.
+- **Independent evidence:** per-item reviewer gates, receipts, and PRs that a human can merge or reject one at a time.
+- **Real parallelism:** runs proceed concurrently, bounded by however many you choose to have in flight at once (worktrees prevent filesystem collisions).
+
+Do not spawn unbounded: dispatch in waves (for example 3–5 concurrent runs), wait for lifecycle notices, then dispatch the next wave — and report the dispatch plan (item → run id → worktree) so the queue is auditable.
+
+**Dependent items → one graph that encodes the ordering.** When items block each other or share a change surface, isolation stops being a feature — separate runs would fight over the same files or implement against stale assumptions. Encode the dependency structure explicitly instead:
+
+- **A composed parent workflow** that nests a proven child (for example `ctx.workflow(goal, ...)` per item) in dependency order, passing each item's outputs/artifacts to its dependents — the preferred form, because each item still gets its own bounded loop and reviewer gate while the parent owns sequencing.
+- **A single monolithic workflow** only when the items are so entangled they are really one task with subtasks (one migration touching every call site is one task, not a queue).
+
+**Clustered queues → both.** Compose within a cluster, fan out across clusters: each cluster becomes one run (a composed parent or a single `goal` objective covering the cluster), and independent clusters are dispatched as parallel background runs in waves.
+
+The self-prompt for factory requests, condensed: **enumerate → classify dependencies → fan out runs where independent, compose graphs where dependent → dispatch in bounded waves → report the plan.** When dependency classification is uncertain, prefer smaller independent runs and let per-item reviewer gates catch collisions — a rejected PR is cheaper than a monolith that carried a bad assumption through the whole queue.
+
+### Prompting the choice
+
+Humans can steer the shape directly. The strongest levers, in rough order of effect:
+
+- **Name the shape or workflow.** "Do this inline", "use subagents to investigate", "run the goal workflow", or "write a custom workflow for this" is honored over the agent's own scoring.
+- **State acceptance criteria.** Verbatim acceptance criteria make the objective provable, which both selects workflow execution and pins the immutable contract that `goal`/`ralph` reviewers enforce.
+- **State the loop.** "Iterate until tests pass", "review and fix until approved" — loop wording is a hard workflow signal and defines the stop condition.
+- **State the evidence.** Asking for a PR, a QA video, test output, or reviewer sign-off tells the agent which gates the graph needs.
+- **State the boundary.** "Work in a separate worktree", "don't create the PR yet", or "stop after implementation" separates the implementation loop from explicitly authorized final actions.
+- **State the queue policy.** For factory requests, say how to split and gate the queue: "one workflow and PR per issue", "these three tickets depend on each other — do them in order in one run", "triage first and show me the dependency plan before dispatching", or "no more than three runs at a time". Absent a policy, the agent triages dependencies itself and defaults to independent per-item runs with per-item evidence.
+
+Absent these levers, the agent applies the self-prompt and rubric above — so a prompt that mentions none of them is delegating the shape decision, not avoiding it.
 
 ## Atomic vs Claude Code Dynamic Workflows
 
@@ -1982,6 +2075,17 @@ Stage prompts should be local contracts, not miniature descriptions of the entir
 Avoid unrelated workflow internals such as reducer algorithms, future PR stages, sibling reviewer names, loop implementation details, or project-specific nicknames unless they are explicitly part of the current stage contract. If a term such as a gate name, ledger field, or workflow nickname is necessary, define it in the prompt before using it.
 
 Choose context mode deliberately. Use `context: "fork"` or `forkFromSessionFile` for coherent long-running implementation stages that need continuity from their own earlier work. Use `context: "fresh"` for unbiased reviewer, evaluator, and gate stages so they inspect the current files and explicit artifacts rather than inheriting the implementer's assumptions. When continuity is needed across fresh stages, pass it explicitly through files, declared outputs, and `reads`.
+
+### Context-Mode-Aware Prompt Text
+
+Context mode is an execution property configured with `context`/`forkFromSessionFile`; it is not something the model can act on, so keep it out of prompt text:
+
+- **Never describe the stage's own context mode.** Sentences like "you are running in a fresh context window", "your context is clean/non-forked", or "this is a forked session" add tokens without changing behavior. State the concrete action, inputs, and success criteria instead.
+- **Fresh stages must not reference invisible context.** A fresh stage has no "previous conversation", cannot see sibling stages, and does not know the surrounding graph, so instructions like "compare against previous workflow reasoning" or "this runs in parallel with the locator pass" are noise at best and confusing at worst. Phrase the same intent stage-locally ("compare the working tree against the baseline branch"; "do your own scan; do not assume any other stage's output is available") and pass any state the stage genuinely needs through files, declared outputs, and `reads`.
+- **Forked continuation prompts send only the delta.** A forked stage already carries the role, contracts, guidance, and output format from its own earlier prompts, so repeating them re-spends the tokens and invites drift between the two copies. Send what changed since the fork point — new artifacts, updated state, the next action — plus a one-line pointer back ("the contracts and report format established earlier in this thread still apply unchanged") instead of re-injecting the full text.
+- **Keep one canonical copy of shared contracts.** When fresh and forked variants of a stage share guidance, render the full contract only in the prompt that first establishes it and reference it from continuations. If a continuation genuinely needs a contract restated (for example, after a schema change), that is a new contract version, not a repeat.
+
+The builtin `goal` and `ralph` workflows follow this pattern: their first worker/orchestrator prompts carry the full contracts, while forked continuation turns send only the per-turn state (new receipts, the latest review artifacts, the rewritten research file) with a pointer back to the established guidance.
 
 ### Context Fundamentals
 

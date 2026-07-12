@@ -144,6 +144,8 @@ export async function runGoalWorkflow(ctx: GoalRunnerContext, options: GoalWorkf
       excludedTools: ["ask_user_question"],
     };
 
+    // Keep this model list identical to Ralph reviewer-a while preserving an
+    // independent Goal configuration and Goal's richer decision schema.
     const reviewerModelConfig = {
       model: "anthropic/claude-fable-5:high",
       fallbackModels: [
@@ -207,7 +209,6 @@ export async function runGoalWorkflow(ctx: GoalRunnerContext, options: GoalWorkf
         : renderForkedGoalWorkerPrompt(
             ledger,
             ledgerPath,
-            blockerThreshold,
             latestReviewArtifactPaths,
           );
 
