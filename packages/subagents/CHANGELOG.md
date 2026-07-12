@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+## [0.9.6] - 2026-07-12
+
+### Changed
+
+- Aligned model-facing subagent guidance with workflow-first routing: subagents remain focused specialists inside workflow stages or bounded direct delegation, rather than becoming an ad hoc implementation/review/retry pipeline for workflow-fit work.
+- Changed bundled Intercom coordination back to model-driven connection: launching foreground or background children no longer connects the parent or child session automatically; an Intercom tool or UI action must establish each session's broker connection.
+
 ## [0.9.6-alpha.1] - 2026-07-12
 
 ### Changed
