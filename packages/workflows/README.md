@@ -552,12 +552,12 @@ Prompt answer replay is live-memory only. `StageSnapshot.promptAnswerState` repo
 
 ### `workflow` tool (LLM-callable)
 
-<!-- Keep the description below in sync with WORKFLOW_TOOL_DESCRIPTION in packages/workflows/src/extension/index.ts; integration tests assert this. -->
+<!-- Keep the description below in sync with WORKFLOW_TOOL_DESCRIPTION in packages/workflows/src/extension/workflow-prompts.ts; integration tests assert this. -->
 
 ```json
 {
   "name": "workflow",
-  "description": "Run named builtin, project, user, or package workflows, or direct one-off task/tasks/chain workflows; when workflow execution fits but another shape would better achieve the task, author a custom TypeScript workflow({...}) inline with normal coding tools, reload it, and run it; discover with list/get/inputs, inspect status/stages/stage details, send prompt answers or steering, pause/resume/interrupt/kill runs, and reload workflow resources. For large stage handoffs, write context to files/artifacts, pass paths via reads, and prompt downstream agents to 'Read the file at <path>...' instead of injecting large previous text. For transcripts, prefer status/stages/stage to get sessionFile/transcriptPath, quote the exact path without rewriting separators (Windows backslashes are valid), then search it with rg/grep and read small ranges; transcript is path-only by default when sessionFile/transcriptPath exists, explicit tail/limit returns bounded previews, and missing transcript paths fall back to a small preview.",
+  "description": "Run named builtin, project, user, or package workflows, or direct one-off task/tasks/chain workflows; custom definitions may import reusable project/package workflows or builtin definitions from @bastani/workflows/builtin and nest them with ctx.workflow(...), including deeper composition within the configured maxDepth; when workflow execution fits but another shape would better achieve the task, author a custom TypeScript workflow({...}) inline with normal coding tools, reload it, and run it; discover with list/get/inputs, inspect status/stages/stage details, send prompt answers or steering, pause/resume/interrupt/kill runs, and reload workflow resources. For large stage handoffs, write context to files/artifacts, pass paths via reads, and prompt downstream agents to 'Read the file at <path>...' instead of injecting large previous text. For transcripts, prefer status/stages/stage to get sessionFile/transcriptPath, quote the exact path without rewriting separators (Windows backslashes are valid), then search it with rg/grep and read small ranges; transcript is path-only by default when sessionFile/transcriptPath exists, explicit tail/limit returns bounded previews, and missing transcript paths fall back to a small preview.",
   "parameters": {
     "workflow": "string (optional) — workflow ID or normalized name",
     "inputs": "object (optional) — key/value map of workflow inputs",
