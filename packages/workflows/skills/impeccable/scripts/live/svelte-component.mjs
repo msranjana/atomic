@@ -95,11 +95,42 @@ export function substitutePropsWithExprs(markup, contract) {
   return out;
 }
 
+function stripNamedBlocks(content, names) {
+  let out = String(content || '');
+  for (const name of names) {
+    const opener = `<${name}`;
+    const closer = `</${name}`;
+    while (true) {
+      const lower = out.toLowerCase();
+      const start = lower.indexOf(opener);
+      if (start === -1) break;
+      const openEnd = lower.indexOf('>', start + opener.length);
+      const closeStart = openEnd === -1 ? -1 : lower.indexOf(closer, openEnd + 1);
+      const closeEnd = closeStart === -1 ? -1 : lower.indexOf('>', closeStart + closer.length);
+      if (openEnd === -1 || closeStart === -1 || closeEnd === -1) break;
+      out = out.slice(0, start) + out.slice(closeEnd + 1);
+    }
+  }
+  while (true) {
+    const start = out.indexOf('<!--');
+    if (start === -1) break;
+    const normalEnd = out.indexOf('-->', start + 4);
+    const bangEnd = out.indexOf('--!>', start + 4);
+    const end = normalEnd === -1 ? bangEnd : bangEnd === -1 ? normalEnd : Math.min(normalEnd, bangEnd);
+    if (end === -1) break;
+    out = out.slice(0, start) + out.slice(end + (end === bangEnd ? 4 : 3));
+  }
+  return out;
+}
+
 export function parseSvelteComponentFile(content) {
   const text = String(content || '');
-  const scriptMatch = text.match(/^([\s\S]*?)<script\b[^>]*>[\s\S]*?<\/script\b[^>]*>/i);
-  const withoutScript = scriptMatch ? text.slice(scriptMatch[0].length) : text;
-  const styleMatch = withoutScript.match(/<style\b[^>]*>[\s\S]*?<\/style\b[^>]*>/i);
+  const lower = text.toLowerCase();
+  const scriptStart = lower.indexOf('<script');
+  const scriptClose = scriptStart === -1 ? -1 : lower.indexOf('</script', scriptStart + 7);
+  const scriptEnd = scriptClose === -1 ? -1 : lower.indexOf('>', scriptClose + 8);
+  const withoutScript = scriptEnd === -1 ? text : text.slice(scriptEnd + 1);
+  const styleMatch = withoutScript.match(/<style\b[^>]*>[\s\S]*?<\/style\s*>/i);
   const styleBlock = styleMatch ? styleMatch[0] : '';
   const markup = styleMatch
     ? withoutScript.slice(0, styleMatch.index).trim()
@@ -107,7 +138,7 @@ export function parseSvelteComponentFile(content) {
   const cssLines = styleBlock
     ? styleBlock
       .replace(/^<style\b[^>]*>/i, '')
-      .replace(/<\/style\b[^>]*>$/i, '')
+      .replace(/<\/style\s*>$/i, '')
       .split('\n')
       .map((line) => line.trimEnd())
     : [];
@@ -290,7 +321,7 @@ function appendCssToSvelteStyle(lines, cssLines) {
 
 function findLastStyleCloseLine(lines) {
   for (let i = lines.length - 1; i >= 0; i--) {
-    if (/<\/style\b[^>]*>/.test(lines[i])) return i;
+    if (/<\/style\s*>/.test(lines[i])) return i;
   }
   return -1;
 }
@@ -631,17 +662,8 @@ function inlineSvelteComponentInsertAccept({
   };
 }
 
-function svelteMarkupHasVisibleContent(markup) {
-  let stripped = String(markup || '');
-  let previous;
-  do {
-    previous = stripped;
-    stripped = stripped
-      .replace(/<script[\s\S]*?<\/script\b[^>]*>/gi, ' ')
-      .replace(/<style[\s\S]*?<\/style\b[^>]*>/gi, ' ')
-      .replace(/<!--[\s\S]*?-->/g, '');
-  } while (stripped !== previous);
-  const text = stripped
+export function svelteMarkupHasVisibleContent(markup) {
+  const text = stripNamedBlocks(markup, ['script', 'style'])
     .replace(/<[^>]+>/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
