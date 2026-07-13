@@ -63,6 +63,40 @@ describe("workflow resume selector", () => {
     assert.equal(completed.session.path, "workflow-completed:durable-completed");
   });
 
+  test("sorts unsorted live rows by latest activity", () => {
+    const items = workflowResumeSelectorItems([
+      pausedLiveRun("middle", 200),
+      pausedLiveRun("newest", 300),
+      pausedLiveRun("oldest", 100),
+    ], []);
+
+    assert.deepEqual(items.map((item) => item.session.id), ["newest", "middle", "oldest"]);
+  });
+
+  test("sorts unsorted durable rows by durable update time", () => {
+    const items = workflowResumeSelectorItems([], [
+      entry("oldest", "paused", 100),
+      entry("newest", "paused", 300),
+      entry("middle", "paused", 200),
+    ]);
+
+    assert.deepEqual(items.map((item) => item.session.id), ["newest", "middle", "oldest"]);
+  });
+
+  test("globally interleaves live and durable rows by recency", () => {
+    const items = workflowResumeSelectorItems(
+      [pausedLiveRun("live-oldest", 100), pausedLiveRun("live-newest", 400)],
+      [entry("durable-middle-new", "paused", 300), entry("durable-middle-old", "paused", 200)],
+    );
+
+    assert.deepEqual(items.map((item) => item.session.id), [
+      "live-newest",
+      "durable-middle-new",
+      "durable-middle-old",
+      "live-oldest",
+    ]);
+  });
+
   test("uses latest stage activity and deterministic ids for equal-time ties", () => {
     const live = pausedLiveRun("zulu-live", 50);
     live.stages.push(stage("recent", 500));

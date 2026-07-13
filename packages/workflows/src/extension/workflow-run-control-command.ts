@@ -236,7 +236,7 @@ export async function handleRunControlCommand(
             .filter((run) => run.endedAt === undefined && run.status === "running" && run.exitReason !== "quit")
             .map((run) => run.id),
         );
-        if (liveRuns.length === 0) await ensureWorkflowResourcesVisible();
+        await ensureWorkflowResourcesVisible();
         const runtime = deps.runtimeForContext(ctx);
         let durableEntries: readonly ResumableWorkflowEntry[] = [];
         let completedEntries: readonly ResumableWorkflowEntry[] = [];
