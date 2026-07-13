@@ -427,7 +427,7 @@ export function renderResult(result: WorkflowToolResult, opts?: RenderResultOpts
     case "models": {
       const r = result as ModelsResult;
       if (r.models.length === 0) {
-        return renderNotice("WORKFLOW MODELS", "no models in configured catalog", opts, themed);
+        return renderNotice("WORKFLOW MODELS", "no models in configured catalog — configured-auth snapshot, not proof of credentials, entitlements, OAuth freshness, or live provider access.", opts, themed);
       }
       const currentLine = r.models.find((m) => m.isCurrent);
       const lines = r.models.map(
