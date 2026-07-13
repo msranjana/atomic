@@ -12,7 +12,6 @@
  */
 
 import type { PendingPrompt, RunSnapshot, StageInputRequest, StageSnapshot, StageStatus } from "../shared/store-types.js";
-import type { WorkflowRunStatusFilter, WorkflowRunStatusSummary } from "./workflow-status-summary.js";
 import type { WorkflowDetails } from "../shared/types.js";
 import type { RunDetail } from "../runs/background/status.js";
 import { renderInputsSchema } from "../shared/render-inputs-schema.js";
@@ -65,11 +64,7 @@ type ListResult = {
 };
 type StatusResult = {
   action: "status";
-  /** Applied run-status filter; "all" when unfiltered. */
-  filter: WorkflowRunStatusFilter;
-  /** Concise per-run summaries (in-flight runs first) for agent consumption. */
-  runs: WorkflowRunStatusSummary[];
-  /** Live snapshots from the in-process store, filtered like `runs`. */
+  /** Live snapshots from the in-process store. */
   snapshots: RunSnapshot[];
 };
 type StatusDetailResult =
@@ -147,9 +142,15 @@ type SendResult = { action: "send"; runId: string; stageId: string; delivery: st
 type PauseResult = { action: "pause"; runId: string; status: string; message: string };
 type ReloadResult = WorkflowReloadReport & { action: "reload"; status: "ok" | "noop"; message: string };
 type InterruptResult = { action: "interrupt"; runId: string; status: string; message: string };
-type QuitResult = { action: "quit"; runId: string; status: string; message: string };
+type KillResult = { action: "kill"; runId: string; status: string; message: string };
 type ResumeResult = { action: "resume"; runId: string; status: string; message: string };
-
+export interface ModelCatalogEntry {
+  provider: string;
+  id: string;
+  fullId: string;
+  isCurrent: boolean;
+}
+type ModelsResult = { action: "models"; models: ModelCatalogEntry[]; };
 export type WorkflowToolResult =
   | ListResult
   | StatusResult
@@ -164,8 +165,9 @@ export type WorkflowToolResult =
   | PauseResult
   | ReloadResult
   | InterruptResult
-  | QuitResult
-  | ResumeResult;
+  | KillResult
+  | ResumeResult
+  | ModelsResult;
 
 export interface RenderResultOpts {
   isPartial?: boolean;
@@ -344,18 +346,8 @@ export function renderResult(result: WorkflowToolResult, opts?: RenderResultOpts
         return renderNotice("WORKFLOW RUN", `${r.runId}${label}: ${r.status} — ${r.error}`, opts, themed);
       }
       if (r.details) {
-        if (r.details.status === "accepted" && r.name && r.runId) {
-          return renderDispatchConfirm({
-            workflowName: r.name,
-            runId: r.runId,
-            inputs: opts?.runInputs ?? {},
-            theme: themed ? deriveGraphTheme({}) : undefined,
-            width: opts?.width,
-          });
-        }
         const label = r.name ? ` (${r.name})` : "";
-        const guidance = r.details.message === undefined ? "" : ` — ${r.details.message}`;
-        return renderNotice("WORKFLOW RUN", `${r.runId}${label}: ${r.details.mode} ${r.details.status}${guidance}`, opts, themed);
+        return renderNotice("WORKFLOW RUN", `${r.runId}${label}: ${r.details.mode} ${r.details.status}`, opts, themed);
       }
       if (r.status === "completed" || r.status === "skipped" || r.status === "cancelled" || r.status === "blocked" || r.status === "killed") {
         const label = r.name ? ` (${r.name})` : "";
@@ -422,14 +414,32 @@ export function renderResult(result: WorkflowToolResult, opts?: RenderResultOpts
       return renderNotice("WORKFLOW INTERRUPT", `${r.runId}: ${r.message}`, opts, themed);
     }
 
-    case "quit": {
-      const r = result as QuitResult;
-      return renderNotice("WORKFLOW QUIT", `${r.runId}: ${r.message}`, opts, themed);
+    case "kill": {
+      const r = result as KillResult;
+      return renderNotice("WORKFLOW KILL", `${r.runId}: ${r.message}`, opts, themed);
     }
 
     case "resume": {
       const r = result as ResumeResult;
       return renderNotice("WORKFLOW RESUME", `${r.runId}: ${r.message}`, opts, themed);
+    }
+
+    case "models": {
+      const r = result as ModelsResult;
+      if (r.models.length === 0) {
+        return renderNotice("WORKFLOW MODELS", "no models in configured catalog", opts, themed);
+      }
+      const currentLine = r.models.find((m) => m.isCurrent);
+      const lines = r.models.map(
+        (m) => `${m.provider}/${m.id}${m.isCurrent ? " (current)" : ""}`,
+      ).join("; ");
+      const suffix = currentLine !== undefined ? "" : " (no current model)";
+      return renderNotice(
+        "WORKFLOW MODELS",
+        `${lines}${suffix} — configured-auth catalog snapshot, not proof of credentials, entitlements, OAuth freshness, or live provider access.`,
+        opts,
+        themed,
+      );
     }
 
     default: {

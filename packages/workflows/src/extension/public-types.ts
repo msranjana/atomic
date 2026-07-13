@@ -222,6 +222,7 @@ export interface WorkflowToolArgs {
   workflow?: string;
   inputs?: WorkflowInputValues;
   action?:
+    | "models"
     | "run"
     | "list"
     | "get"

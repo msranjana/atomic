@@ -1,12 +1,13 @@
 export const WORKFLOW_TOOL_DESCRIPTION =
   "Run named builtin, project, user, or package workflows; custom definitions may import reusable project/package workflows or builtin definitions from @bastani/workflows/builtin and nest them with ctx.workflow(...), including deeper composition within the configured maxDepth; " +
   "when workflow execution fits but another shape would better achieve the task, author a custom TypeScript workflow({...}) inline with normal coding tools, reload it, and run it; " +
-  "discover with list/get/inputs, list session runs with status (no runId; statusFilter narrows the list), inspect status/stages/stage details, " +
+  "discover with list/get/inputs/models, list session runs with status (no runId; statusFilter narrows the list), inspect status/stages/stage details, " +
   "send prompt answers or steering, pause/resume/interrupt/quit runs, and reload workflow resources. " +
   "For large stage handoffs, write context to files/artifacts, pass paths via reads, and prompt downstream agents to 'Read the file at <path>...' instead of injecting large previous text. " +
   "For transcripts, prefer status/stages/stage to get sessionFile/transcriptPath, " +
   "quote the exact path without rewriting separators (Windows backslashes are valid), " +
-  "then search it with rg/grep and read small ranges; transcript is path-only by default when sessionFile/transcriptPath exists, explicit tail/limit returns bounded previews, and missing transcript paths fall back to a small preview.";
+  "then search it with rg/grep and read small ranges; transcript is path-only by default when sessionFile/transcriptPath exists, explicit tail/limit returns bounded previews, and missing transcript paths fall back to a small preview. " +
+  "Use action 'models' to inspect models in the configured catalog; the result is a configured-auth snapshot showing what's present in the registry with configured authentication, not proof of credentials, entitlements, OAuth freshness, or live provider access.";
 
 export const DEFAULT_PROMPT_GUIDANCE: string[] = [
   `**Workflows**: Treat workflows as the default execution path for any non-trivial task and for any request that has inherent structure plus an objective you can make verifiable. Use the \`workflow\` tool for existing named workflows; when the task needs a graph that is not installed, author a custom TypeScript \`workflow({...})\` inline with normal coding tools, reload workflow resources, and run it.

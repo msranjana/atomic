@@ -95,7 +95,7 @@ describe("MockExtensionAPI — tool registration", () => {
     const actionSchema = params.properties.action;
     // TypeBox Optional(Union([...])) wraps in anyOf
     const raw = JSON.stringify(actionSchema);
-    for (const literal of ["run", "list", "get", "status", "interrupt", "quit", "resume", "inputs"]) {
+    for (const literal of ["run", "list", "get", "status", "interrupt", "quit", "resume", "inputs", "models"]) {
       assert.ok(raw.includes(literal));
     }
     assert.ok(!raw.includes("kill"));
@@ -165,6 +165,29 @@ describe("MockExtensionAPI — tool registration", () => {
     const r = result as { action: "inputs"; name: string; inputs: Array<{ name: string }> };
     assert.equal(r.name, "deep-research-codebase");
     assert.ok(r.inputs.some((input) => input.name === "prompt"));
+  });
+
+  test("tool execute models with registry populates entries and marks current; no registry returns empty", async () => {
+    const execute = mock.tools[0]!.opts.execute;
+    const withRegistry = await execute("models-with-registry", { action: "models" }, undefined, undefined, {
+      model: { provider: "openai", id: "gpt-4" },
+      modelRegistry: {
+        getAvailable: () => [
+          { provider: "openai", id: "gpt-4" },
+          { provider: "anthropic", id: "claude-3" },
+        ],
+      },
+    } as never);
+    const result = withRegistry.details as Extract<WorkflowToolResult, { action: "models" }>;
+    assert.equal(result.models.length, 2);
+    assert.equal(result.models[0]!.fullId, "openai/gpt-4");
+    assert.equal(result.models[0]!.isCurrent, true);
+    assert.equal(result.models[1]!.fullId, "anthropic/claude-3");
+    assert.equal(result.models[1]!.isCurrent, false);
+
+    const withoutRegistry = await execute("models-without-registry", { action: "models" }, undefined, undefined, {} as never);
+    const emptyResult = withoutRegistry.details as Extract<WorkflowToolResult, { action: "models" }>;
+    assert.deepEqual(emptyResult.models, []);
   });
 
   test("tool execute returns read-only workflow details for action='get'", async () => {

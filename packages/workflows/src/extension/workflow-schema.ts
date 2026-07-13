@@ -9,6 +9,7 @@ export const WorkflowParametersSchema = Type.Object({
     description: "Key/value inputs passed to a named workflow run.",
   })),
   action: Type.Optional(Type.Union([
+    Type.Literal("models"),
     Type.Literal("run"),
     Type.Literal("list"),
     Type.Literal("get"),
@@ -20,17 +21,17 @@ export const WorkflowParametersSchema = Type.Object({
     Type.Literal("send"),
     Type.Literal("pause"),
     Type.Literal("interrupt"),
-    Type.Literal("quit"),
+    Type.Literal("kill"),
     Type.Literal("resume"),
     Type.Literal("reload"),
   ], {
-    description: "Workflow action: run/list/get/inputs/status, inspect stage metadata, send messages or prompt answers, pause/resume/interrupt/quit runs, or reload workflow resources. 'status' without runId lists every workflow run in the current session with concise per-run summaries (status, timing, active stages, awaiting-input prompts); filter the listing with statusFilter. 'status' with runId returns one run's full detail. For transcript inspection, prefer status/stages/stage first to get sessionFile/transcriptPath, quote the exact path without rewriting separators (Windows backslashes are valid), then search it with rg/grep and read small ranges; transcript is path-only by default when sessionFile/transcriptPath exists, explicit tail/limit returns bounded previews, and missing transcript paths fall back to a small preview.",
+    description: "Workflow action: run/list/get/inputs/models/status, inspect stage metadata, send messages or prompt answers, pause/resume/interrupt/kill runs, inspect model catalog, or reload workflow resources. For transcript inspection, prefer status/stages/stage first to get sessionFile/transcriptPath, quote the exact path without rewriting separators (Windows backslashes are valid), then search it with rg/grep and read small ranges; transcript is path-only by default when sessionFile/transcriptPath exists, explicit tail/limit returns bounded previews, and missing transcript paths fall back to a small preview.",
   })),
   runId: Type.Optional(Type.String({
-    description: "Run identifier or unique prefix for status/stages/stage/transcript/send/pause/resume/interrupt/quit. Omit runId with action 'status' to list all session runs and their statuses. Use '--all' or all:true for supported bulk run-control actions.",
+    description: "Run identifier or unique prefix for status/stages/stage/transcript/send/pause/resume/interrupt/kill. Use '--all' or all:true for supported bulk run-control actions.",
   })),
   all: Type.Optional(Type.Boolean({
-    description: "Apply supported run-control actions (pause/interrupt/quit) to all in-flight runs instead of one run; cannot be combined with stageId.",
+    description: "Apply supported run-control actions (pause/interrupt/kill) to all in-flight runs instead of one run; cannot be combined with stageId.",
   })),
   stageId: Type.Optional(Type.String({
     description: "Stage id, unique prefix, or stage name for stage-scoped inspection, transcript, send, pause, or resume.",
@@ -47,14 +48,12 @@ export const WorkflowParametersSchema = Type.Object({
     Type.Literal("completed"),
     Type.Literal("failed"),
     Type.Literal("skipped"),
-    Type.Literal("cancelled"),
-    Type.Literal("killed"),
     Type.Literal("all"),
   ], {
-    description: "Filter stages (stages action) or listed runs (status action without runId) by status; 'all' (default) includes everything. For the status listing, run statuses match directly, 'awaiting_input' selects runs with at least one stage awaiting input or pending human prompt, and in-flight runs are listed first.",
+    description: "Filter stages by status for the stages action; use 'all' to include every stage.",
   })),
   format: Type.Optional(Type.Union([Type.Literal("text"), Type.Literal("json")], {
-    description: "Agent-visible output format for data-bearing inspection actions (status, stages, stage, transcript); 'json' returns the full structured result.",
+    description: "Agent-visible output format for data-bearing inspection actions.",
   })),
   limit: Type.Optional(Type.Integer({
     minimum: 0,
