@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.9.8-alpha.1] - 2026-07-12
+
 ### Changed
 
 - Synchronized the builtin `playwright-cli` skill with microsoft/playwright-cli at `793cfb32572733cbcb401e6f28d05a7a914ce408`, including current installation, snapshot search, mobile emulation, and test generation guidance.
