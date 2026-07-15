@@ -149,6 +149,7 @@ export interface ModelCatalogEntry {
   id: string;
   fullId: string;
   isCurrent: boolean;
+  availableThinkingLevels?: readonly string[];
 }
 type ModelsResult = { action: "models"; models: ModelCatalogEntry[]; };
 export type WorkflowToolResult =
@@ -431,7 +432,12 @@ export function renderResult(result: WorkflowToolResult, opts?: RenderResultOpts
       }
       const currentLine = r.models.find((m) => m.isCurrent);
       const lines = r.models.map(
-        (m) => `${m.provider}/${m.id}${m.isCurrent ? " (current)" : ""}`,
+        (m) => {
+          const levels = m.availableThinkingLevels?.length
+            ? ` [levels: ${m.availableThinkingLevels.join(", ")}]`
+            : "";
+          return `${m.provider}/${m.id}${m.isCurrent ? " (current)" : ""}${levels}`;
+      },
       ).join("; ");
       const suffix = currentLine !== undefined ? "" : " (no current model)";
       return renderNotice(

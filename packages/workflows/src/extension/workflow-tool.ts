@@ -71,6 +71,7 @@ export function makeExecuteWorkflowTool(
           id: m.id,
           fullId: `${m.provider}/${m.id}`,
           isCurrent: current !== undefined && m.provider === current.provider && m.id === current.id,
+          availableThinkingLevels: (m as any).availableThinkingLevels,
         }));
         return { action: "models", models };
       }

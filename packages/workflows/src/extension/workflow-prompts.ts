@@ -7,7 +7,8 @@ export const WORKFLOW_TOOL_DESCRIPTION =
   "For transcripts, prefer status/stages/stage to get sessionFile/transcriptPath, " +
   "quote the exact path without rewriting separators (Windows backslashes are valid), " +
   "then search it with rg/grep and read small ranges; transcript is path-only by default when sessionFile/transcriptPath exists, explicit tail/limit returns bounded previews, and missing transcript paths fall back to a small preview. " +
-  "Use action 'models' to inspect models in the configured catalog; the result is a configured-auth snapshot showing what's present in the registry with configured authentication, not proof of credentials, entitlements, OAuth freshness, or live provider access.";
+  "Use action 'models' to inspect models in the configured catalog; the result is a configured-auth snapshot showing what's present in the registry with configured authentication, not proof of credentials, entitlements, OAuth freshness, or live provider access. " +
+  "When authoring a workflow that should dynamically select a model, first call workflow({ action: 'models' }) to inspect the configured catalog, then select from the returned provider/id entries considering the isCurrent marker and available thinking levels.";
 
 export const DEFAULT_PROMPT_GUIDANCE: string[] = [
   `**Workflows**: Treat workflows as the default execution path for any non-trivial task and for any request that has inherent structure plus an objective you can make verifiable. Use the \`workflow\` tool for existing named workflows; when the task needs a graph that is not installed, author a custom TypeScript \`workflow({...})\` inline with normal coding tools, reload workflow resources, and run it.

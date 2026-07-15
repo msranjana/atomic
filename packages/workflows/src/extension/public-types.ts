@@ -61,6 +61,7 @@ export interface PiCommandOptions {
 export interface PiRuntimeModel {
   readonly provider: string;
   readonly id: string;
+  readonly availableThinkingLevels?: readonly string[];
 }
 
 export interface PiRuntimeModelRegistry {
