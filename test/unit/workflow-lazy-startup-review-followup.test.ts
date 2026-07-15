@@ -67,6 +67,7 @@ function registerFactory(piOverrides: Partial<ExtensionAPI> = {}): Array<{ name:
 
 beforeEach(() => {
   delete process.env[WORKFLOW_STAGE_SUBAGENT_GUARD_ENV];
+  setDurableBackend(new InMemoryDurableBackend());
 });
 
 afterEach(() => {
