@@ -107,6 +107,15 @@ export interface DurableUiCheckpoint {
   readonly completedAt: number;
 }
 
+export const DURABLE_STAGE_TOPOLOGY_VERSION = 1 as const;
+
+/** Versioned source-stage lineage used to reconstruct completed DAGs after restart. */
+export interface DurableStageTopology {
+  readonly version: typeof DURABLE_STAGE_TOPOLOGY_VERSION;
+  readonly stageId: string;
+  readonly parentIds: readonly string[];
+}
+
 /** A `ctx.stage(...)` / `ctx.task(...)` durable checkpoint or resumable session marker. */
 export interface DurableStageCheckpoint {
   readonly kind: "stage";
@@ -116,6 +125,8 @@ export interface DurableStageCheckpoint {
   readonly name: string;
   /** Stable replay key (matches existing continuation replay semantics). */
   readonly replayKey: string;
+  /** Source stage identity and parents for fresh-process completed-run inspection. */
+  readonly topology?: DurableStageTopology;
   /** Stage output text or structured result when the stage completed. */
   readonly output?: WorkflowSerializableValue;
   /** Resumable Atomic/Pi session metadata for in-progress LM stages. */

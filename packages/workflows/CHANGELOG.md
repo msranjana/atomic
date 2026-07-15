@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Fixed
 
 - Fixed workflow resource reload to build and atomically publish a fresh registry for additions, edits, renames, deletions, config paths, conventional/legacy directories, and package resources without restarting Atomic. Reloads now serialize and coalesce, reject stale session generations, retain the active registry on fatal failures, remain safe during in-flight runs, and return visible config/discovery diagnostics through both slash-command and tool surfaces while preserving valid siblings.
+- Fixed completed named and direct workflow inspection after a process restart to preserve linear and parallel fan-out/fan-in stage topology through additive versioned durable metadata and reconstructed parent-id remapping. Legacy topology-less checkpoints remain readable with an explicit `topology unavailable` graph label instead of false root claims, and inspection remains read-only without redispatching completed work ([#1816](https://github.com/bastani-inc/atomic/issues/1816)).
 
 ## [0.9.9-alpha.3] - 2026-07-14
 

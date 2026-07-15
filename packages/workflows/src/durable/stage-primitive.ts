@@ -9,7 +9,7 @@ import { durableHash } from "./backend.js";
 import { recordCheckpointDurably } from "./tool-primitive.js";
 import { elapsedStageMs } from "../shared/timing.js";
 import { RESUME_CONTINUATION_PROMPT } from "../shared/resume-continuation.js";
-import type { DurableStageCheckpoint } from "./types.js";
+import { DURABLE_STAGE_TOPOLOGY_VERSION, type DurableStageCheckpoint } from "./types.js";
 export type DurableCompletedStageCheckpoint = DurableStageCheckpoint & { readonly output: WorkflowSerializableValue };
 
 export interface DurableStageDeps {
@@ -246,6 +246,7 @@ function stageOutput(stage: StageSnapshot): WorkflowSerializableValue {
 
 function checkpointMetadata(stage: StageSnapshot): Partial<DurableStageCheckpoint> {
   return {
+    topology: { version: DURABLE_STAGE_TOPOLOGY_VERSION, stageId: stage.id, parentIds: [...stage.parentIds] },
     ...(stage.startedAt !== undefined ? { startedAt: stage.startedAt } : {}),
     ...(stage.endedAt !== undefined ? { endedAt: stage.endedAt } : {}),
     ...(stage.durationMs !== undefined ? { durationMs: stage.durationMs } : {}),

@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import type { WorkflowSerializableValue } from "../shared/types.js";
-import type { DurableCheckpoint, DurableWorkflowHandle } from "./types.js";
+import { DURABLE_STAGE_TOPOLOGY_VERSION, type DurableCheckpoint, type DurableWorkflowHandle } from "./types.js";
 import { classifyDurableFormatVersion, DURABLE_FORMAT_VERSION } from "./format-version.js";
 
 export interface FileDurableRecord {
@@ -69,7 +69,14 @@ function isCheckpoint(value: unknown): value is DurableCheckpoint {
   if (value["kind"] === "ui") return typeof value["promptKind"] === "string" && typeof value["message"] === "string"
     && typeof value["promptHash"] === "string" && isSerializable(value["response"]);
   return value["kind"] === "stage" && typeof value["name"] === "string" && typeof value["replayKey"] === "string"
-    && (!("output" in value) || isSerializable(value["output"]));
+    && (!("output" in value) || isSerializable(value["output"]))
+    && isOptionalStageTopology(value["topology"]);
+}
+
+function isOptionalStageTopology(value: unknown): boolean {
+  if (value === undefined) return true;
+  return isObject(value) && value["version"] === DURABLE_STAGE_TOPOLOGY_VERSION && typeof value["stageId"] === "string"
+    && isStringArray(value["parentIds"]);
 }
 
 function isStringArray(value: unknown): value is readonly string[] {

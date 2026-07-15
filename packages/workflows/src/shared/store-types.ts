@@ -142,6 +142,8 @@ export interface StageSnapshot {
    * refreshes parents, so do not cache this reference across store updates.
    */
   parentIds: readonly string[];
+  /** Set when durable inspection cannot safely determine the original stage lineage. */
+  topologyState?: "unavailable";
   startedAt?: number;
   endedAt?: number;
   durationMs?: number;
