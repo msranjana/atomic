@@ -15,13 +15,15 @@
  */
 
 import type { WorkflowSerializableObject, WorkflowSerializableValue } from "../shared/types.js";
-import type {
-  DurableCheckpoint,
-  DurableCheckpointKind,
-  DurableStageCheckpoint,
-  DurableToolCheckpoint,
-  DurableUiCheckpoint,
-  UiPromptKind,
+import {
+  DURABLE_STAGE_TOPOLOGY_VERSION,
+  type DurableCheckpoint,
+  type DurableCheckpointKind,
+  type DurableStageCheckpoint,
+  type DurableStageTopology,
+  type DurableToolCheckpoint,
+  type DurableUiCheckpoint,
+  type UiPromptKind,
 } from "./types.js";
 import { classifyDurableFormatVersion, DURABLE_FORMAT_VERSION } from "./format-version.js";
 
@@ -60,6 +62,7 @@ export interface DbosCheckpointEnvelope extends WorkflowSerializableObject {
   readonly fastMode?: boolean;
   readonly attemptedModels?: WorkflowSerializableValue;
   readonly modelAttempts?: WorkflowSerializableValue;
+  readonly topology?: WorkflowSerializableValue;
 }
 
 /**
@@ -89,6 +92,7 @@ export function encodeCheckpoint(cp: DurableCheckpoint): DbosCheckpointEnvelope 
     ...base,
     name: s.name,
     replayKey: s.replayKey,
+    ...(s.topology !== undefined ? { topology: { version: s.topology.version, stageId: s.topology.stageId, parentIds: [...s.topology.parentIds] } } : {}),
     ...(s.sessionId !== undefined ? { sessionId: s.sessionId } : {}),
     ...(s.sessionFile !== undefined ? { sessionFile: s.sessionFile } : {}),
     ...(s.startedAt !== undefined ? { startedAt: s.startedAt } : {}),
@@ -183,6 +187,7 @@ function decodeEnvelope(workflowId: string, env: DbosCheckpointEnvelope): Durabl
       response: env.output,
     } as DurableUiCheckpoint;
   }
+  const topology = stageTopology(env.topology);
   if (env.kind !== "stage"
     || (env.replayKey !== undefined && typeof env.replayKey !== "string")
     || (env.sessionId !== undefined && typeof env.sessionId !== "string")
@@ -201,6 +206,7 @@ function decodeEnvelope(workflowId: string, env: DbosCheckpointEnvelope): Durabl
     name: env.name ?? "stage",
     replayKey: env.replayKey ?? env.checkpointId,
     ...(env.hasOutput !== false && env.output !== undefined ? { output: env.output } : {}),
+    ...(topology !== undefined ? { topology } : {}),
     ...(env.sessionId !== undefined ? { sessionId: env.sessionId } : {}),
     ...(env.sessionFile !== undefined ? { sessionFile: env.sessionFile } : {}),
     ...(typeof env.startedAt === "number" ? { startedAt: env.startedAt } : {}),
@@ -214,6 +220,14 @@ function decodeEnvelope(workflowId: string, env: DbosCheckpointEnvelope): Durabl
   } as DurableStageCheckpoint;
 }
 
+
+function stageTopology(value: WorkflowSerializableValue | undefined): DurableStageTopology | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const record = value as Record<string, WorkflowSerializableValue>;
+  if (record["version"] !== DURABLE_STAGE_TOPOLOGY_VERSION
+    || typeof record["stageId"] !== "string" || !isStringArray(record["parentIds"])) return undefined;
+  return { version: DURABLE_STAGE_TOPOLOGY_VERSION, stageId: record["stageId"], parentIds: record["parentIds"] };
+}
 
 function isModelAttempts(value: WorkflowSerializableValue | undefined): boolean {
   return Array.isArray(value) && value.every((attempt) => {

@@ -2,10 +2,11 @@ import type { RunSnapshot, StageSnapshot } from "../shared/store-types.js";
 import type { WorkflowInputValues } from "../shared/types.js";
 import { isReopenableSessionTranscript } from "../shared/session-transcript.js";
 import type { DurableWorkflowBackend } from "./backend.js";
-import type {
-  DurableCheckpoint,
-  DurableStageCheckpoint,
-  ResumableWorkflowEntry,
+import {
+  DURABLE_STAGE_TOPOLOGY_VERSION,
+  type DurableCheckpoint,
+  type DurableStageCheckpoint,
+  type ResumableWorkflowEntry,
 } from "./types.js";
 import { resolveDurableEntry } from "./resume-runtime.js";
 
@@ -31,6 +32,7 @@ interface StageDraft {
   readonly fastMode?: boolean;
   readonly attemptedModels?: readonly string[];
   readonly modelAttempts?: DurableStageCheckpoint["modelAttempts"];
+  readonly topology?: DurableStageCheckpoint["topology"];
 }
 
 /** Authoritative completed rows. This path is deliberately separate from resumability. */
@@ -113,7 +115,7 @@ function stageSnapshotsFromCheckpoints(
   }
   const ordered = [...drafts.values()].sort((a, b) => a.firstCompletedAt - b.firstCompletedAt);
   if (ordered.length === 0) return [syntheticCheckpointStage(checkpoints.length, fallbackCompletedAt)];
-  return ordered.map(stageSnapshotFromDraft);
+  return stageSnapshotsFromDrafts(ordered);
 }
 
 function mergeStageDraft(
@@ -135,6 +137,7 @@ function mergeStageDraft(
     ...valueOrExisting("fastMode", checkpoint, existing),
     ...valueOrExisting("attemptedModels", checkpoint, existing),
     ...valueOrExisting("modelAttempts", checkpoint, existing),
+    ...valueOrExisting("topology", checkpoint, existing),
   };
 }
 
@@ -147,14 +150,47 @@ function valueOrExisting<
   return existingValue === undefined ? {} : { [key]: existingValue } as Pick<StageDraft, K>;
 }
 
-function stageSnapshotFromDraft(draft: StageDraft, index: number): StageSnapshot {
+function stageSnapshotsFromDrafts(drafts: readonly StageDraft[]): StageSnapshot[] {
+  const reconstructedIds = drafts.map((_, index) => `completed-stage-${index + 1}`);
+  const sourceToReconstructed = new Map<string, string>();
+  let topologyAvailable = drafts.every((draft) => draft.topology?.version === DURABLE_STAGE_TOPOLOGY_VERSION);
+  for (let index = 0; topologyAvailable && index < drafts.length; index += 1) {
+    const sourceId = drafts[index]!.topology!.stageId;
+    if (sourceToReconstructed.has(sourceId)) {
+      topologyAvailable = false;
+      break;
+    }
+    sourceToReconstructed.set(sourceId, reconstructedIds[index]!);
+  }
+  if (topologyAvailable) {
+    topologyAvailable = drafts.every((draft) =>
+      draft.topology!.parentIds.every((parentId) => sourceToReconstructed.has(parentId)),
+    );
+  }
+  return drafts.map((draft, index) => stageSnapshotFromDraft(
+    draft,
+    reconstructedIds[index]!,
+    topologyAvailable
+      ? draft.topology!.parentIds.map((parentId) => sourceToReconstructed.get(parentId)!)
+      : [],
+    topologyAvailable,
+  ));
+}
+
+function stageSnapshotFromDraft(
+  draft: StageDraft,
+  id: string,
+  parentIds: readonly string[],
+  topologyAvailable: boolean,
+): StageSnapshot {
   const startedAt = draft.startedAt ?? draft.firstCompletedAt;
   const endedAt = draft.endedAt ?? draft.firstCompletedAt;
   return {
-    id: `completed-stage-${index + 1}`,
+    id,
     name: draft.name,
     status: "completed",
-    parentIds: [],
+    parentIds,
+    ...(!topologyAvailable ? { topologyState: "unavailable" as const } : {}),
     startedAt,
     endedAt,
     durationMs: draft.durationMs ?? Math.max(0, endedAt - startedAt),
