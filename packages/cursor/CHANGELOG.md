@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.9.9-alpha.2] - 2026-07-14
+
 ### Changed
 
 - Aligned the Cursor provider dependency with `@earendil-works/pi-ai` `^0.80.7` as part of the consolidated Pi v0.80.7 dependency update; no Cursor provider source changes were needed.

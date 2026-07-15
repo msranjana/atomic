@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.9.9-alpha.2] - 2026-07-14
+
 ### Changed
 
 - Aligned the workflows extension peer dependency with `@earendil-works/pi-tui` `^0.80.7` as part of the consolidated Pi v0.80.7 dependency update; no workflow source changes were needed.

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.9.9-alpha.2] - 2026-07-14
+
 ### Changed
 
 - Aligned the subagents extension peer dependencies with the `@earendil-works/pi-agent-core`, `pi-ai`, and `pi-tui` `^0.80.7` runtime set as part of the consolidated Pi v0.80.7 dependency update; no subagent source changes were needed.
