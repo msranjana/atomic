@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.9.9-alpha.3] - 2026-07-14
+
 ### Added
 
 - Added `pi.sendMessages()` for atomic, array-ordered custom-message admission without waiting for the resulting model turn, allowing companion extensions to keep related preludes and terminal notices contiguous without globally serializing unrelated work.

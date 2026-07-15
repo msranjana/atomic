@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.9.9-alpha.3] - 2026-07-14
+
+### Fixed
+
+- Preserved background async-child completion chronology with Intercom by emitting a terminal-ordering barrier and atomically batching claimed same-child messages before the completion notice, with a compatibility fallback for hosts without batched message admission.
+
 ## [0.9.9-alpha.2] - 2026-07-14
 
 ### Changed
