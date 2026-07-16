@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed live workflow stages abandoning their objective after a user-queued message: steering (Enter) or queuing a follow-up (Ctrl+F) into a streaming stage from the attached stage chat, or via `workflow({ action: "send" })` with `steer`/`followUp` delivery, now arms the resume-continuation mechanism so the exact deterministic continuation prompt ("Continue where you left off. If you believe you are finished with your original task (or a redefined task if the user told you), stop.") is injected once when the interrupted turn ends. Multiple messages queued during one turn produce a single injection, idle deliveries (which start a fresh user turn) are unaffected, and the existing guards still suppress the injection for aborted runs and finalized/fail-fast-skipped stages.
+
 ## [0.9.10-alpha.1] - 2026-07-15
 
 ### Added

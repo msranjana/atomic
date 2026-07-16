@@ -67,8 +67,15 @@ export function createStageControlHandle(runtime: LiveStageRuntime): StageContro
     async steer(text: string) {
       runtime.throwIfStageMutationBlocked();
       await ensureMessagingSession();
+      // A user message queued into an in-flight turn should nudge the stage
+      // back to its objective once that turn ends: arm the pending flag so
+      // drainResumeContinuations injects RESUME_CONTINUATION_PROMPT after the
+      // tracked call resolves. Idle deliveries start a fresh user turn and
+      // need no continuation nudge, so only arm while streaming.
+      const queuedIntoInFlightTurn = runtime.innerCtx.isStreaming;
       try {
         await runtime.innerCtx.steer(text);
+        if (queuedIntoInFlightTurn) runtime.state.resumeContinuationPending = true;
       } finally {
         runtime.captureStageSessionMeta();
       }
@@ -76,8 +83,11 @@ export function createStageControlHandle(runtime: LiveStageRuntime): StageContro
     async followUp(text: string) {
       runtime.throwIfStageMutationBlocked();
       await ensureMessagingSession();
+      // Same in-flight continuation arming as steer(): see comment above.
+      const queuedIntoInFlightTurn = runtime.innerCtx.isStreaming;
       try {
         await runtime.innerCtx.followUp(text);
+        if (queuedIntoInFlightTurn) runtime.state.resumeContinuationPending = true;
       } finally {
         runtime.captureStageSessionMeta();
       }
