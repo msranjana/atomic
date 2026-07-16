@@ -1,9 +1,13 @@
 export const HINT_KEYS: Array<{ key: string; label: string }> = [
+  { key: "ctrl+x", label: "return to main chat" },
+  { key: "↵", label: "open stage chat" },
   { key: "↑↓←→", label: "navigate" },
-  { key: "↵", label: "attach" },
   { key: "/", label: "stages" },
-  { key: "ctrl+d", label: "detach" },
-  { key: "q", label: "quit" },
+];
+
+export const COMPACT_HINT_KEYS: Array<{ key: string; label: string }> = [
+  { key: "ctrl+x", label: "return to main chat" },
+  { key: "↵", label: "stage chat" },
 ];
 
 /**

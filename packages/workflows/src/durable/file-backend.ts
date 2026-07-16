@@ -12,13 +12,24 @@
  */
 
 import { readdirSync, rmSync } from "node:fs";
-import type { DurableCheckpoint, DurableWorkflowHandle, DurableWorkflowStatus } from "./types.js";
+import type { DurableCheckpoint, DurableWorkflowStatus } from "./types.js";
 import { InMemoryDurableBackend, type DurableWorkflowBackend } from "./backend.js";
-import { DURABLE_FORMAT_VERSION } from "./format-version.js";
-import { readDurableFileState, type FileDurableRecord, type FileDurableState } from "./file-state.js";
+import type { PromptReservationToken } from "./prompt-reservation-state.js";
+import { mergeFileDurableRecords, readDurableFileState, type FileDurableRecord, type FileDurableState } from "./file-state.js";
+import { currentState, durableStateFileFor, emptyState, isPrunableTerminalStatus, stateMatchesWorkflowId, workflowIdFromStateFile } from "./file-backend-state.js";
+export { defaultDurableStateDir, durableStateFileFor } from "./file-backend-state.js";
 import { withDurableFileLock, writeDurableFileState } from "./file-lock.js";
+import {
+  adjustFilePrompts,
+  claimFilePrompt,
+  promptReservationsFrom,
+  releaseFilePrompt,
+  reserveFilePrompt,
+  resetFilePrompts,
+  withPromptReservations,
+  type FilePromptReservations,
+} from "./file-prompt-reservations.js";
 
-const FILE_FORMAT_VERSION = DURABLE_FORMAT_VERSION;
 
 export class FileDurableBackend implements DurableWorkflowBackend {
   public readonly persistent = true;
@@ -29,7 +40,6 @@ export class FileDurableBackend implements DurableWorkflowBackend {
   private unknownState = false;
   private suppressedAll = false;
   private readonly deletedWorkflowIds = new Set<string>();
-  private readonly revivedWorkflowIds = new Set<string>();
 
   constructor(
     filePath: string,
@@ -87,9 +97,15 @@ export class FileDurableBackend implements DurableWorkflowBackend {
     if (this.unknownState) throw new Error(`Cannot overwrite unknown durable workflow state format: ${this.filePath}`);
   }
 
-  private persist(): void {
+  private mutateFreshState<T>(
+    mutate: (
+      latest: InMemoryDurableBackend,
+      reservations: FilePromptReservations,
+      deleted: Set<string>,
+    ) => T,
+  ): T {
     this.assertWritable();
-    withDurableFileLock(this.filePath, () => {
+    return withDurableFileLock(this.filePath, () => {
       const result = readDurableFileState(this.filePath);
       if (result.kind === "unknown" || (result.kind === "current" && !this.matchesExpectedId(result.state))) {
         this.unknownState = true;
@@ -97,19 +113,20 @@ export class FileDurableBackend implements DurableWorkflowBackend {
         this.mem.reset();
         throw new Error(`Cannot overwrite unknown durable workflow state format: ${this.filePath}`);
       }
-      const stored = result.kind === "current" ? result.state.workflows : [];
+      const records = result.kind === "current" ? result.state.workflows : [];
       const deleted = new Set(
         result.kind === "current" ? result.state.deletedWorkflowIds
           : result.kind === "legacy" ? result.workflowIds
             : [],
       );
-      this.deletedWorkflowIds.forEach((id) => deleted.add(id));
-      this.revivedWorkflowIds.forEach((id) => deleted.delete(id));
-      const merged = mergeRecords(stored, this.mem.exportAll()).filter((record) => !deleted.has(record.handle.workflowId));
-      const state = currentState(merged, deleted);
+      const latest = new InMemoryDurableBackend();
+      latest.importAll(records.filter((record) => !deleted.has(record.handle.workflowId)));
+      const reservations = promptReservationsFrom(records);
+      const value = mutate(latest, reservations, deleted);
+      const state = currentState(withPromptReservations(latest.exportAll(), reservations), deleted);
       this.writeState(this.filePath, state);
       this.replaceMirror(state);
-      this.revivedWorkflowIds.clear();
+      return value;
     });
   }
   private refreshCompatibilityFromDisk(): void {
@@ -136,8 +153,25 @@ export class FileDurableBackend implements DurableWorkflowBackend {
       this.ensureLoaded();
     }
   }
-
-
+  private refreshReplayState(): readonly FileDurableRecord[] {
+    this.ensureLoaded();
+    return withDurableFileLock(this.filePath, () => {
+      const result = readDurableFileState(this.filePath);
+      if (result.kind === "current" && this.matchesExpectedId(result.state)) {
+        this.unknownState = false; this.suppressedAll = false;
+        this.replaceMirror(result.state);
+        return result.state.workflows;
+      }
+      if (result.kind === "missing") {
+        this.unknownState = false; this.suppressedAll = false;
+        this.replaceMirror(emptyState());
+      } else {
+        this.unknownState = true; this.suppressedAll = true;
+        this.mem.reset();
+      }
+      return [];
+    });
+  }
   private replaceMirror(state: FileDurableState): void {
     this.mem.reset();
     this.deletedWorkflowIds.clear();
@@ -153,43 +187,41 @@ export class FileDurableBackend implements DurableWorkflowBackend {
 
   registerWorkflow(handle: Parameters<DurableWorkflowBackend["registerWorkflow"]>[0]): void {
     this.ensureLoaded();
-    this.assertWritable();
     this.suppressedAll = false;
-    this.deletedWorkflowIds.delete(handle.workflowId);
-    this.revivedWorkflowIds.add(handle.workflowId);
-    this.mem.registerWorkflow(handle);
-    this.persist();
+    this.mutateFreshState((latest, reservations, deleted) => {
+      deleted.delete(handle.workflowId);
+      latest.registerWorkflow(handle);
+      if (handle.pendingPrompts !== undefined) resetFilePrompts(reservations, handle.workflowId, handle.pendingPrompts);
+    });
   }
 
   recordCheckpoint(checkpoint: DurableCheckpoint): void {
     this.ensureLoaded();
-    this.assertWritable();
-    this.mem.recordCheckpoint(checkpoint);
-    this.persist();
+    this.mutateFreshState((latest) => latest.recordCheckpoint(checkpoint));
   }
 
   getToolOutput(workflowId: string, argsHash: string) {
-    this.ensureLoaded();
+    this.refreshReplayState();
     return this.mem.getToolOutput(workflowId, argsHash);
   }
 
   getUiResponse(workflowId: string, promptHash: string) {
-    this.ensureLoaded();
+    this.refreshReplayState();
     return this.mem.getUiResponse(workflowId, promptHash);
   }
 
   getStageOutput(workflowId: string, replayKey: string) {
-    this.ensureLoaded();
+    this.refreshReplayState();
     return this.mem.getStageOutput(workflowId, replayKey);
   }
 
   getStageSession(workflowId: string, replayKey: string) {
-    this.ensureLoaded();
+    this.refreshReplayState();
     return this.mem.getStageSession(workflowId, replayKey);
   }
 
   listCheckpoints(workflowId: string): readonly DurableCheckpoint[] {
-    this.ensureLoaded();
+    this.refreshReplayState();
     return this.mem.listCheckpoints(workflowId);
   }
 
@@ -198,11 +230,52 @@ export class FileDurableBackend implements DurableWorkflowBackend {
     return this.mem.getWorkflow(workflowId);
   }
 
+  getLoadableWorkflow(workflowId: string) {
+    this.refreshReplayState(); const handle = !this.suppressedAll && !this.deletedWorkflowIds.has(workflowId) ? this.mem.getWorkflow(workflowId) : undefined;
+    return handle === undefined ? undefined : structuredClone(handle);
+  }
+
   setWorkflowStatus(workflowId: string, status: Parameters<DurableWorkflowBackend["setWorkflowStatus"]>[1], pendingPrompts?: number, resumable?: boolean): void {
     this.ensureLoaded();
-    this.assertWritable();
-    this.mem.setWorkflowStatus(workflowId, status, pendingPrompts, resumable);
-    this.persist();
+    this.mutateFreshState((latest, reservations) => {
+      latest.setWorkflowStatus(workflowId, status, pendingPrompts, resumable);
+      if (pendingPrompts !== undefined) resetFilePrompts(reservations, workflowId, pendingPrompts);
+    });
+  }
+
+  transitionWorkflowStatus(workflowId: string, expectedStatuses: readonly DurableWorkflowStatus[], status: DurableWorkflowStatus, pendingPrompts?: number, resumable?: boolean): boolean {
+    this.ensureLoaded();
+    return this.mutateFreshState((latest, reservations, deleted) => {
+      const handle = deleted.has(workflowId) ? undefined : latest.getWorkflow(workflowId);
+      if (handle === undefined || !expectedStatuses.includes(handle.status)) return false;
+      latest.setWorkflowStatus(workflowId, status, pendingPrompts, resumable);
+      if (pendingPrompts !== undefined) resetFilePrompts(reservations, workflowId, pendingPrompts);
+      return true;
+    });
+  }
+
+  adjustPendingPrompts(workflowId: string, delta: number): void {
+    this.ensureLoaded();
+    this.mutateFreshState((latest, reservations) => {
+      adjustFilePrompts(latest, reservations, workflowId, delta);
+    });
+  }
+
+  promptReservationScope(workflowId: string): { readonly rootWorkflowId: string; readonly scope: string } {
+    return { rootWorkflowId: workflowId, scope: "root" };
+  }
+  pendingPromptToken(workflowId: string, reservationId: string): PromptReservationToken | undefined { this.ensureLoaded(); return this.mutateFreshState((latest, reservations) => claimFilePrompt(latest, reservations, workflowId, reservationId)); }
+
+  reservePendingPrompt(workflowId: string, reservationId: string): PromptReservationToken {
+    this.ensureLoaded();
+    return this.mutateFreshState((latest, reservations) =>
+      reserveFilePrompt(latest, reservations, workflowId, reservationId));
+  }
+  releasePendingPrompt(workflowId: string, reservationId: string, token: PromptReservationToken): void {
+    this.ensureLoaded();
+    this.mutateFreshState((latest, reservations) => {
+      releaseFilePrompt(latest, reservations, workflowId, reservationId, token);
+    });
   }
 
   listResumableWorkflows() {
@@ -234,7 +307,7 @@ export class FileDurableBackend implements DurableWorkflowBackend {
             : [],
       );
       deleted.add(workflowId);
-      const merged = mergeRecords(stored, this.mem.exportAll())
+      const merged = mergeFileDurableRecords(stored, this.mem.exportAll())
         .filter((record) => !deleted.has(record.handle.workflowId));
       const state = currentState(merged, deleted);
       this.writeState(this.filePath, state);
@@ -253,7 +326,6 @@ export class FileDurableBackend implements DurableWorkflowBackend {
     this.unknownState = false;
     this.suppressedAll = false;
     this.deletedWorkflowIds.clear();
-    this.revivedWorkflowIds.clear();
     withDurableFileLock(this.filePath, () => this.writeState(this.filePath, emptyState()));
   }
 }
@@ -278,6 +350,9 @@ export class WorkflowFileDurableBackend implements DurableWorkflowBackend {
   getStageSession(workflowId: string, replayKey: string) { return this.backendFor(workflowId).getStageSession(workflowId, replayKey); }
   listCheckpoints(workflowId: string): readonly DurableCheckpoint[] { return this.backendFor(workflowId).listCheckpoints(workflowId); }
   getWorkflow(workflowId: string) { return this.backendFor(workflowId).getWorkflow(workflowId); }
+  getLoadableWorkflow(workflowId: string) {
+    return this.backendFor(workflowId).getLoadableWorkflow(workflowId);
+  }
 
   setWorkflowStatus(workflowId: string, status: DurableWorkflowStatus, pendingPrompts?: number, resumable?: boolean): void {
     const backend = this.backendFor(workflowId);
@@ -287,15 +362,37 @@ export class WorkflowFileDurableBackend implements DurableWorkflowBackend {
       && backend.getWorkflow(workflowId) !== undefined) this.removeWorkflowFile(workflowId);
   }
 
+  transitionWorkflowStatus(workflowId: string, expectedStatuses: readonly DurableWorkflowStatus[], status: DurableWorkflowStatus, pendingPrompts?: number, resumable?: boolean): boolean {
+    return this.backendFor(workflowId).transitionWorkflowStatus(workflowId, expectedStatuses, status, pendingPrompts, resumable);
+  }
+
+  adjustPendingPrompts(workflowId: string, delta: number): void {
+    this.backendFor(workflowId).adjustPendingPrompts(workflowId, delta);
+  }
+
+  promptReservationScope(workflowId: string): { readonly rootWorkflowId: string; readonly scope: string } {
+    return this.backendFor(workflowId).promptReservationScope(workflowId);
+  }
+
+  pendingPromptToken(workflowId: string, reservationId: string): PromptReservationToken | undefined { return this.backendFor(workflowId).pendingPromptToken(workflowId, reservationId); }
+
+  reservePendingPrompt(workflowId: string, reservationId: string): PromptReservationToken {
+    return this.backendFor(workflowId).reservePendingPrompt(workflowId, reservationId);
+  }
+
+  releasePendingPrompt(workflowId: string, reservationId: string, token: PromptReservationToken): void {
+    this.backendFor(workflowId).releasePendingPrompt(workflowId, reservationId, token);
+  }
+
   listResumableWorkflows() {
     const mem = new InMemoryDurableBackend();
-    mem.importAll(mergeRecords([], this.readAllRecords()));
+    mem.importAll(mergeFileDurableRecords([], this.readAllRecords()));
     return mem.listResumableWorkflows();
   }
 
   listCompletedWorkflows() {
     const mem = new InMemoryDurableBackend();
-    mem.importAll(mergeRecords([], this.readAllRecords()));
+    mem.importAll(mergeFileDurableRecords([], this.readAllRecords()));
     return mem.listCompletedWorkflows();
   }
 
@@ -390,50 +487,4 @@ export class WorkflowFileDurableBackend implements DurableWorkflowBackend {
     rmSync(filePath, { force: true });
     rmSync(`${filePath}.lock`, { recursive: true, force: true });
   }
-}
-
-function workflowIdFromStateFile(dir: string, filePath: string): string | undefined {
-  const prefix = `${dir}/workflow-`;
-  if (!filePath.startsWith(prefix) || !filePath.endsWith(".json")) return undefined;
-  try { return decodeURIComponent(filePath.slice(prefix.length, -".json".length)); }
-  catch { return undefined; }
-}
-
-
-function emptyState(deletedWorkflowIds: readonly string[] = []): FileDurableState {
-  return { version: FILE_FORMAT_VERSION, workflows: [], deletedWorkflowIds };
-}
-
-function currentState(records: readonly FileDurableRecord[], deleted: ReadonlySet<string>): FileDurableState {
-  return { version: FILE_FORMAT_VERSION, workflows: records, deletedWorkflowIds: [...deleted] };
-}
-
-function stateMatchesWorkflowId(state: FileDurableState, workflowId: string): boolean {
-  return state.workflows.every((record) => record.handle.workflowId === workflowId)
-    && state.deletedWorkflowIds.every((id) => id === workflowId);
-}
-function isPrunableTerminalStatus(status: DurableWorkflowStatus, resumable?: boolean): boolean {
-  if (status === "cancelled") return true;
-  return (status === "failed" || status === "blocked") && resumable === false;
-}
-
-function mergeRecords(a: readonly FileDurableRecord[], b: readonly FileDurableRecord[]): readonly FileDurableRecord[] {
-  const byWorkflow = new Map<string, { handle: DurableWorkflowHandle; checkpoints: Map<string, DurableCheckpoint> }>();
-  for (const rec of [...a, ...b]) {
-    const existing = byWorkflow.get(rec.handle.workflowId);
-    const handle = existing === undefined || rec.handle.updatedAt >= existing.handle.updatedAt ? rec.handle : existing.handle;
-    const checkpoints = existing?.checkpoints ?? new Map<string, DurableCheckpoint>();
-    for (const cp of rec.checkpoints) checkpoints.set(`${cp.kind}:${cp.checkpointId}`, cp);
-    byWorkflow.set(rec.handle.workflowId, { handle, checkpoints });
-  }
-  return [...byWorkflow.values()].map((rec) => ({ handle: rec.handle, checkpoints: [...rec.checkpoints.values()] }));
-}
-
-export function defaultDurableStateDir(): string | undefined {
-  const home = process.env.HOME ?? process.env.USERPROFILE;
-  return home === undefined || home.length === 0 ? undefined : `${home}/.atomic/workflow-durable`;
-}
-
-export function durableStateFileFor(dir: string, workflowId: string): string {
-  return `${dir}/workflow-${encodeURIComponent(workflowId)}.json`;
 }

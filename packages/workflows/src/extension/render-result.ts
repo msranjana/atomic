@@ -142,7 +142,7 @@ type SendResult = { action: "send"; runId: string; stageId: string; delivery: st
 type PauseResult = { action: "pause"; runId: string; status: string; message: string };
 type ReloadResult = WorkflowReloadReport & { action: "reload"; status: "ok" | "noop"; message: string };
 type InterruptResult = { action: "interrupt"; runId: string; status: string; message: string };
-type KillResult = { action: "kill"; runId: string; status: string; message: string };
+type QuitResult = { action: "quit"; runId: string; status: string; message: string };
 type ResumeResult = { action: "resume"; runId: string; status: string; message: string };
 
 export type WorkflowToolResult =
@@ -159,7 +159,7 @@ export type WorkflowToolResult =
   | PauseResult
   | ReloadResult
   | InterruptResult
-  | KillResult
+  | QuitResult
   | ResumeResult;
 
 export interface RenderResultOpts {
@@ -339,8 +339,18 @@ export function renderResult(result: WorkflowToolResult, opts?: RenderResultOpts
         return renderNotice("WORKFLOW RUN", `${r.runId}${label}: ${r.status} — ${r.error}`, opts, themed);
       }
       if (r.details) {
+        if (r.details.status === "accepted" && r.name && r.runId) {
+          return renderDispatchConfirm({
+            workflowName: r.name,
+            runId: r.runId,
+            inputs: opts?.runInputs ?? {},
+            theme: themed ? deriveGraphTheme({}) : undefined,
+            width: opts?.width,
+          });
+        }
         const label = r.name ? ` (${r.name})` : "";
-        return renderNotice("WORKFLOW RUN", `${r.runId}${label}: ${r.details.mode} ${r.details.status}`, opts, themed);
+        const guidance = r.details.message === undefined ? "" : ` — ${r.details.message}`;
+        return renderNotice("WORKFLOW RUN", `${r.runId}${label}: ${r.details.mode} ${r.details.status}${guidance}`, opts, themed);
       }
       if (r.status === "completed" || r.status === "skipped" || r.status === "cancelled" || r.status === "blocked" || r.status === "killed") {
         const label = r.name ? ` (${r.name})` : "";
@@ -407,9 +417,9 @@ export function renderResult(result: WorkflowToolResult, opts?: RenderResultOpts
       return renderNotice("WORKFLOW INTERRUPT", `${r.runId}: ${r.message}`, opts, themed);
     }
 
-    case "kill": {
-      const r = result as KillResult;
-      return renderNotice("WORKFLOW KILL", `${r.runId}: ${r.message}`, opts, themed);
+    case "quit": {
+      const r = result as QuitResult;
+      return renderNotice("WORKFLOW QUIT", `${r.runId}: ${r.message}`, opts, themed);
     }
 
     case "resume": {

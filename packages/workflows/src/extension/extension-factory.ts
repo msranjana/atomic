@@ -1,4 +1,3 @@
-import { quitRun } from "../runs/background/quit.js";
 import { store } from "../shared/store.js";
 import { subscribeIntercomControl } from "../intercom/result-intercom.js";
 import { buildIntercomCallbacks } from "../intercom/intercom-routing.js";
@@ -38,13 +37,7 @@ function buildWorkflowOverlay(
   pi: ExtensionAPI,
   resolvePostMortemHandle: (runId: string, stageId: string) => PostMortemHandleResolution,
 ): GraphOverlayPort {
-  return buildGraphOverlayAdapter(pi, store, {
-    resolvePostMortemHandle,
-    onQuitRun: (runId) => {
-      quitRun(runId, { store });
-      pi.ui?.notify?.(`Workflow quit; resume with /workflow resume.`, "info");
-    },
-  });
+  return buildGraphOverlayAdapter(pi, store, { resolvePostMortemHandle });
 }
 
 function registerWorkflowShortcut(pi: ExtensionAPI, overlay: GraphOverlayPort): void {
@@ -91,7 +84,6 @@ function factory(pi: ExtensionAPI): void {
   const intercomControlRef: { current: (() => void) | null } = { current: null };
   const executeWorkflowTool = makeExecuteWorkflowTool(
     (ctx) => runtimeState.runtimeForContext(ctx),
-    () => runtimeState.persistenceRef.current,
     runtimeState.reloadWorkflowResources,
     runtimeState.ensureWorkflowResourcesLoaded,
     { resolvePostMortemDeps: (runId) => postMortemDepsForRun(runId, postMortemResolverDeps) },
@@ -108,7 +100,6 @@ function factory(pi: ExtensionAPI): void {
     runControl: {
       pi,
       overlay,
-      getPersistence: () => runtimeState.persistenceRef.current,
       runtimeForContext: runtimeState.runtimeForContext,
       ensureWorkflowResourcesLoaded: runtimeState.ensureWorkflowResourcesLoaded,
     },
