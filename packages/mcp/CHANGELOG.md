@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added validated per-server MCP tool-call inactivity timeouts for local and remote servers, with progress-aware timer resets, user-readable timeout errors, and preserved host cancellation.
+
 ### Fixed
 
 - Fixed collapsed MCP results showing a malformed or unavailable expand shortcut when `app.tools.expand` is remapped or unbound.
