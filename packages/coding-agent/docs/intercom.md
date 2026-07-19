@@ -120,13 +120,13 @@ The reply hint (enabled by default) points to `intercom({ action: "reply", ... }
 
 ## How Connection Works
 
-Intercom connections are tool-driven. Sessions keep the lightweight wrapper unloaded until the model or user invokes an Intercom tool, `/intercom`, or the ALT+M overlay. Merely launching a foreground or background delegated child does not connect either session. Concurrent first-use callers share one import and connection attempt, and lazy broker state is leased to the active session generation and cleaned up on shutdown or replacement.
+Intercom connections are normally tool-driven. Ordinary sessions and delegated children keep the lightweight wrapper unloaded until an Intercom tool, `/intercom`, or the ALT+M overlay is invoked. One exception is supervisor authorization: launching an Intercom-enabled subagent connects the parent runtime long enough to request a broker capability for that child; the child's own connection remains lazy until it invokes `contact_supervisor`. The parent restores issued capabilities across reconnects, and the child uses the broker-confirmed current supervisor ID. Concurrent callers share one import and connection attempt, and broker state is leased to the active session generation and cleaned up on shutdown or replacement.
 
 A session becomes intercom-connected when all of these are true:
 
 - the intercom extension is loaded in that session
 - `enabled` is not set to `false` in `~/.atomic/agent/intercom/config.json` (or the legacy `~/.pi/agent/intercom/config.json` fallback)
-- the model or user has invoked an Intercom tool, `/intercom`, or the ALT+M overlay in that session
+- the model or user has invoked an Intercom surface in that session, **or** the parent runtime is authorizing an Intercom-enabled child supervisor relationship
 - the local broker is running or can be auto-started
 
 The session list only shows intercom-connected sessions, not every open Atomic process on the machine.
@@ -142,6 +142,7 @@ Name sessions with `/name` so they can target each other (for example `/name pla
 | `message` | string | Message text (for send/ask/reply) |
 | `attachments` | array | Optional `file`, `snippet`, or `context` attachments |
 | `replyTo` | string | Optional message ID for threading or replying to an `ask` |
+| `group` | string | Read-only group filter for `list`/`status` (peek who is in a named group). Ignored/locked for `send`/`ask` — those always use your own group and error on a different group. |
 
 ### Actions
 
@@ -158,7 +159,17 @@ Sent and received messages are recorded in session history as `intercom_sent` / 
 
 ### Targeting Sessions
 
-Target lookup resolves an exact full ID first, then an exact case-insensitive name, then a unique session-ID prefix. If a prefix matches multiple sessions, Intercom reports every match and asks for a longer ID or exact name instead of guessing. Resolving a prefix to the current session triggers the normal self-target rejection ("Cannot message the current session").
+Target lookup resolves an exact full ID first, then an exact case-insensitive name, then a unique session-ID prefix. If a prefix matches multiple sessions, Intercom reports every match and asks for a longer ID or exact name instead of guessing. Resolving a prefix to the current session triggers the normal self-target rejection ("Cannot message the current session"). Targeting is also **group-scoped** — see [Groups](#groups) below.
+
+### Groups
+
+Every session belongs to exactly one intercom **group**. Sessions with no group configured share the implicit `"default"` group (so ungrouped sessions all see and message each other, exactly as before). A session in group G can **only** message sessions in group G — cross-group sends are rejected by the broker, not merely hidden from discovery:
+
+- A cross-group target name is unresolvable (`list`/targeting only consider your own group), and a cross-group send by exact session ID is rejected with `"Target session is in a different intercom group"`.
+- `list`/`status` show your own group and only same-group peers. Pass `group: "name"` to `list`/`status` for a **read-only** peek at another group's membership. `send`/`ask` are always locked to your own group and error if you pass a different `group`.
+- `session_joined`/`session_left`/`presence_update` are group-scoped, so you never see peers outside your group appear or disappear.
+
+A session's home group is resolved with precedence: workflow/orchestrator-injected per-session group > env `ATOMIC_INTERCOM_GROUP` (legacy `PI_INTERCOM_GROUP`) > intercom `config.json` `"group"` > `"default"`. In workflow and subagent `group` options, boolean `true` and the trimmed, case-insensitive strings `"true"`/`"auto"` request an automatically generated group; those string names are reserved and cannot name literal groups. Groups are the mechanism workflows use to isolate reviewer levels (see [workflows.md](/workflows)). The subagent-only `contact_supervisor` path can cross groups only after a broker capability binds the registered child socket to the issuing supervisor session. The broker, not the client, marks validated traffic as `supervisor`; ordinary `send` frames remain isolated even if a raw client forges that flag, and replies cross back only through an exact broker-recorded `replyTo` match. Parent-held authorization state is restored after broker reconnects. The lightweight wrapper synchronously claims supervisor-authorization requests and lazy-loads the broker provider; a claimed provider failure aborts launch, while runtimes with no provider omit supervisor metadata and do not expose a broken channel.
 
 ### send vs ask vs reply
 
@@ -374,7 +385,8 @@ Create `~/.atomic/agent/intercom/config.json`. The legacy `~/.pi/agent/intercom/
   "confirmSend": false,
   "enabled": true,
   "replyHint": true,
-  "status": "researching"
+  "status": "researching",
+  "group": "default"
 }
 ```
 
@@ -386,6 +398,7 @@ Create `~/.atomic/agent/intercom/config.json`. The legacy `~/.pi/agent/intercom/
 | `enabled` | `true` | Enable/disable intercom entirely |
 | `replyHint` | `true` | Include reply instruction in incoming messages |
 | `status` | — | Optional custom status suffix shown after the automatic lifecycle status, for example `thinking · researching` |
+| `group` | `"default"` | Home intercom group for this session (see [Groups](#groups)). Overridden by env `ATOMIC_INTERCOM_GROUP` / `PI_INTERCOM_GROUP` and by workflow/orchestrator per-session injection. |
 
 The default `npx --no-install tsx` pair is a compatibility sentinel: Intercom recognizes it and starts the broker through the current Atomic runtime (`process.execPath`). Node-based installs use that runtime with a resolved `tsx` CLI, falling back to Atomic's bundled `jiti` loader when `tsx` is unavailable; Bun source-checkout runs use the current Bun executable directly; standalone Atomic binaries re-enter the split launcher through a narrow internal broker handoff. Default startup therefore does not rely on `npx`, `tsx`, or `bun` being on `PATH`. Explicit custom broker commands still work — for example, to intentionally use Bun from `PATH`:
 

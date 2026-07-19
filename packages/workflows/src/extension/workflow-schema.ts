@@ -43,6 +43,15 @@ const JsonSchemaObject = Type.Unsafe<Record<string, unknown>>({
   description: "Plain JSON Schema used as final-answer tool arguments for this workflow item.",
 });
 
+// Keep this union opaque to Value.Convert: a plain Union([String, Literal(true)])
+// otherwise coerces boolean `true` to the string "true" (the String branch wins),
+// which bypasses the per-set auto-UUID minting that keys off `group === true`.
+// Mirrors WorkflowOutputSchema's double-negation opacity trick.
+const GroupSchema = Type.Optional(Type.Unsafe<string | true>({
+  not: { not: { anyOf: [{ type: "string" }, { const: true }] } },
+  description: "Intercom home group for this session. A named string joins that group; boolean `true` or the trimmed, case-insensitive string sentinel `true`/`auto` auto-generates one shared UUID group per parallel set (all items in the set share it). The names `true` and `auto` are reserved; use a different name for a literal group. Only applied when the session has intercom access.",
+}));
+
 const StageSessionOptionProperties = {
   schema: Type.Optional(JsonSchemaObject),
   cwd: Type.Optional(Type.String({ description: "Starting directory only; does not provide worktree isolation." })),
@@ -69,6 +78,7 @@ const StageSessionOptionProperties = {
   sessionDir: Type.Optional(Type.String()),
   context: Type.Optional(Type.Union([Type.Literal("fresh"), Type.Literal("fork")])),
   forkFromSessionFile: Type.Optional(Type.String()),
+  group: GroupSchema,
 };
 
 // Keep this union opaque to Value.Convert: branch ordering otherwise coerces
@@ -110,6 +120,7 @@ const ParallelChainStepSchema = Type.Object({
   worktree: Type.Optional(Type.Boolean({ description: "Runner-managed temporary per-task worktree isolation for direct runs." })),
   gitWorktreeDir: Type.Optional(Type.String({ description: "Runner-managed reusable worktree; natural-language worktree instructions do not set this option." })),
   baseBranch: Type.Optional(Type.String()),
+  group: GroupSchema,
 });
 
 export const WorkflowParametersSchema = Type.Object({
