@@ -12,6 +12,7 @@
  */
 
 import type { PendingPrompt, RunSnapshot, StageInputRequest, StageSnapshot, StageStatus } from "../shared/store-types.js";
+import type { WorkflowRunStatusFilter, WorkflowRunStatusSummary } from "./workflow-status-summary.js";
 import type { WorkflowDetails } from "../shared/types.js";
 import type { RunDetail } from "../runs/background/status.js";
 import { renderInputsSchema } from "../shared/render-inputs-schema.js";
@@ -64,7 +65,11 @@ type ListResult = {
 };
 type StatusResult = {
   action: "status";
-  /** Live snapshots from the in-process store. */
+  /** Applied run-status filter; "all" when unfiltered. */
+  filter: WorkflowRunStatusFilter;
+  /** Concise per-run summaries (in-flight runs first) for agent consumption. */
+  runs: WorkflowRunStatusSummary[];
+  /** Live snapshots from the in-process store, filtered like `runs`. */
   snapshots: RunSnapshot[];
 };
 type StatusDetailResult =
@@ -142,7 +147,7 @@ type SendResult = { action: "send"; runId: string; stageId: string; delivery: st
 type PauseResult = { action: "pause"; runId: string; status: string; message: string };
 type ReloadResult = WorkflowReloadReport & { action: "reload"; status: "ok" | "noop"; message: string };
 type InterruptResult = { action: "interrupt"; runId: string; status: string; message: string };
-type KillResult = { action: "kill"; runId: string; status: string; message: string };
+type QuitResult = { action: "quit"; runId: string; status: string; message: string };
 type ResumeResult = { action: "resume"; runId: string; status: string; message: string };
 export interface ModelCatalogEntry {
   provider: string;
@@ -151,7 +156,8 @@ export interface ModelCatalogEntry {
   isCurrent: boolean;
   availableThinkingLevels?: readonly string[];
 }
-type ModelsResult = { action: "models"; models: ModelCatalogEntry[]; };
+type ModelsResult = { action: "models"; models: ModelCatalogEntry[] };
+
 export type WorkflowToolResult =
   | ListResult
   | StatusResult
@@ -166,7 +172,7 @@ export type WorkflowToolResult =
   | PauseResult
   | ReloadResult
   | InterruptResult
-  | KillResult
+  | QuitResult
   | ResumeResult
   | ModelsResult;
 
@@ -347,8 +353,18 @@ export function renderResult(result: WorkflowToolResult, opts?: RenderResultOpts
         return renderNotice("WORKFLOW RUN", `${r.runId}${label}: ${r.status} — ${r.error}`, opts, themed);
       }
       if (r.details) {
+        if (r.details.status === "accepted" && r.name && r.runId) {
+          return renderDispatchConfirm({
+            workflowName: r.name,
+            runId: r.runId,
+            inputs: opts?.runInputs ?? {},
+            theme: themed ? deriveGraphTheme({}) : undefined,
+            width: opts?.width,
+          });
+        }
         const label = r.name ? ` (${r.name})` : "";
-        return renderNotice("WORKFLOW RUN", `${r.runId}${label}: ${r.details.mode} ${r.details.status}`, opts, themed);
+        const guidance = r.details.message === undefined ? "" : ` — ${r.details.message}`;
+        return renderNotice("WORKFLOW RUN", `${r.runId}${label}: ${r.details.mode} ${r.details.status}${guidance}`, opts, themed);
       }
       if (r.status === "completed" || r.status === "skipped" || r.status === "cancelled" || r.status === "blocked" || r.status === "killed") {
         const label = r.name ? ` (${r.name})` : "";
@@ -415,9 +431,9 @@ export function renderResult(result: WorkflowToolResult, opts?: RenderResultOpts
       return renderNotice("WORKFLOW INTERRUPT", `${r.runId}: ${r.message}`, opts, themed);
     }
 
-    case "kill": {
-      const r = result as KillResult;
-      return renderNotice("WORKFLOW KILL", `${r.runId}: ${r.message}`, opts, themed);
+    case "quit": {
+      const r = result as QuitResult;
+      return renderNotice("WORKFLOW QUIT", `${r.runId}: ${r.message}`, opts, themed);
     }
 
     case "resume": {
@@ -430,15 +446,13 @@ export function renderResult(result: WorkflowToolResult, opts?: RenderResultOpts
       if (r.models.length === 0) {
         return renderNotice("WORKFLOW MODELS", "no models in configured catalog — configured-auth snapshot, not proof of credentials, entitlements, OAuth freshness, or live provider access.", opts, themed);
       }
-      const currentLine = r.models.find((m) => m.isCurrent);
-      const lines = r.models.map(
-        (m) => {
-          const levels = m.availableThinkingLevels?.length
-            ? ` [levels: ${m.availableThinkingLevels.join(", ")}]`
-            : "";
-          return `${m.provider}/${m.id}${m.isCurrent ? " (current)" : ""}${levels}`;
-      },
-      ).join("; ");
+      const currentLine = r.models.find((model) => model.isCurrent);
+      const lines = r.models.map((model) => {
+        const levels = model.availableThinkingLevels?.length
+          ? ` [levels: ${model.availableThinkingLevels.join(", ")}]`
+          : "";
+        return `${model.provider}/${model.id}${model.isCurrent ? " (current)" : ""}${levels}`;
+      }).join("; ");
       const suffix = currentLine !== undefined ? "" : " (no current model)";
       return renderNotice(
         "WORKFLOW MODELS",

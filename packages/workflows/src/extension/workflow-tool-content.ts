@@ -221,8 +221,6 @@ export function renderWorkflowToolContent(
     case "run":
     case "models":
       return stringifyWorkflowToolResult(result);
-    default:
-      return stringifyWorkflowToolResult(result);
   }
 }
 
