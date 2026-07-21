@@ -1,3 +1,4 @@
+import { getSupportedThinkingLevels } from "@earendil-works/pi-ai/compat";
 import { inspectRun } from "../runs/background/status.js";
 import type { WorkflowExecutionPolicy } from "../shared/types.js";
 import type { ExtensionRuntime } from "./runtime.js";
@@ -71,7 +72,7 @@ export function makeExecuteWorkflowTool(
           id: m.id,
           fullId: `${m.provider}/${m.id}`,
           isCurrent: current !== undefined && m.provider === current.provider && m.id === current.id,
-          availableThinkingLevels: (m as any).availableThinkingLevels,
+          availableThinkingLevels: getSupportedThinkingLevels(m),
         }));
         return { action: "models", models };
       }

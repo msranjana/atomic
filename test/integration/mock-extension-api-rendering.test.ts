@@ -468,10 +468,12 @@ describe("renderResult — all action branches", () => {
 
     const withCurrent = renderResult({
       action: "models",
-      models: [{ provider: "openai", id: "gpt-4", fullId: "openai/gpt-4", isCurrent: true }],
+      models: [{ provider: "openai", id: "gpt-4", fullId: "openai/gpt-4", isCurrent: true,
+        availableThinkingLevels: ["off", "low", "medium", "high", "max"] }],
     }, { width: 240 });
     assert.ok(withCurrent.includes("openai/gpt-4"));
     assert.ok(withCurrent.includes("(current)"));
+    assert.ok(withCurrent.includes("[levels: off, low, medium, high, max]"));
 
     const withoutCurrent = renderResult({
       action: "models",

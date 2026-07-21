@@ -2195,17 +2195,20 @@ List or inspect unfamiliar workflows before running them. If required inputs are
 workflow({ action: "list" })
 workflow({ action: "get", workflow: "deep-research-codebase" })
 workflow({ action: "inputs", workflow: "deep-research-codebase" })
+workflow({ action: "models" })
 ```
 
 The workflow tool action surface is:
 
-- discovery: `list`, `get`, `inputs`
+- discovery: `list`, `get`, `inputs`, plus `models` for the configured model catalog
 - execution: named `run` with validated `workflow` and `inputs`
 - inspection: `status`, `stages`, `stage`, `transcript`
 - messaging and run control: `send`, `pause`, `interrupt`, `quit`, `resume`
 - rediscovery: `reload`
 
 From interactive chat, named workflow launches run in the background so the parent chat stays available. Run `/workflow connect <run>` to see agents working and chat with and steer each stage. Inspection and control calls (`status`, `stages`, `stage`, `transcript`, `send`, `pause`, `resume`, `interrupt`, `quit`) remain available while work runs.
+
+`workflow({ action: "models" })` returns the registry's configured-auth catalog snapshot in registry order. Each entry includes `provider`, `id`, `fullId`, an `isCurrent` marker, and `availableThinkingLevels` derived from the real model's `reasoning` and `thinkingLevelMap` metadata. This is not proof of credentials, entitlements, OAuth freshness, or live provider access, and it exposes no authentication details.
 
 Named launches wait only for **startup admission**, not for workflow completion. Atomic returns `status: "running"` after durable registration, reusable-worktree setup, and other pre-body setup succeed, while the workflow body and stages continue in the background. If setup fails before the workflow body is admitted — for example, `git_worktree_dir` points inside the invoking checkout — the original `workflow` tool call instead returns a structured `status: "failed"` result with the allocated run id and concrete setup error. No background-start claim or orphan run is retained, so the caller can correct the inputs and retry immediately. Failures after admission remain ordinary background lifecycle outcomes reported through status and lifecycle notices.
 
