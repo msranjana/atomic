@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- Updated workflow-creation guidance to prefer `ctx.tool(...)` for workflow-owned side effects, connecting durable cached results to safe resume while distinguishing pure TypeScript computation and agent-stage internals ([#1923](https://github.com/bastani-inc/atomic/issues/1923)).
 - Clarified the built-in `deep-research-codebase` discovery guidance so agents reserve the heavy workflow for tasks requiring comprehensive whole-repository context ([#1925](https://github.com/bastani-inc/atomic/issues/1925)).
 - When no durable backend can be provisioned at all (no `DBOS_SYSTEM_DATABASE_URL`, embedded Postgres unavailable, and no Docker), workflows now degrade to a process-local in-memory backend with a loud non-durable warning instead of failing every workflow action. Degraded runs execute normally but do not survive the process, so `/workflow resume` after exit has nothing to restore; DBOS query and write failures on a provisioned backend still fail the workflow action.
 
